@@ -5,6 +5,24 @@ It rebuilds the everyday experience of the KDE file manager Dolphin — places
 sidebar, tabs, breadcrumb path bar, icon and detail views, zoom, sorting,
 drag and drop, the information panel — and adds a few tools of its own.
 
+## Download
+
+Prebuilt Linux binaries are on the [releases page](https://github.com/mjb73/DolphinCraft/releases):
+a tarball per architecture (x86_64, aarch64) with a `.sha256` beside it.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh | sh
+```
+
+`install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
+`~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
+application menu. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.0` to pin a
+release.
+
+The tarballs are built on Debian 12 on purpose, so they ask for glibc 2.36 — Debian 12,
+Ubuntu 22.04+, Mint 21+, Fedora 37+ and newer. A Wayland or X11 session plus an OpenGL driver
+(libglvnd + mesa) is all it needs at runtime.
+
 ## What it does
 
 - **Places sidebar**: Home, Desktop, Documents, Downloads, Music, Pictures,

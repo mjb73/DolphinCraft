@@ -1,0 +1,110 @@
+name: Release
+
+# Tag a commit and the downloads appear:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Artifacts: one Linux tarball per architecture plus a .sha256 beside each. The tarball holds the
+# binary, a desktop entry and the README — install.sh puts them in ~/.local without root.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: linux (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    # Built inside an old-base image on purpose. The glibc a binary is linked against becomes the
+    # glibc every user needs; building on the runner image itself sets that floor to 2.39
+    # (Ubuntu 24.04), which refuses to start on Debian 12 or Mint 22. Debian 12 gives 2.36. The
+    # image is `node:` rather than `debian:` because a container job runs the `uses:` actions
+    # inside the container, and those need node, git and curl.
+    container: node:22-bookworm
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu-24.04-arm is GitHub's hosted arm64 runner; it is newer than the x86 one, hence
+          # `experimental` — if it is unavailable in this account the x86 build still releases.
+          - arch: x86_64
+            runner: ubuntu-24.04
+            experimental: false
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain and build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config ca-certificates file \
+            libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: cargo build --locked --release
+
+      # Printed so the log itself proves the floor: a tarball whose binary wants a newer glibc
+      # than the release notes claim installs and then dies at load with a version error.
+      - name: Report the glibc floor
+        run: |
+          file target/release/dolphincraft
+          echo "highest glibc symbol requested by the binary:"
+          readelf --version-info target/release/dolphincraft \
+            | grep -o 'GLIBC_[0-9][0-9.]*' | sort -uV | tail -3
+
+      - name: Package the tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
+            VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          fi
+          echo "packaging $VERSION for ${{ matrix.arch }}"
+          sh packaging/linux-tarball.sh "$VERSION" "${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: linux
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show what will be published
+        run: ls -l dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" dist/* -R "$GITHUB_REPOSITORY" \
+              --title "DolphinCraft ${tag}" \
+              --notes-file .github/release-notes.md
+          fi

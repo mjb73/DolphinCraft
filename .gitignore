@@ -1,5 +1,6 @@
 # Build output
 /target
+/dist
 Cargo.lock.bak
 
 # Local pictures and scratch data
