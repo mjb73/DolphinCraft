@@ -1,0 +1,622 @@
+//! Per-tab, per-pane state: history, listing, selection, sorting, zoom.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use crate::fsutil::{self, Entry};
+use crate::search::{SearchFilters, SearchSession};
+use crate::theme;
+
+pub const TRASH_URI: &str = "trash:/";
+
+/// Wheel delta that makes the original change the zoom by one step.
+///
+/// `DolphinView::wheelEvent` @0x272710 in libdolphinprivate.so.6 only acts when
+/// the event carries `Qt::ControlModifier`, sums the incoming wheel delta in
+/// the view object (this+0xcc) and calls `slotIncreaseZoom` / `slotDecreaseZoom`
+/// once per ±0x78 = 120 units, subtracting those 120 from the sum and keeping
+/// the rest for the next event. 120 units is one wheel notch in Qt (an eighth
+/// of a degree per unit), so one notch is one zoom step. The step itself is
+/// `setZoomLevel(level ± 1)` (`slotIncreaseZoom` @0x284b00), clamped to 0..=16
+/// by `DolphinItemListView::setZoomLevel` @0x26e100.
+pub const WHEEL_UNITS_PER_STEP: f32 = 120.0;
+
+/// Add one frame's worth of Ctrl+wheel delta (in Qt's 1/8-degree units) to the
+/// running total and return how many zoom steps that buys, keeping the
+/// leftover in `acc` exactly as the original does.
+pub fn wheel_zoom_steps(acc: &mut f32, delta_units: f32) -> i32 {
+    *acc += delta_units;
+    let mut steps = 0;
+    while *acc >= WHEEL_UNITS_PER_STEP {
+        *acc -= WHEEL_UNITS_PER_STEP;
+        steps += 1;
+    }
+    while *acc <= -WHEEL_UNITS_PER_STEP {
+        *acc += WHEEL_UNITS_PER_STEP;
+        steps -= 1;
+    }
+    steps
+}
+
+/// Turn one egui wheel event into Qt's wheel units. A line-based event (a real
+/// mouse wheel, one line per notch) is 120 units; a pixel-based event (a
+/// touchpad or a smooth-scrolling mouse) is converted with egui's own
+/// 40 points per line, so a 40-pixel glide is one notch as well.
+pub fn wheel_units(unit: egui::MouseWheelUnit, delta_y: f32) -> f32 {
+    match unit {
+        egui::MouseWheelUnit::Line => delta_y * WHEEL_UNITS_PER_STEP,
+        egui::MouseWheelUnit::Point => delta_y * (WHEEL_UNITS_PER_STEP / 40.0),
+        egui::MouseWheelUnit::Page => delta_y * WHEEL_UNITS_PER_STEP * 3.0,
+    }
+}
+
+/// Cut/copy buffer shared by every tab (as in the original, Ctrl+C / Ctrl+X
+/// then Ctrl+V in any view).
+#[derive(Clone, Default)]
+pub struct Clipboard {
+    pub paths: Vec<PathBuf>,
+    pub cut: bool,
+}
+
+impl Clipboard {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+    pub fn clear(&mut self) {
+        self.paths.clear();
+        self.cut = false;
+    }
+}
+
+/// Where a typed or pasted address leads.
+pub enum Location {
+    Folder(PathBuf),
+    File(PathBuf),
+}
+
+/// Turn whatever the person typed or pasted into a location. A pasted address
+/// may be quoted, may arrive as a `file://` link, may start with `~`, and may
+/// point at a file rather than a folder (the original opens the folder and
+/// selects the file — see `Pane::apply_pending_select`).
+pub fn resolve_location(raw: &str) -> Result<Location, String> {
+    let text = raw
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'' || c == ' ')
+        .to_string();
+    if text.is_empty() {
+        return Err("Type or paste a location first.".to_string());
+    }
+    let text = match text.strip_prefix("file://") {
+        Some(rest) => percent_decode(rest),
+        None => text,
+    };
+    if text == "trash:" || text == "trash:/" || text.starts_with("trash:/") {
+        return Ok(Location::Folder(PathBuf::from(TRASH_URI)));
+    }
+    let expanded = if text == "~" {
+        fsutil::home_dir()
+    } else if let Some(rest) = text.strip_prefix("~/") {
+        fsutil::home_dir().join(rest)
+    } else if text == "$HOME" {
+        fsutil::home_dir()
+    } else if let Some(rest) = text.strip_prefix("$HOME/") {
+        fsutil::home_dir().join(rest)
+    } else {
+        PathBuf::from(&text)
+    };
+    if expanded.is_dir() {
+        return Ok(Location::Folder(expanded));
+    }
+    if expanded.is_file() {
+        return Ok(Location::File(expanded));
+    }
+    Err(format!("There is nothing at \u{201c}{text}\u{201d}."))
+}
+
+/// `%20` and friends, as they appear in a `file://` link copied from a browser.
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(v) = u8::from_str_radix(hex, 16) {
+                    out.push(v);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Icons,
+    Compact,
+    Details,
+}
+
+impl ViewMode {
+    pub fn index(self) -> usize {
+        match self {
+            ViewMode::Icons => 0,
+            ViewMode::Compact => 1,
+            ViewMode::Details => 2,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            ViewMode::Icons => "Icons",
+            ViewMode::Compact => "Compact",
+            ViewMode::Details => "Details",
+        }
+    }
+    pub fn all() -> [ViewMode; 3] {
+        [ViewMode::Icons, ViewMode::Compact, ViewMode::Details]
+    }
+    pub fn from_index(i: usize) -> ViewMode {
+        match i {
+            0 => ViewMode::Icons,
+            1 => ViewMode::Compact,
+            _ => ViewMode::Details,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    Name,
+    Size,
+    Type,
+    Modified,
+}
+
+impl SortKey {
+    pub fn label(self) -> &'static str {
+        match self {
+            SortKey::Name => "Name",
+            SortKey::Size => "Size",
+            SortKey::Type => "Type",
+            SortKey::Modified => "Modified",
+        }
+    }
+}
+
+pub struct RenameState {
+    pub index: usize,
+    pub text: String,
+    pub focus: bool,
+}
+
+pub enum Request {
+    Navigate(PathBuf),
+    NavigateOther(PathBuf),
+    OpenInNewTab(PathBuf),
+    OpenInSplit(PathBuf),
+    AddBookmark(String, PathBuf),
+    RemoveBookmark(PathBuf),
+    Properties(Vec<PathBuf>),
+    Trash(Vec<PathBuf>),
+    Restore(Vec<PathBuf>),
+    DeletePermanent(Vec<PathBuf>),
+    BulkRename(Vec<PathBuf>),
+    QuickLook(PathBuf),
+    NewFolder(PathBuf),
+    Rename(PathBuf, String),
+    OpenTerminal(PathBuf),
+    CopyToOther(bool),
+    Duplicate(Vec<PathBuf>),
+    FolderSize(Vec<PathBuf>),
+    /// Added feature: give folders a colour of the person's choosing (`None`
+    /// clears it back to the normal one).
+    FolderColor(Vec<PathBuf>, Option<[u8; 3]>),
+    OpenPath(PathBuf),
+    Cut,
+    Copy,
+    Paste,
+    BeginRename(usize),
+    /// A Ctrl+wheel zoom changed the size inside a pane; remember it for the
+    /// next start.
+    ZoomChanged,
+    Toast(String),
+}
+
+pub struct Pane {
+    pub id: usize,
+    pub path: PathBuf,
+    pub back: Vec<PathBuf>,
+    pub forward: Vec<PathBuf>,
+    pub entries: Vec<Entry>,
+    pub error: Option<String>,
+    pub sel: BTreeSet<usize>,
+    pub anchor: usize,
+    pub cursor: usize,
+    pub sort: SortKey,
+    pub asc: bool,
+    pub folders_first: bool,
+    pub view: ViewMode,
+    pub zoom: [u8; 3],
+    pub show_hidden: bool,
+    pub previews: bool,
+    pub filter: String,
+    pub filter_on: bool,
+    pub filter_focus: bool,
+    pub location_edit: Option<String>,
+    pub location_focus: bool,
+    /// After a location was typed or pasted, the file inside the folder that
+    /// should end up selected (the original selects the file once the listing
+    /// has arrived — DolphinView::selectFileOnceAvailable, 0x173b40).
+    pub pending_select: Option<String>,
+    /// Select the whole address the next time the location field is drawn, so a
+    /// paste replaces the current path instead of being appended to it.
+    pub location_select: bool,
+    pub rename: Option<RenameState>,
+    pub search: Option<SearchSession>,
+    pub scroll_to: Option<usize>,
+    pub last_click: Option<(usize, std::time::Instant)>,
+    pub loading: bool,
+    pub selected_size: Option<u64>,
+    /// Ctrl+wheel delta gathered so far, in Qt's 1/8-degree wheel units, kept
+    /// between frames so a slow glide still reaches a full step.
+    pub wheel_acc: f32,
+}
+
+impl Pane {
+    pub fn new(id: usize, path: PathBuf) -> Self {
+        let mut pane = Self {
+            id,
+            path: PathBuf::new(),
+            back: Vec::new(),
+            forward: Vec::new(),
+            entries: Vec::new(),
+            error: None,
+            sel: BTreeSet::new(),
+            anchor: 0,
+            cursor: 0,
+            sort: SortKey::Name,
+            asc: true,
+            folders_first: true,
+            view: ViewMode::Icons,
+            zoom: theme::default_zoom(true),
+            show_hidden: false,
+            previews: true,
+            filter: String::new(),
+            filter_on: false,
+            filter_focus: false,
+            location_edit: None,
+            location_focus: false,
+            pending_select: None,
+            location_select: false,
+            rename: None,
+            search: None,
+            scroll_to: None,
+            last_click: None,
+            loading: false,
+            selected_size: None,
+            wheel_acc: 0.0,
+        };
+        pane.load(path);
+        pane
+    }
+
+    pub fn is_trash(&self) -> bool {
+        self.path.as_os_str() == TRASH_URI
+    }
+
+    pub fn display_path(&self) -> String {
+        if self.is_trash() {
+            "Trash".to_string()
+        } else {
+            self.path.display().to_string()
+        }
+    }
+
+    pub fn breadcrumbs(&self) -> Vec<(String, PathBuf)> {
+        if self.is_trash() {
+            return vec![("Trash".to_string(), PathBuf::from(TRASH_URI))];
+        }
+        let mut out = Vec::new();
+        let mut acc = PathBuf::from("/");
+        out.push(("root".to_string(), acc.clone()));
+        for comp in self.path.components() {
+            use std::path::Component;
+            if let Component::Normal(part) = comp {
+                acc = acc.join(part);
+                out.push((part.to_string_lossy().to_string(), acc.clone()));
+            }
+        }
+        if out.len() > 1 {
+            out.remove(0);
+            out.insert(0, ("/".to_string(), PathBuf::from("/")));
+        }
+        out
+    }
+
+    pub fn load(&mut self, path: PathBuf) {
+        // Show the folder itself, not the wording that led to it: a path with
+        // `..` in it would otherwise leave a segment in the location bar that
+        // is not a folder.
+        self.path = crate::fsutil::tidy_path(&path);
+        self.rename = None;
+        self.location_edit = None;
+        self.search = None;
+        self.error = None;
+        self.reload();
+    }
+
+    pub fn reload(&mut self) {
+        self.sel.clear();
+        self.cursor = 0;
+        self.anchor = 0;
+        self.selected_size = None;
+        self.loading = false;
+        if self.is_trash() {
+            self.entries = fsutil::list_trash();
+            self.error = None;
+        } else {
+            match fsutil::read_folder(&self.path, self.show_hidden) {
+                Ok(mut list) => {
+                    list.retain(|e| self.show_hidden || !e.hidden);
+                    self.entries = list;
+                    self.error = None;
+                }
+                Err(e) => {
+                    self.entries.clear();
+                    self.error = Some(e);
+                }
+            }
+        }
+        self.sort_entries();
+        self.apply_pending_select();
+    }
+
+    /// The original view selects a file as soon as it appears in the listing
+    /// (DolphinView::selectFileOnceAvailable @0x173b40), which is how a typed or
+    /// pasted address for a *file* lands on that file with its folder open.
+    pub fn apply_pending_select(&mut self) {
+        let Some(name) = self.pending_select.take() else {
+            return;
+        };
+        if let Some(idx) = self.entries.iter().position(|e| e.name == name) {
+            self.sel.clear();
+            self.sel.insert(idx);
+            self.anchor = idx;
+            self.cursor = idx;
+            self.scroll_to = Some(idx);
+        }
+    }
+
+    /// Navigate to something the person typed or pasted into the location bar.
+    /// A folder opens; a file opens its folder with the file selected. Returns
+    /// the message to show when the address leads nowhere.
+    pub fn navigate_input(&mut self, raw: &str) -> Option<String> {
+        match resolve_location(raw) {
+            Ok(Location::Folder(path)) => {
+                self.pending_select = None;
+                self.navigate(path);
+                None
+            }
+            Ok(Location::File(path)) => {
+                let parent = path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(fsutil::home_dir);
+                self.pending_select = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string());
+                self.navigate(parent);
+                None
+            }
+            Err(message) => Some(message),
+        }
+    }
+
+    pub fn navigate(&mut self, path: PathBuf) {
+        if path == self.path {
+            self.reload();
+            return;
+        }
+        self.back.push(self.path.clone());
+        if self.back.len() > 100 {
+            self.back.remove(0);
+        }
+        self.forward.clear();
+        self.load(path);
+    }
+
+    pub fn go_back(&mut self) {
+        if let Some(prev) = self.back.pop() {
+            self.forward.push(self.path.clone());
+            self.load(prev);
+        }
+    }
+
+    pub fn go_forward(&mut self) {
+        if let Some(next) = self.forward.pop() {
+            self.back.push(self.path.clone());
+            self.load(next);
+        }
+    }
+
+    pub fn go_up(&mut self) {
+        if self.is_trash() {
+            self.navigate(fsutil::home_dir());
+            return;
+        }
+        if let Some(parent) = self.path.parent() {
+            let p = parent.to_path_buf();
+            self.navigate(p);
+        }
+    }
+
+    pub fn sort_entries(&mut self) {
+        let sort = self.sort;
+        let asc = self.asc;
+        let folders_first = self.folders_first;
+        self.entries.sort_by(|a, b| {
+            if folders_first && a.is_dir != b.is_dir {
+                return if a.is_dir {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                };
+            }
+            let ord = match sort {
+                SortKey::Name => fsutil::name_cmp(&a.name, &b.name),
+                SortKey::Size => a.size.cmp(&b.size).then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+                SortKey::Type => a
+                    .type_label()
+                    .cmp(&b.type_label())
+                    .then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+                SortKey::Modified => a
+                    .modified
+                    .cmp(&b.modified)
+                    .then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+            };
+            if asc {
+                ord
+            } else {
+                ord.reverse()
+            }
+        });
+    }
+
+    pub fn visible(&self) -> Vec<usize> {
+        if !self.filter_on || self.filter.trim().is_empty() {
+            return (0..self.entries.len()).collect();
+        }
+        let needle = self.filter.to_lowercase();
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.name.to_lowercase().contains(&needle))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub fn selected_paths(&self) -> Vec<PathBuf> {
+        self.sel
+            .iter()
+            .filter_map(|i| self.entries.get(*i).map(|e| e.path.clone()))
+            .collect()
+    }
+
+    pub fn primary_selection(&self) -> Option<&Entry> {
+        self.sel
+            .iter()
+            .next()
+            .and_then(|i| self.entries.get(*i))
+            .or_else(|| self.entries.get(self.cursor))
+    }
+
+    pub fn select_single(&mut self, idx: usize) {
+        self.sel.clear();
+        self.sel.insert(idx);
+        self.anchor = idx;
+        self.cursor = idx;
+    }
+
+    pub fn toggle_select(&mut self, idx: usize) {
+        if !self.sel.remove(&idx) {
+            self.sel.insert(idx);
+        }
+        self.anchor = idx;
+        self.cursor = idx;
+    }
+
+    pub fn select_range(&mut self, idx: usize) {
+        let (a, b) = if self.anchor <= idx {
+            (self.anchor, idx)
+        } else {
+            (idx, self.anchor)
+        };
+        self.sel.clear();
+        for i in a..=b {
+            self.sel.insert(i);
+        }
+        self.cursor = idx;
+    }
+
+    pub fn select_all(&mut self) {
+        self.sel = self.visible().into_iter().collect();
+    }
+
+    pub fn icon_size(&self) -> f32 {
+        theme::icon_size_for_zoom(self.zoom[self.view.index()])
+    }
+
+    pub fn zoom_by(&mut self, delta: i32) {
+        let i = self.view.index();
+        let z = self.zoom[i] as i32 + delta;
+        self.zoom[i] = z.clamp(0, 16) as u8;
+    }
+
+    pub fn start_search(&mut self) {
+        let query = self.filter.clone();
+        let filters = SearchFilters::default();
+        self.search = Some(SearchSession::start(
+            if self.is_trash() {
+                fsutil::home_dir()
+            } else {
+                self.path.clone()
+            },
+            query,
+            filters,
+        ));
+        self.sel.clear();
+        self.cursor = 0;
+    }
+
+    /// Entries that are shown: search results when searching, else the folder.
+    pub fn display_entries(&self) -> &[Entry] {
+        match &self.search {
+            Some(s) => &s.results,
+            None => &self.entries,
+        }
+    }
+
+    pub fn open_entry(&mut self, idx: usize, reqs: &mut Vec<Request>) {
+        let Some(entry) = self.display_entries().get(idx).cloned() else {
+            return;
+        };
+        if entry.is_dir {
+            let target = if self.is_trash() {
+                if entry.path.starts_with(fsutil::trash_root().join("files")) {
+                    // Stay in the trash when a folder there is opened.
+                    entry.path.clone()
+                } else {
+                    entry.path.clone()
+                }
+            } else {
+                entry.path.clone()
+            };
+            self.navigate(target);
+        } else {
+            reqs.push(Request::OpenPath(entry.path.clone()));
+        }
+    }
+
+    pub fn entry_at(&self, idx: usize) -> Option<&Entry> {
+        self.display_entries().get(idx)
+    }
+
+    pub fn current_dir(&self) -> PathBuf {
+        if self.is_trash() {
+            fsutil::home_dir()
+        } else {
+            self.path.clone()
+        }
+    }
+
+    pub fn path_is_dir(&self) -> bool {
+        Path::new(&self.path).is_dir()
+    }
+}

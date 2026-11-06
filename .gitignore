@@ -1,0 +1,8 @@
+# Build output
+/target
+Cargo.lock.bak
+
+# Local pictures and scratch data
+/shots
+/testdata
+*.log
