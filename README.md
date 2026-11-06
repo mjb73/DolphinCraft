@@ -8,7 +8,7 @@ drag and drop, the information panel — and adds a few tools of its own.
 ## Download
 
 Prebuilt Linux binaries are on the [releases page](https://github.com/mjb73/DolphinCraft/releases):
-a tarball per architecture (x86_64, aarch64) with a `.sha256` beside it.
+a tarball and an identical `.zip` per architecture (x86_64, aarch64), each with a `.sha256`.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh | sh
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 
 `install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
 `~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
-release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.1` to pin a
+release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.2` to pin a
 release.
 
 The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,

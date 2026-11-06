@@ -47,7 +47,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential pkg-config ca-certificates file \
+            build-essential pkg-config ca-certificates file zip \
             libxkbcommon-dev libwayland-dev libgl1-mesa-dev
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile minimal

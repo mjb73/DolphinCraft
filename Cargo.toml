@@ -1,7 +1,14 @@
 [package]
 name = "dolphincraft"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
+description = "DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with extra tools."
+authors = ["Michael Bayes"]
+license = "MIT"
+repository = "https://github.com/mjb73/DolphinCraft"
+homepage = "https://github.com/mjb73/DolphinCraft"
+readme = "README.md"
+keywords = ["file-manager", "files", "egui", "dolphin", "desktop"]
 
 [dependencies]
 eframe = { version = "0.33", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }

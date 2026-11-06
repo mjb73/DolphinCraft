@@ -1,13 +1,15 @@
 #!/bin/sh
-# Build the Linux tarball that goes on a DolphinCraft release.
+# Build the Linux archives that go on a DolphinCraft release.
 #
 #     packaging/linux-tarball.sh <version> <arch> [binary]
 #
-# Writes dist/dolphincraft-<version>-<arch>-linux.tar.gz plus its .sha256.
+# Writes dist/dolphincraft-<version>-<arch>-linux.tar.gz and the identical .zip, each with a
+# .sha256 beside it. The tarball is what install.sh downloads; the zip is there for people who
+# would rather unzip than untar.
 #
-# The version is the release without its leading "v" (0.1.0 for tag v0.1.0), the arch is
+# The version is the release without its leading "v" (0.1.2 for tag v0.1.2), the arch is
 # x86_64 or aarch64. The workflow runs this inside a Debian bookworm container on purpose:
-# the glibc a binary is linked against becomes the glibc every user needs, and a tarball built
+# the glibc a binary is linked against becomes the glibc every user needs, and an archive built
 # on a rolling-release host links a glibc that nothing else can start.
 set -eu
 
@@ -24,7 +26,8 @@ OUT=$here/dist
     exit 1
 }
 
-rm -rf "$OUT/$NAME"
+rm -rf "$OUT/$NAME" "$OUT/$NAME.tar.gz" "$OUT/$NAME.zip" \
+    "$OUT/$NAME.tar.gz.sha256" "$OUT/$NAME.zip.sha256"
 mkdir -p "$OUT/$NAME"
 install -m 755 "$BIN" "$OUT/$NAME/dolphincraft"
 install -m 644 "$here/packaging/dolphincraft.desktop" "$OUT/$NAME/dolphincraft.desktop"
@@ -34,7 +37,19 @@ if [ -f "$here/LICENSE" ]; then
 fi
 
 tar -C "$OUT" -czf "$OUT/$NAME.tar.gz" "$NAME"
+if command -v zip >/dev/null 2>&1; then
+    ( cd "$OUT" && zip -qr "$NAME.zip" "$NAME" )
+else
+    echo "no zip on PATH — the .zip is skipped, only the tarball is built" >&2
+fi
 rm -rf "$OUT/$NAME"
-( cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256" )
 
-ls -l "$OUT/$NAME.tar.gz" "$OUT/$NAME.tar.gz.sha256"
+(
+    cd "$OUT"
+    sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+    if [ -f "$NAME.zip" ]; then
+        sha256sum "$NAME.zip" > "$NAME.zip.sha256"
+    fi
+)
+
+ls -l "$OUT/$NAME"*

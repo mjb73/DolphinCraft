@@ -6,12 +6,12 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 ```
 It installs `dolphincraft` to `~/.local/bin`, writes the menu entry, and refreshes the launcher.
 
-**Tarball** — `dolphincraft-<version>-x86_64-linux.tar.gz` (or `aarch64` for ARM) plus a `.sha256`.
-Unpack it and run the binary:
+**Archives** — `dolphincraft-0.1.2-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
+`.zip`, each with a `.sha256`. Unpack one and run the binary:
 
 ```sh
-tar xzf dolphincraft-0.1.1-x86_64-linux.tar.gz
-./dolphincraft-0.1.1-x86_64-linux/dolphincraft
+tar xzf dolphincraft-0.1.2-x86_64-linux.tar.gz
+./dolphincraft-0.1.2-x86_64-linux/dolphincraft
 ```
 
 The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,
