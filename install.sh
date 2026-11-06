@@ -63,7 +63,7 @@ else
     echo "note: no .sha256 published for this release, skipping the checksum check" >&2
 fi
 
-tar -C "$WORK" -xzf "$ASSET"
+tar -C "$WORK" -xzf "$WORK/$ASSET"
 
 mkdir -p "$PREFIX/bin" "$PREFIX/share/applications"
 install -m 755 "$WORK/${ASSET%.tar.gz}/dolphincraft" "$PREFIX/bin/dolphincraft"

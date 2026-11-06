@@ -14,8 +14,8 @@ tar xzf dolphincraft-0.1.0-x86_64-linux.tar.gz
 ./dolphincraft-0.1.0-x86_64-linux/dolphincraft
 ```
 
-The tarballs are built on Debian 12, so they ask for glibc 2.36 — Debian 12, Ubuntu 22.04+,
-Mint 21+, Fedora 37+ and anything newer. A Wayland or X11 session and an OpenGL driver
+The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,
+Mint 21+, Fedora 36+ and anything newer. A Wayland or X11 session and an OpenGL driver
 (libglvnd + mesa) are the only runtime requirements.
 
 Build it yourself if you prefer: `cargo build --release`, which needs a Rust toolchain

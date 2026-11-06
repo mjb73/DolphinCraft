@@ -19,8 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 application menu. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.0` to pin a
 release.
 
-The tarballs are built on Debian 12 on purpose, so they ask for glibc 2.36 — Debian 12,
-Ubuntu 22.04+, Mint 21+, Fedora 37+ and newer. A Wayland or X11 session plus an OpenGL driver
+The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,
+Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an OpenGL driver
 (libglvnd + mesa) is all it needs at runtime.
 
 ## What it does
