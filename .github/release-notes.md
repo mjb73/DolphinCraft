@@ -10,8 +10,8 @@ It installs `dolphincraft` to `~/.local/bin`, writes the menu entry, and refresh
 Unpack it and run the binary:
 
 ```sh
-tar xzf dolphincraft-0.1.0-x86_64-linux.tar.gz
-./dolphincraft-0.1.0-x86_64-linux/dolphincraft
+tar xzf dolphincraft-0.1.1-x86_64-linux.tar.gz
+./dolphincraft-0.1.1-x86_64-linux/dolphincraft
 ```
 
 The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,
