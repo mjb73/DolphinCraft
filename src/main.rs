@@ -259,6 +259,7 @@ impl App {
         pane.show_hidden = cfg.show_hidden;
         pane.previews = cfg.previews;
         pane.folders_first = cfg.folders_first;
+        pane.name_sort = state::NameSort::from_index(cfg.name_sort);
         if cfg.show_hidden {
             pane.reload();
         }
@@ -369,6 +370,7 @@ impl App {
         pane.zoom = self.config.zoom;
         pane.show_hidden = self.config.show_hidden;
         pane.previews = self.config.previews;
+        pane.name_sort = state::NameSort::from_index(self.config.name_sort);
         self.tabs.push(Tab {
             panes: vec![pane],
             active: 0,
@@ -608,26 +610,59 @@ impl App {
 
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(190.0);
-        let pane = self.pane_mut();
-        for key in [
-            state::SortKey::Name,
-            state::SortKey::Size,
-            state::SortKey::Type,
-            state::SortKey::Modified,
-        ] {
-            let checked = pane.sort == key;
-            if ui.selectable_label(checked, key.label()).clicked() {
-                if pane.sort == key {
-                    pane.asc = !pane.asc;
-                } else {
-                    pane.sort = key;
-                    pane.asc = true;
+        {
+            let pane = self.pane_mut();
+            for key in [
+                state::SortKey::Name,
+                state::SortKey::Size,
+                state::SortKey::Type,
+                state::SortKey::Modified,
+            ] {
+                let checked = pane.sort == key;
+                if ui.selectable_label(checked, key.label()).clicked() {
+                    if pane.sort == key {
+                        pane.asc = !pane.asc;
+                    } else {
+                        pane.sort = key;
+                        pane.asc = true;
+                    }
+                    pane.sort_entries();
+                    ui.close();
                 }
-                pane.sort_entries();
-                ui.close();
             }
         }
         ui.separator();
+        // The original's Sort page (`FUN_001e5750` @0x1e5750) offers three name
+        // comparisons as radio rows. They live in a submenu here so the four
+        // sort keys stay one click away.
+        ui.menu_button("Name comparison", |ui| {
+            let mut changed = false;
+            {
+                let pane = self.pane_mut();
+                for mode in [
+                    state::NameSort::Natural,
+                    state::NameSort::CaseInsensitive,
+                    state::NameSort::CaseSensitive,
+                ] {
+                    if ui
+                        .selectable_label(pane.name_sort == mode, mode.label())
+                        .clicked()
+                    {
+                        if pane.name_sort != mode {
+                            pane.name_sort = mode;
+                            pane.sort_entries();
+                            changed = true;
+                        }
+                        ui.close();
+                    }
+                }
+            }
+            if changed {
+                self.config_dirty = true;
+            }
+        });
+        ui.separator();
+        let pane = self.pane_mut();
         if ui
             .checkbox(&mut pane.folders_first, "Show folders first")
             .changed()
@@ -1173,6 +1208,33 @@ impl App {
                             // size, so a zero total shows nothing at all.
                             if t > 0 {
                                 let pct = fsutil::used_percent(f, t);
+                                // `FUN_001e6a40` @0x1e6a40 also drives a
+                                // `KCapacityBar` that sits next to the free-space
+                                // button: `KCapacityBar::setValue(iVar4)` with the
+                                // same rounded used percentage the tooltip prints,
+                                // inside the same `total != 0` test that hides the
+                                // whole widget on a volume of unknown size.
+                                let (bar, _) = ui.allocate_exact_size(
+                                    Vec2::new(34.0, 6.0),
+                                    Sense::hover(),
+                                );
+                                ui.painter().rect_filled(
+                                    bar,
+                                    CornerRadius::same(2),
+                                    Color32::from_rgb(48, 53, 58),
+                                );
+                                let filled = (bar.width() * (pct as f32 / 100.0)).max(0.0);
+                                if filled > 0.5 {
+                                    let fill = Rect::from_min_size(
+                                        bar.min,
+                                        Vec2::new(filled, bar.height()),
+                                    );
+                                    ui.painter().rect_filled(
+                                        fill,
+                                        CornerRadius::same(2),
+                                        ACCENT,
+                                    );
+                                }
                                 ui.label(
                                     egui::RichText::new(format!(
                                         "{} free",
@@ -2314,6 +2376,7 @@ impl eframe::App for App {
             cfg.view = self.pane().view.index();
             cfg.zoom = self.pane().zoom;
             cfg.folders_first = self.pane().folders_first;
+            cfg.name_sort = self.pane().name_sort.index();
             cfg.last_dir = self.pane().current_dir().display().to_string();
             cfg.save();
             self.config = cfg;

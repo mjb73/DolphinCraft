@@ -190,6 +190,72 @@ impl SortKey {
     }
 }
 
+/// How two names are compared when sorting by name.
+///
+/// The original offers exactly three, as three radio buttons on the Sort page
+/// of the View Properties dialog (`FUN_001e5750` @0x1e5750 in `/usr/bin/dolphin`).
+/// Read out of that function's three `QRadioButton` constructions, in the order
+/// the rows are laid out:
+///
+/// | row | text | string address |
+/// | --- | --- | --- |
+/// | 1 | `Natural` | 0x12eaf2 |
+/// | 2 | `Alphabetical, case insensitive` | 0x1372e0 |
+/// | 3 | `Alphabetical, case sensitive` | 0x12eafa |
+///
+/// `Natural` is the one the rebuild had hard-wired; the other two were missing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NameSort {
+    Natural,
+    CaseInsensitive,
+    CaseSensitive,
+}
+
+impl NameSort {
+    /// The exact label the original prints, used both in the menu and in the
+    /// "Sort by" row of the app menu.
+    pub fn label(self) -> &'static str {
+        match self {
+            NameSort::Natural => "Natural",
+            NameSort::CaseInsensitive => "Alphabetical, case insensitive",
+            NameSort::CaseSensitive => "Alphabetical, case sensitive",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        match self {
+            NameSort::Natural => 0,
+            NameSort::CaseInsensitive => 1,
+            NameSort::CaseSensitive => 2,
+        }
+    }
+
+    pub fn from_index(i: usize) -> Self {
+        match i {
+            1 => NameSort::CaseInsensitive,
+            2 => NameSort::CaseSensitive,
+            _ => NameSort::Natural,
+        }
+    }
+
+    /// Compare two names the way the chosen mode does. The natural mode is the
+    /// one `fsutil::name_cmp` already implements (digit runs compared by value);
+    /// the two alphabetical modes are plain code-unit order, differing only in
+    /// whether case is folded first. A case-insensitive tie falls back to the
+    /// exact strings so the order stays total and stable.
+    pub fn compare(self, a: &str, b: &str) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match self {
+            NameSort::Natural => crate::fsutil::name_cmp(a, b),
+            NameSort::CaseSensitive => a.cmp(b),
+            NameSort::CaseInsensitive => {
+                let (la, lb) = (a.to_lowercase(), b.to_lowercase());
+                la.cmp(&lb).then_with(|| a.cmp(b))
+            }
+        }
+    }
+}
+
 pub struct RenameState {
     pub index: usize,
     pub text: String,
@@ -240,6 +306,10 @@ pub struct Pane {
     pub anchor: usize,
     pub cursor: usize,
     pub sort: SortKey,
+    /// Which of the three name comparisons the original offers is in use
+    /// (`FUN_001e5750` @0x1e5750, rows "Natural" / "Alphabetical, case
+    /// insensitive" / "Alphabetical, case sensitive").
+    pub name_sort: NameSort,
     pub asc: bool,
     pub folders_first: bool,
     pub view: ViewMode,
@@ -282,6 +352,7 @@ impl Pane {
             anchor: 0,
             cursor: 0,
             sort: SortKey::Name,
+            name_sort: NameSort::Natural,
             asc: true,
             folders_first: true,
             view: ViewMode::Icons,
@@ -459,6 +530,7 @@ impl Pane {
 
     pub fn sort_entries(&mut self) {
         let sort = self.sort;
+        let name_sort = self.name_sort;
         let asc = self.asc;
         let folders_first = self.folders_first;
         self.entries.sort_by(|a, b| {
@@ -470,16 +542,19 @@ impl Pane {
                 };
             }
             let ord = match sort {
-                SortKey::Name => fsutil::name_cmp(&a.name, &b.name),
-                SortKey::Size => a.size.cmp(&b.size).then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+                SortKey::Name => name_sort.compare(&a.name, &b.name),
+                SortKey::Size => a
+                    .size
+                    .cmp(&b.size)
+                    .then_with(|| name_sort.compare(&a.name, &b.name)),
                 SortKey::Type => a
                     .type_label()
                     .cmp(&b.type_label())
-                    .then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+                    .then_with(|| name_sort.compare(&a.name, &b.name)),
                 SortKey::Modified => a
                     .modified
                     .cmp(&b.modified)
-                    .then_with(|| fsutil::name_cmp(&a.name, &b.name)),
+                    .then_with(|| name_sort.compare(&a.name, &b.name)),
             };
             if asc {
                 ord

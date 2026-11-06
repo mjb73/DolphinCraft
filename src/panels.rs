@@ -121,24 +121,52 @@ impl App {
         // Sorting is also reachable here, so it stays available in a window so
         // narrow that the toolbar's sort control gives way to the location bar.
         ui.menu_button("Sort by", |ui| {
-            let pane = self.pane_mut();
-            for key in [
-                crate::state::SortKey::Name,
-                crate::state::SortKey::Size,
-                crate::state::SortKey::Type,
-                crate::state::SortKey::Modified,
-            ] {
-                let checked = pane.sort == key;
-                if ui.selectable_label(checked, key.label()).clicked() {
-                    if pane.sort == key {
-                        pane.asc = !pane.asc;
-                    } else {
-                        pane.sort = key;
-                        pane.asc = true;
+            let mut changed = false;
+            {
+                let pane = self.pane_mut();
+                for key in [
+                    crate::state::SortKey::Name,
+                    crate::state::SortKey::Size,
+                    crate::state::SortKey::Type,
+                    crate::state::SortKey::Modified,
+                ] {
+                    let checked = pane.sort == key;
+                    if ui.selectable_label(checked, key.label()).clicked() {
+                        if pane.sort == key {
+                            pane.asc = !pane.asc;
+                        } else {
+                            pane.sort = key;
+                            pane.asc = true;
+                        }
+                        pane.sort_entries();
+                        ui.close();
                     }
-                    pane.sort_entries();
-                    ui.close();
                 }
+                ui.separator();
+                // Same three comparisons the original's Sort page lists
+                // (`FUN_001e5750` @0x1e5750).
+                ui.menu_button("Name comparison", |ui| {
+                    for mode in [
+                        crate::state::NameSort::Natural,
+                        crate::state::NameSort::CaseInsensitive,
+                        crate::state::NameSort::CaseSensitive,
+                    ] {
+                        if ui
+                            .selectable_label(pane.name_sort == mode, mode.label())
+                            .clicked()
+                        {
+                            if pane.name_sort != mode {
+                                pane.name_sort = mode;
+                                pane.sort_entries();
+                                changed = true;
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            if changed {
+                self.config_dirty = true;
             }
         });
         ui.separator();

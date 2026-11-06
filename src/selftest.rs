@@ -558,6 +558,78 @@ pub fn run() -> i32 {
     );
 
     r.check(
+        "the three name comparisons of the original order names differently",
+        (|| {
+            use crate::state::NameSort;
+            // `FUN_001e5750` @0x1e5750 offers exactly these three rows; the
+            // strings are "Natural" (0x12eaf2), "Alphabetical, case insensitive"
+            // (0x1372e0) and "Alphabetical, case sensitive" (0x12eafa).
+            let natural = NameSort::Natural;
+            let ci = NameSort::CaseInsensitive;
+            let cs = NameSort::CaseSensitive;
+
+            // Natural reads digit runs as numbers: file2 before file10.
+            if natural.compare("file2", "file10") != std::cmp::Ordering::Less {
+                return Err("Natural put file10 before file2".into());
+            }
+            // Case-sensitive is plain code-unit order, so an upper-case B (0x42)
+            // sorts before a lower-case a (0x61).
+            if cs.compare("B.txt", "a.txt") != std::cmp::Ordering::Less {
+                return Err("case-sensitive did not put B.txt before a.txt".into());
+            }
+            // Case-insensitive folds first: a.txt before B.txt.
+            if ci.compare("a.txt", "B.txt") != std::cmp::Ordering::Less {
+                return Err("case-insensitive did not put a.txt before B.txt".into());
+            }
+            // A case-only difference still has a defined order in both.
+            if ci.compare("Report.txt", "report.txt") == std::cmp::Ordering::Equal {
+                return Err("case-insensitive left a case-only pair unordered".into());
+            }
+            if crate::state::NameSort::from_index(1) != ci
+                || crate::state::NameSort::from_index(2) != cs
+                || crate::state::NameSort::from_index(0) != natural
+            {
+                return Err("the saved index does not round-trip".into());
+            }
+            Ok("file2 < file10, B.txt < a.txt, a.txt < B.txt".to_string())
+        })(),
+    );
+
+    r.check(
+        "sorting by size still breaks ties with the chosen name comparison",
+        (|| {
+            // One `SortingChoice` decides how two names compare wherever a name
+            // is the deciding key (`FUN_001e5750` @0x1e5750, saved by
+            // `FUN_001e7af0` @0x1e7af0), so equal-size rows must follow the
+            // chosen mode rather than always the natural one.
+            fn two(mode: crate::state::NameSort) -> Vec<String> {
+                let mut pane = crate::state::Pane::new(1, std::path::PathBuf::from("/tmp"));
+                pane.sort = crate::state::SortKey::Size;
+                pane.name_sort = mode;
+                pane.asc = true;
+                pane.entries.clear();
+                for name in ["B.txt", "a.txt"] {
+                    let mut e = fsutil::Entry::from_path(std::path::Path::new(&format!("/tmp/{name}")));
+                    e.name = name.to_string();
+                    e.size = 10;
+                    pane.entries.push(e);
+                }
+                pane.sort_entries();
+                pane.entries.iter().map(|e| e.name.clone()).collect()
+            }
+            let cs = two(crate::state::NameSort::CaseSensitive);
+            if cs != ["B.txt", "a.txt"] {
+                return Err(format!("case-sensitive size ties read {cs:?}"));
+            }
+            let natural = two(crate::state::NameSort::Natural);
+            if natural != ["a.txt", "B.txt"] {
+                return Err(format!("natural size ties read {natural:?}"));
+            }
+            Ok("B.txt/a.txt by size follows the name mode".to_string())
+        })(),
+    );
+
+    r.check(
         "the used-space share rounds half up",
         (|| {
             // `FUN_001e6a40` @0x1e6a40: (total - free) * 100 / total + 0.5,

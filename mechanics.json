@@ -135,8 +135,8 @@
   {
    "name": "status bar free space",
    "group": "view",
-   "value": "%1 free on the bar; %1 free out of %2 (%3% used) in the tooltip",
-   "source": "FUN_001e6a40 @0x1e6a40 in /usr/bin/dolphin; strings 0x12ec43, 0x12ec68"
+   "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
+   "source": "FUN_001e6a40 @0x1e6a40 in /usr/bin/dolphin; strings 0x12ec43, 0x12ec68; KCapacityBar::setValue"
   },
   {
    "name": "size unit style",
@@ -166,7 +166,7 @@
    "name": "default sorting mode",
    "group": "sorting",
    "value": "Natural",
-   "source": "string in /usr/bin/dolphin; applied as natural sort"
+   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin, ItemEnum SortingChoice default 0 = NaturalSorting"
   },
   {
    "name": "sort options",
@@ -652,7 +652,7 @@
    "name": "information panel label, several items selected",
    "group": "view",
    "value": "%1 items selected, no size, with the dialog-information icon",
-   "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x22ed75"
+   "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x12ed75; Baloo::FileMetaDataWidget::setItems cleared then QWidget::hide"
   },
   {
    "name": "details row padding",
@@ -678,7 +678,7 @@
    "group": "view",
    "value": 1,
    "unit": "zoom level",
-   "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level ± 1)"
+   "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level \u00b1 1)"
   },
   {
    "name": "wheel zoom remainder carried between events",
@@ -754,7 +754,7 @@
   {
    "name": "long breadcrumb paths",
    "group": "controls",
-   "value": "segments drop from the left behind a \"…\"; the current folder stays",
+   "value": "segments drop from the left behind a \"\u2026\"; the current folder stays",
    "estimated": true
   },
   {
@@ -779,7 +779,7 @@
    "name": "shortcut order storage",
    "group": "shortcuts",
    "value": "the order of the bookmarks in the settings; no separate order number",
-   "source": "KFilePlacesModel::movePlace @0x96220 → KBookmarkGroup::moveBookmark"
+   "source": "KFilePlacesModel::movePlace @0x96220 \u2192 KBookmarkGroup::moveBookmark"
   },
   {
    "name": "shortcut drop indicator",
@@ -873,6 +873,81 @@
    "group": "window",
    "value": "dolphincraft",
    "source": "follows the asked-for window title (the original's desktop id is dolphin)"
+  },
+  {
+   "name": "name comparison modes",
+   "group": "sorting",
+   "value": "Natural, Alphabetical case insensitive, Alphabetical case sensitive \u2014 in that row order",
+   "source": "FUN_001e5750 @0x1e5750 in /usr/bin/dolphin; strings at analysed addresses 0x22eaf2, 0x2372e0, 0x22eafa"
+  },
+  {
+   "name": "default name comparison",
+   "group": "sorting",
+   "value": "Natural",
+   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin (main program): ItemEnum \"SortingChoice\" with NaturalSorting/CaseInsensitiveSorting/CaseSensitiveSorting, default index 0"
+  },
+  {
+   "name": "name comparison config key",
+   "group": "sorting",
+   "value": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting",
+   "source": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting, GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin"
+  },
+  {
+   "name": "status bar capacity bar share",
+   "group": "view",
+   "value": "(total - free) * 100.0 / total + 0.5, truncated \u2014 same value as the tooltip",
+   "source": "FUN_001e6a40 @0x1e6a40, KCapacityBar::setValue(iVar4)"
+  },
+  {
+   "name": "icons view maximum width steps",
+   "group": "icons view",
+   "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
+   "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1c80 TextWidthIndex default 1"
+  },
+  {
+   "name": "details view click-to-open rows",
+   "group": "view",
+   "value": "By clicking anywhere on the row / By clicking on icon or name",
+   "source": "FUN_001dcdb0 @0x1dcdb0 (@option:radio how files/folders are opened)"
+  },
+  {
+   "name": "panel widths",
+   "group": "view",
+   "value": "remembered from the splitter, not fixed in the code",
+   "source": "QSplitter::setSizes call sites 0x90e2a, 0x927f3, 0x94673, 0x986eb in /usr/bin/dolphin (saved config or live widths)"
+  },
+  {
+   "name": "folder size display in the list",
+   "group": "sorting",
+   "value": "the number of items in the folder (no recursive size)",
+   "unit": "enum 0 = ContentCount",
+   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70 in /usr/bin/dolphin, ItemEnum DirectorySizeMode default 0"
+  },
+  {
+   "name": "folder size mode options",
+   "group": "sorting",
+   "value": "0 Show number of items, 1 Show size of contents up to N, 2 Show no size",
+   "source": "FUN_001e5750 @0x1e5750 builds the three radios (strings 0x22eb26, 0x22eb3b, 0x22eb59); FUN_001e7af0 @0x1e7af0 stores DirectorySizeMode 0/1/2"
+  },
+  {
+   "name": "recursive directory size limit",
+   "group": "sorting",
+   "value": 10,
+   "unit": "items",
+   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemUInt RecursiveDirectorySizeLimit default 10"
+  },
+  {
+   "name": "relative dates in the information panel",
+   "group": "details",
+   "value": true,
+   "unit": "bool",
+   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemBool UseShortRelativeDates default true"
+  },
+  {
+   "name": "sort tie-break",
+   "group": "sorting",
+   "value": "the chosen name comparison, for every sort key",
+   "source": "one SortingChoice (FUN_001e5750 @0x1e5750, saved by FUN_001e7af0 @0x1e7af0) governs name order everywhere; state::sort_entries"
   }
  ]
 }

@@ -43,6 +43,11 @@ pub struct Config {
     pub zoom: [u8; 3],
     #[serde(default = "yes")]
     pub folders_first: bool,
+    /// Which name comparison the Sort menu uses, as the index of the three rows
+    /// the original's Sort page offers (`FUN_001e5750` @0x1e5750):
+    /// 0 Natural, 1 Alphabetical case insensitive, 2 Alphabetical case sensitive.
+    #[serde(default)]
+    pub name_sort: usize,
     /// The Shortcuts section of the navigation panel can be folded away.
     #[serde(default = "yes")]
     pub shortcuts_expanded: bool,
@@ -89,6 +94,7 @@ impl Default for Config {
             view: 0,
             zoom: crate::theme::default_zoom(true),
             folders_first: true,
+            name_sort: 0,
             shortcuts_expanded: true,
             shortcut_keys: true,
             shortcut_colors: Vec::new(),

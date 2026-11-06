@@ -275,7 +275,9 @@ program, plus a separate level per view mode as before.
 * Details row height 26 px, Icons cell padding, sidebar 208 px, Information panel
   288 px at 100 % scaling — measured off the capture at 125 % scaling and
   rounded, so they are approximations of the theme, not constants in the code.
-* "Show folders first" and "Natural" sorting as factory defaults.
+* "Show folders first" and the sort key/order defaults are still estimates;
+  the name comparison itself is no longer one — `SortingChoice` defaults to
+  `NaturalSorting` (see the deep pass at the end of this sheet).
 
 ## Shortcuts in the navigation panel (added feature)
 
@@ -838,6 +840,187 @@ icon-only sort at 620 px, and the menu opening below the button, entirely under
 the toolbar. Split view (F3) keeps its per-pane location bars and the sort
 control in the toolbar with no bar to collide with.
 
+## The deep pass: the main program read function by function
+
+This round the original's **main program** `/usr/bin/dolphin` (26.08.2, stripped,
+sha256 `341e417b…fad937`) was opened as the analysis target and read with the
+decompiler, not with `strings` alone. REA imported it at image base `0x100000`,
+so **a Ghidra address is the file offset plus `0x100000`** (a function at file
+offset `0xe5750` is quoted as `0x1e5750`). The same base applies to
+`libdolphinprivate.so.26.08.2`, whose dynamic symbols are real names.
+
+Strings were found first, then their references were followed into functions:
+
+| string | file offset (= analysed address − 0x100000) | read from |
+| --- | --- | --- |
+| `Natural` | 0x12eaf2 | `FUN_001e5750` |
+| `Alphabetical, case insensitive` | 0x1372e0 | `FUN_001e5750` |
+| `Alphabetical, case sensitive` | 0x12eafa | `FUN_001e5750` |
+| `%1 items selected` | 0x12ed75 | `FUN_001f76f0` |
+| `%1 free` | 0x12ec43 | `FUN_001e6a40` |
+| `%1 free out of %2 (%3% used)` | 0x12ec68 | `FUN_001e6a40` |
+| `Preview icon size:` | 0x12e777 | `FUN_001dcdb0` |
+| `Show previews for` / `… for folders` | 0x12ef59 / 0x12efa6 | `FUN_00217c30` |
+
+Functions read (pseudo-code kept under `rea/deep/`, whole-batch evidence
+`ev_4d98f818…b70f97`, settings constructor `ev_e6212217…87f678eb`):
+
+| function | address | what it is |
+| --- | --- | --- |
+| `FUN_001e5750` | 0x1e5750 | the **View → Display** page of the settings dialog (sorting mode, folder size, date style, permissions style, long names) |
+| `FUN_001dcdb0` | 0x1dcdb0 | that dialog's view page: icon/preview size sliders, font, maximum width, details rows |
+| `FUN_001f76f0` | 0x1f76f0 | Information panel update (selection count, icon, label) |
+| `FUN_001e6a40` | 0x1e6a40 | status bar free-space widget (text, tooltip, capacity bar, hide) |
+| `GeneralSettings::GeneralSettings` | 0x2b8630 (main program) | the stored sorting choice and its factory default |
+
+### The three name comparisons, and which one is the default
+
+`FUN_001e5750` builds three `QRadioButton`s in this order, each label passed to
+`ki18ndc` with the dolphin context:
+
+1. `Natural` — 0x12eaf2, stored at `this+0x28`
+2. `Alphabetical, case insensitive` — 0x1372e0, stored at `this+0x38`
+3. `Alphabetical, case sensitive` — 0x12eafa, stored at `this+0x30`
+
+(the third is constructed last but kept at the lower offset, and
+`QButtonGroup::addButton` is called in the order +0x28, +0x38, +0x30 — the row
+order above is the order they are laid out in).
+
+The value they set is `GeneralSettings::SortingChoice`, an `ItemEnum` created in
+`GeneralSettings::GeneralSettings` @0x2b8630. Its three enum entries are built in
+this order — `NaturalSorting`, `CaseInsensitiveSorting`, `CaseSensitiveSorting` —
+and the `ItemEnum` constructor's last argument is `0`, i.e. **a fresh profile
+sorts by `NaturalSorting`**. The three names are the config keys under
+`[General]`, so a saved choice is `SortingChoice=NaturalSorting` etc.
+
+What the rebuild now does: `state::NameSort` (Natural / CaseInsensitive /
+CaseSensitive) with the same 0/1/2 order, `config.name_sort` written as
+`NameSort::index()`, and the three rows in a *Name comparison* submenu of the
+sort control **and** of the app menu's *Sort by*, carrying the original's exact
+wording. `--selftest` checks the ordering each mode produces
+(`file2 < file10`, `B.txt < a.txt`, `a.txt < B.txt`) and that the saved index
+round-trips. Pictures: `app/shots/deep/11-sortmenu.png`, `12-submenu.png`.
+
+### The rest of the page those radios sit on — `FUN_001e5750` @0x1e5750
+
+The sorting radios are not a sort dialog of their own. The same widget builds
+every row of the **View → Display** settings page, in this order, each label
+followed by its `@title:group` heading:
+
+| row | strings (analysed addresses in `/usr/bin/dolphin`) | what it sets |
+| --- | --- | --- |
+| sorting mode | `Sorting mode: ` 0x22eb17 → `Natural` 0x22eaf2, `Alphabetical, case insensitive` 0x2372e0, `Alphabetical, case sensitive` 0x22eafa | `GeneralSettings` key `SortingChoice` |
+| folder size | `Folder size:` 0x22eb66 → `Show number of items` 0x22eb26, `Show size of contents, up to ` 0x22eb3b, `Show no size` 0x22eb59, plus a `QSpinBox` beside the middle row (`setRange(1, …)`, step 1) | `ContentDisplaySettings` keys `DirectorySizeMode` (0/1/2 in that row order) and `RecursiveDirectorySizeLimit` (the spin box) |
+| date style | `Date style:` 0x22eb9d → `Relative (e.g. '%1')` 0x22eb73, `Absolute (e.g. '%1')` 0x22eb88 | `ContentDisplaySettings` key `UseShortRelativeDates` (true = relative) |
+| permissions | `Permissions style:` 0x22ec01 → `Symbolic (e.g. 'drwxr-xr-x')`, `Numeric (Octal) (e.g. '755')`, `Combined (e.g. 'drwxr-xr-x (755)')` | `UsePermissionsFormat` (bool) with the three format strings `SymbolicFormat` / `NumericFormat` / `CombinedFormat`, all in the ctor below |
+| long names | `Long file names:` 0x22ec32 → one radio labelled `Long file names` 0x22ec14 | not traced to a key: the page toggles a single radio, and the ctor's `ElidingMode` (`Right` / `Middle`) belongs to a different group |
+
+The values those rows write are read out of `FUN_001e7af0` @0x1e7af0, the page's
+save routine: it tests the three folder-size radios in turn and stores
+`DirectorySizeMode = 0, 1, 2` (`0` = number of items, `1` = size of contents,
+`2` = no size), stores the spin box in `RecursiveDirectorySizeLimit` and the
+sorting radios as `SortingChoice = 0, 1, 2`. Every write is guarded by
+`KCoreConfigSkeleton::isImmutable`, so a system-wide lock file wins over the
+dialog — the same reason the rebuild's saved settings are only defaults.
+
+The factory values live in the two settings constructors, both in the **main
+program**, group `[General]` / `[ContentDisplay]` of `dolphinrc`:
+
+| constructor | address | item | default |
+| --- | --- | --- | --- |
+| `GeneralSettings::GeneralSettings` | 0x2b8630 | `SortingChoice` (`ItemEnum`, at `this+0xac`) | 0 — `NaturalSorting` |
+| | | `HideXTrashFile` (`ItemBool`) | false |
+| `ContentDisplaySettings::ContentDisplaySettings` | 0x2b2b70 | `DirectorySizeMode` (`ItemEnum`, at `this+0x18`) | 0 — `ContentCount`, i.e. **a folder shows how many items it holds, not a size** |
+| | | `RecursiveDirectorySizeLimit` (`ItemUInt`, at `this+0x1c`) | **10** |
+| | | `UseShortRelativeDates` (`ItemBool`, at `this+0x20`) | **true** |
+
+Evidence: `FUN_001e5750` references `ev_e22ccbc6…b84f89b` (string references),
+`FUN_001e7af0` `ev_092db445…5202a7b`, `ContentDisplaySettings` ctor
+`ev_2ee237b2…be05139a`, `GeneralSettings` ctor `ev_e6212217…87f678eb`; all from
+REA's Ghidra 12.1.4 session on `/usr/bin/dolphin` (sha256 `341e417b…fad937`).
+
+So the rebuild's folder rows already show the original's factory choice: a count
+(`12 items`), never a recursive size, and the size only after the person asks for
+it. The one behaviour this pass changed is the tie-break: in the original one
+`SortingChoice` decides how two names compare wherever a name is the deciding
+key, so sorting by size, type or date now breaks ties with
+`NameSort::compare` rather than always with the natural comparison
+(`state::sort_entries`). `--selftest` pins it: with
+`Alphabetical, case sensitive` two same-size files order `B.txt, a.txt`, and with
+`Natural` they order `a.txt, B.txt`.
+
+### The free-space widget is a button, a bar and a tooltip — `FUN_001e6a40` @0x1e6a40
+
+Read line by line, in this order:
+
+* it returns early — `QWidget::hide()` — when the volume reports no total size
+  (`total == 0`) or the widget is flagged invisible, so nothing is printed at all;
+* `used% = (int)(((double)(total - free) * 100.0) / (double)total + 0.5)` — round
+  half up, **then** truncate (the rebuild's `fsutil::used_percent`);
+* the button text is the message id at 0x12ec43 (`%1 free`) with
+  `KIO::convertSize(free)` — the free bytes only;
+* the tooltip is 0x12ec68 (`%1 free out of %2 (%3% used)`) filled with free,
+  total and that same rounded percentage;
+* **and the widget also drives a `KCapacityBar`**: `KCapacityBar::setValue(iVar4)`
+  with the identical percentage, i.e. a bar filled to the used share, next to the
+  button. It is set inside the same `setUpdatesEnabled(false/true)` pair as the
+  text, so bar and number always agree.
+
+The rebuild had the text and the tooltip but no bar. It now draws one, 34 × 6 px,
+filled to `fsutil::used_percent(free, total)` — visible in the status bar of
+`app/shots/deep/10-window.png` between the `… GiB free` label and the `NN px`
+zoom label. The tooltip still reads `%1 free out of %2 (%3% used)`.
+
+### The Information panel with more than one item — `FUN_001f76f0` @0x1f76f0
+
+The count is at `+0x98`. When it is **greater than one** the function:
+
+* stops the preview job and any preview movie for the previously shown item;
+* loads the `dialog-information` icon from the theme and puts it in the preview
+  label (`QIcon::fromTheme("dialog-information")`, then `QIcon::pixmap`);
+* sets the label from `ki18ndcp(..., "@label", "%1 item selected")` with the count
+  as `%1` — the plural form is `%1 items selected` (string 0x12ed75);
+* calls `Baloo::FileMetaDataWidget::setItems()` with an empty list and then
+  `QWidget::hide()`, so **no per-file rows and no total size** are shown.
+
+With exactly one item the item's metadata is shown; with none it falls back to
+`KIO::stat` of the folder URL. The rebuild already behaved this way (circled
+information mark + `N items selected`, size only in the status bar) — this pass
+confirms it against the code instead of the capture.
+
+### The view page behind the sort page — `FUN_001dcdb0` @0x1dcdb0
+
+Same dialog, per view mode (`param_2`: 0 icons, 1 compact, 2 details). What it
+builds, which is what the original lets a person set:
+
+* two `QSlider`s — icon size and preview size — plus the font row (a combo with
+  *system font* / *custom font* and a `Choose font…` button);
+* icons mode: a `Maximum width:` combo whose entries are inserted in this order —
+  `Unlimited`, `Small`, `Medium`, `Large` (message id `@item:inlistbox Maximum
+  width`) — this is the `TextWidthIndex` the icon-cell formula uses;
+* details mode: a `Folders:` row with an `Expandable` checkbox, and two radio
+  rows, `By clicking anywhere on the row` / `By clicking on icon or name`
+  (`@option:radio how files/folders are opened`), i.e. how a click opens an item.
+
+The rebuild keeps its own single click model and does not expose the width steps;
+both are recorded here rather than copied.
+
+### Where the earlier "estimated" numbers stand
+
+* name comparison default — **now measured**: `SortingChoice` default index 0 =
+  `NaturalSorting` (see above); the note that called *Natural* an estimate is
+  superseded;
+* "show folders first" and the sort key/order defaults are still not read out of
+  a settings constructor, so they stay marked `estimated` in `mechanics.json`;
+* details row height 26 px, places 208 px, information panel 288 px stay
+  approximations of the theme: the splitter sizes are **not** constants in the
+  program — `QSplitter::setSizes` is fed either from the saved config or from the
+  live widget widths (call sites at 0x90e2a, 0x927f3, 0x94673, 0x986eb), so the
+  original remembers whatever the person dragged rather than opening at a fixed
+  width.
+
+
+
 ## The name on the window (asked for by the person)
 
 The person saw the window title still reading "Dolphin" and asked for
@@ -864,3 +1047,10 @@ is why the screenshot check cannot see the rename — it is a title-bar change.
 Estimated, in the sense that it cannot be read from the original's code: how the
 title bar ellipsises a long name on a narrow window is the window manager's
 business, not the program's.
+
+The name lives in one place in the code (`APP_NAME` in `app/src/main.rs`); the
+viewport title, the name handed to the window library, the app id and the About
+row all read it, and `--selftest` has a case that fails if it stops being
+`"DolphinCraft"`. The application-menu shortcut that was installed for this build
+was renamed to match, and its window-class hint now says `dolphincraft` as well,
+so the task bar groups the window under the right name instead of the original's.
