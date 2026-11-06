@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=DolphinCraft
+GenericName=File Manager
+Comment=A file manager with extra tools
+Exec=/path/to/dolphincraft/start.sh %U
+TryExec=/path/to/dolphincraft/start.sh
+Icon=system-file-manager
+Terminal=false
+StartupNotify=true
+Categories=System;FileTools;FileManager;
+Keywords=files;folder;manager;browse;
+MimeType=inode/directory;

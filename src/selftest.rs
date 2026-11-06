@@ -833,6 +833,21 @@ pub fn run() -> i32 {
         })(),
     );
 
+    r.check(
+        "the window carries the app's own name, not the original's",
+        (|| {
+            let name = crate::APP_NAME;
+            if name != "DolphinCraft" {
+                return Err(format!("the window title is {name:?}"));
+            }
+            // Every place that shows the name reads APP_NAME, and this is it.
+            if name.trim() != name || name.is_empty() {
+                return Err("the name has stray spaces".into());
+            }
+            Ok(format!("the title bar, task switcher and app id all read {name:?}"))
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

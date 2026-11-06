@@ -861,6 +861,18 @@
    "group": "controls",
    "value": "trash:/ keeps its spelling",
    "source": "fsutil::tidy_path"
+  },
+  {
+   "name": "window title",
+   "group": "window",
+   "value": "DolphinCraft",
+   "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
+  },
+  {
+   "name": "window app id",
+   "group": "window",
+   "value": "dolphincraft",
+   "source": "follows the asked-for window title (the original's desktop id is dolphin)"
   }
  ]
 }

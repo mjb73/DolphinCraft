@@ -34,9 +34,19 @@ desktop session with either X11 or Wayland.
 cargo run --release
 ```
 
-To build a standalone binary and put it on your menu as an app, build with
-`cargo build --release` and run `target/release/file-craft`, or install it with
-the `start.sh` / `.desktop` recipe described in `MECHANICS.md`.
+To build a standalone binary and put it on your application menu:
+
+```
+cargo build --release
+```
+
+then copy `dolphincraft.desktop.example` to `~/.local/share/applications/dolphincraft.desktop`
+and change the two paths in it to where `target/release/file-craft` ended up on
+your machine. `start.sh` does the same thing in one step:
+
+```
+./start.sh          # builds if needed, then launches the app
+```
 
 Options:
 

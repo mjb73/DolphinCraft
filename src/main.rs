@@ -1,5 +1,11 @@
 //! Dolphin-style file manager: window, toolbar, tabs, places, panes, status.
 
+/// The name on the window title bar, in the task switcher and in the app id.
+/// The original program declares its own name "Dolphin" (`@title` of its
+/// KAboutData block at 0x12d350); this build carries its own name instead, as
+/// the person asked. Everything that shows the app's name reads this one string.
+pub const APP_NAME: &str = "DolphinCraft";
+
 mod config;
 mod foldercolor;
 mod fsutil;
@@ -2838,13 +2844,13 @@ fn main() -> eframe::Result<()> {
             // The window title is the name the person sees on the title bar and
             // in the task switcher. Renamed from the original program's name to
             // this build's own name, as asked.
-            .with_title("DolphinCraft")
+            .with_title(APP_NAME)
             .with_app_id("dolphincraft"),
         ..Default::default()
     };
     let shot = screenshot.clone();
     eframe::run_native(
-        "DolphinCraft",
+        APP_NAME,
         options,
         Box::new(move |cc| {
             Ok(Box::new(App::new(

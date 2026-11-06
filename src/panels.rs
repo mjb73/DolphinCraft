@@ -143,7 +143,7 @@ impl App {
         });
         ui.separator();
         if crate::menu_row(ui, "About", "").clicked() {
-            self.toast("DolphinCraft — file manager with extra tools");
+            self.toast(&format!("{} — file manager with extra tools", crate::APP_NAME));
             ui.close();
         }
         if crate::menu_row(ui, "Quit", "Ctrl+Q").clicked() {

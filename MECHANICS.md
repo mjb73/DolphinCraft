@@ -837,3 +837,30 @@ and 620 px (`app/shots/toolbar-*.png`) show the label clear of the bar, then the
 icon-only sort at 620 px, and the menu opening below the button, entirely under
 the toolbar. Split view (F3) keeps its per-pane location bars and the sort
 control in the toolbar with no bar to collide with.
+
+## The name on the window (asked for by the person)
+
+The person saw the window title still reading "Dolphin" and asked for
+"DolphinCraft". The original does not paint its name inside the window; the name
+lives in the title bar the window manager draws, and comes from the program's own
+declared application title.
+
+| what | original | this build | where it comes from |
+| --- | --- | --- | --- |
+| title bar text | `Dolphin` | `DolphinCraft` | original: the NUL-terminated string `"Dolphin"` at **0x12d350** in `/usr/bin/dolphin`, immediately after the `@title` tag of its KAboutData block (next to `"File Manager"` and the authors) — i.e. the program's declared name, not a translated label. Rename asked for by the person. |
+| `WM_CLASS` / app id | `dolphin` | `dolphincraft` | the original's desktop file / QGuiApplication application id; the copy follows the new title so the task switcher groups it as its own app |
+| name shown in the About row | — | `DolphinCraft — file manager with extra tools` | rebuild's toast; the original's About box is a KAboutData dialog, which this build does not reproduce |
+
+Both the viewport title and the name handed to `eframe::run_native` were changed
+together, so the X11 `_NET_WM_NAME` and the Wayland title agree. Checked on a
+virtual X display: `xprop` on the running window reports
+`_NET_WM_NAME(UTF8_STRING) = "DolphinCraft"` and `WM_CLASS = "", "dolphincraft"`,
+and `xdotool search --name DolphinCraft` finds exactly that window. The saved
+settings folder is deliberately left at its old name (`dolphin-remake`) so the
+person's shortcut colours, order and window size survive the rename.
+
+Nothing else in the window changed: the client area never carried the name, which
+is why the screenshot check cannot see the rename — it is a title-bar change.
+Estimated, in the sense that it cannot be read from the original's code: how the
+title bar ellipsises a long name on a narrow window is the window manager's
+business, not the program's.
