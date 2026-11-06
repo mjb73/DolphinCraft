@@ -41,7 +41,7 @@ cargo build --release
 ```
 
 then copy `dolphincraft.desktop.example` to `~/.local/share/applications/dolphincraft.desktop`
-and change the two paths in it to where `target/release/file-craft` ended up on
+and change the two paths in it to where `target/release/dolphincraft` ended up on
 your machine. `start.sh` does the same thing in one step:
 
 ```
