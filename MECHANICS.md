@@ -1,10 +1,16 @@
 # What the original program does — measured, not guessed
 
-Target: `/usr/bin/dolphin` (KDE Dolphin, 26.08.2) and its private library
-`/usr/lib/libdolphinprivate.so.6` (26.08.2). The main binary is stripped, but the
-shared library keeps its dynamic symbol table, so the functions below have real
-names and addresses. Addresses are file offsets inside `libdolphinprivate.so.6`
-(identical to virtual addresses in this ELF).
+Target: `/usr/bin/dolphin` (KDE Dolphin, **26.08.3**) and its private library
+`/usr/lib/libdolphinprivate.so.6` (26.08.3, sha256 `88510538…`; the main binary
+is sha256 `e824c204…`). The main binary is stripped; the shared library keeps its
+dynamic symbol table, so the library functions below have real names.
+
+Addresses are the analysis tool's coordinates for those files, i.e. image base
+0x100000: an `nm`/`readelf` offset inside `libdolphinprivate.so.6` gains
+0x100000, so the file offset 0x1a6380 reads as 0x2a6380 here. Sections written
+before the last pass carry 26.08.2 addresses; the final section of this sheet
+re-reads the zoom, grid and settings functions out of the installed 26.08.3 and
+gives the corrected addresses for every one of them.
 
 Two kinds of evidence were used:
 
@@ -22,12 +28,12 @@ Two kinds of evidence were used:
 
 | function | address | result |
 | --- | --- | --- |
-| `ZoomLevelInfo::minimumLevel()` | 0x1a6520 | returns 0 |
-| `ZoomLevelInfo::maximumLevel()` | 0x1a6530 | returns 16 |
-| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x1a6540 | level 0..4 read a table, level >4 returns `level * 16` |
-| `ZoomLevelInfo::zoomLevelForIconSize(QSize)` | 0x1a6560 | inverse: 16→0, 22→1, 32→2, 48→3, 64→4, then `4 + (size-64)/16` |
+| `ZoomLevelInfo::minimumLevel()` | 0x2a6360 | returns 0 |
+| `ZoomLevelInfo::maximumLevel()` | 0x2a6370 | returns 16 |
+| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x2a6380 | level 0..4 read a table, level >4 returns `level * 16` |
+| `ZoomLevelInfo::zoomLevelForIconSize(QSize)` | 0x2a63a0 | inverse: 16→0, 22→1, 32→2, 48→3, 64→4, then `4 + (size-64)/16` |
 
-The table at 0x1cd980 is five 32-bit ints: `0x10, 0x16, 0x20, 0x30, 0x40`, i.e.
+The table at 0x2cd960 is five 32-bit ints: `0x10, 0x16, 0x20, 0x30, 0x40`, i.e.
 **16, 22, 32, 48, 64 px**. Levels 5..16 are 80, 96, 112, … 256 px. So the icon
 size ladder used by the rebuild is exactly:
 
@@ -52,7 +58,7 @@ per view mode, and `mechanics.json` repeats as data.
   Compact 16 px (level 0). The user's own `~/.config/dolphinrc` has
   `[DetailsMode] IconSize=256` and `PreviewSize=80`, which is a personal choice,
   not a factory default, so it was not copied.
-* `DolphinView::setZoomLevel(int)` @ 0x1715b0, `ViewProperties::setZoomLevel(int)`
+* `DolphinView::setZoomLevel(int)` @ 0x271380, `ViewProperties::setZoomLevel(int)`
   @ 0x19cfc0, and `DolphinViewActionHandler::slotZoomLevelChanged` @ 0x193ac0
   clamp a zoom change to 0..16 and push the resulting icon size into the view.
 
@@ -173,7 +179,7 @@ Code in `libdolphinprivate.so.6`:
 
 | what | address | result |
 | --- | --- | --- |
-| `DolphinItemListView::setZoomLevel(int)` | 0x16e100 | clamps the level to 0..16 (the pair of bounds is packed at 0x1c3350), asks `ZoomLevelInfo::iconSizeForZoomLevel` @0x1a6540 for the pixel size, stores that size at object offset +0x200 when previews are on and at +0x204 when they are off, writes the level to +0x1fc, then calls `updateGridSize` |
+| `DolphinItemListView::setZoomLevel(int)` | 0x26dec0 | clamps the level to 0..16 (the 16 it clamps against is the first int at 0x2c31c0), asks `ZoomLevelInfo::iconSizeForZoomLevel` @0x2a6380 for the pixel size, stores that size at object offset +0x200 when previews are on and at +0x204 when they are off, writes the level to +0x1fc, then calls `updateGridSize` |
 | `DolphinItemListView::updateGridSize()` | 0x16db80 | picks the visible size: +0x200 when `previewsShown()` is true, otherwise +0x204; falls back to the per-mode settings object (`DetailsModeSettings` +0x2c `IconSize`, +0x30 `PreviewSize`; the icons and compact modes have their own) when the stored size is 0; converts the size back with `ZoomLevelInfo::zoomLevelForIconSize` and lays the grid out again |
 | `KStandardItemListWidget::drawPixmap(QPainter*, QPixmap const&)` | 0x135bb0 | divides the cached preview's width by its device pixel ratio, compares the result with the cached target width and height kept at +0x1b0 and +0x1b4, and when they differ copies the pixmap, calls `KPixmapModifier::scale` @0x15e820 with the icon box size, restores the ratio and paints it centred |
 | `KPixmapModifier::scale(QPixmap&, QSize const&)` | 0x15e820 | scales the pixmap to fit the box, keeping the aspect ratio |
@@ -248,8 +254,8 @@ constants, not estimates:
 | `DolphinView::wheelEvent(QWheelEvent*)` | 0x272710 | if the Control modifier bit is **not** set (byte at +0x23 & 4 — the third byte of Qt's modifier mask, i.e. `Qt::ControlModifier`) it clears the event's accept flag and returns, so a plain wheel only scrolls. With Ctrl it adds the wheel delta to a running total at `this+0xcc`; when the total passes **+0x78 = 120** it calls `slotIncreaseZoom` and subtracts 120, when it passes **−120** it calls `slotDecreaseZoom` and adds 120. The leftover stays in the total for the next event. |
 | `DolphinView::slotIncreaseZoom()` | 0x284b00 | `setZoomLevel(zoomLevel() + 1)` |
 | `DolphinView::slotDecreaseZoom()` | 0x284b30 | `setZoomLevel(zoomLevel() - 1)` |
-| `DolphinView::setZoomLevel(int)` | 0x2715b0 | applies the level, stores it for the current URL through `ViewProperties::setZoomLevel` (or −1 when it equals the default), hides the tool tip, emits `zoomLevelChanged(old, new)`, then saves if the properties differ |
-| `DolphinItemListView::setZoomLevel(int)` | 0x26e100 | clamps to 0..16 and turns the level into the icon size (see the zoom ladder) |
+| `DolphinView::setZoomLevel(int)` | 0x271380 | applies the level, stores it for the current URL through `ViewProperties::setZoomLevel` (or −1 when it equals the default), hides the tool tip, emits `zoomLevelChanged(old, new)`, then saves if the properties differ |
+| `DolphinItemListView::setZoomLevel(int)` | 0x26dec0 | clamps to 0..16 and turns the level into the icon size (see the zoom ladder) |
 | `KItemListController::increaseZoom()` | 0x1f8c60 | emits `increaseZoomClicked`, which the view connects to `slotIncreaseZoom`; this is what the status bar's `+` button (and the slider's arrow steps) trigger |
 
 So the rule copied into the rebuild (`app/src/state.rs`: `WHEEL_UNITS_PER_STEP`,
@@ -288,7 +294,7 @@ program, plus a separate level per view mode as before.
 
 * Factory default icon and preview sizes were estimated in an earlier round.
   They are now read out of the three settings constructors (Icons 32/64,
-  Compact 16/48, Details 16/48) and out of `updateDefaultZoomLevel` @0x27df20 —
+  Compact 16/48, Details 16/48) and out of `updateDefaultZoomLevel` @0x27dd60 —
   see the decompiler section at the end of this sheet.
 * Details row height 26 px, Icons cell padding, sidebar 208 px, Information panel
   288 px at 100 % scaling — measured off the capture at 125 % scaling and
@@ -758,7 +764,7 @@ Everything in this section comes from `native_function_pseudocode` (Ghidra
 equal to file offsets). The raw answers are kept in `rea/code/` and `rea/mcp2/`;
 the shell script that asks for them is `rea/batch.py`.
 
-### Status bar text — `DolphinView::emitStatusBarText` @0x273180
+### Status bar text — `DolphinView::emitStatusBarText` @0x272f40
 
 The function takes `(int folderCount, int fileCount, unsigned long long
 fileSize, DolphinView::Selection)` and builds the line from several plural
@@ -846,14 +852,14 @@ the default), not from the person's own `dolphinrc`:
 
 | settings object | address | factory values |
 | --- | --- | --- |
-| `IconsModeSettings::IconsModeSettings` | `0x2b1c80` | `IconSize` 32, `PreviewSize` 64, `TextWidthIndex` 1, `MaximumTextLines` 3 |
-| `CompactModeSettings::CompactModeSettings` | `0x2af830` | `IconSize` 16, `PreviewSize` 48, `MaximumTextWidthIndex` 0 |
-| `DetailsModeSettings::DetailsModeSettings` | `0x2b10d0` | `IconSize` 16 (at `+0x2c`), `PreviewSize` 48 (at `+0x30`), `LeftPadding` 20, `RightPadding` 20, `HighlightEntireRow` true, `ExpandableFolders` true |
+| `IconsModeSettings::IconsModeSettings` | `0x2b1ac0` | `IconSize` 32, `PreviewSize` 64, `TextWidthIndex` 1, `MaximumTextLines` 3 |
+| `CompactModeSettings::CompactModeSettings` | `0x2af670` | `IconSize` 16, `PreviewSize` 48, `MaximumTextWidthIndex` 0 |
+| `DetailsModeSettings::DetailsModeSettings` | `0x2b0f10` | `IconSize` 16 (at `+0x2c`), `PreviewSize` 48 (at `+0x30`), `LeftPadding` 20, `RightPadding` 20, `HighlightEntireRow` true, `ExpandableFolders` true |
 
-`DolphinView::updateDefaultZoomLevel` @0x27df20 then converts those sizes into
+`DolphinView::updateDefaultZoomLevel` @0x27dd60 then converts those sizes into
 the zoom a fresh view opens with: it takes `PreviewSize` while previews are
 shown and `IconSize` when they are off, and calls
-`ZoomLevelInfo::zoomLevelForIconSize` @0x2a6560. That gives **icons 4, compact 3,
+`ZoomLevelInfo::zoomLevelForIconSize` @0x2a63a0. That gives **icons 4, compact 3,
 details 3** with previews (64, 48, 48 px) and **icons 2, compact 0, details 0**
 without (32, 16, 16 px). The earlier "estimated" defaults in this sheet are
 replaced by these numbers, and a config file that predates the `zoom` key now
@@ -1359,8 +1365,8 @@ guessed, and the sources are the ones the browser uses at runtime.
 | comparison zoom | ×1.25 / ÷1.25 buttons, ×1.1 / ×0.9 per wheel notch, clamped 0.1 … 20 | `compareZoomIn`, `compareZoomOut`, `initCompareZoomWheel`, `stepCompareZoom` |
 
 The original's own picture size ladder was measured for contrast: it stops at
-**256 px** (`ZoomLevelInfo::maximumLevel()` @0x1a6530 returns 16 and
-`ZoomLevelInfo::iconSizeForZoomLevel(int)` @0x1a6540 returns `level * 16` above
+**256 px** (`ZoomLevelInfo::maximumLevel()` @0x2a6370 returns 16 and
+`ZoomLevelInfo::iconSizeForZoomLevel(int)` @0x2a6380 returns `level * 16` above
 level 4), so a 400 px ceiling is an addition, not a copy. The 30 s upper limit of
 the slideshow, the fade switch, and the "Hide names / Show dimensions / Rounded"
 toggles as separate switches are this build's own: the browser carries those
@@ -1395,10 +1401,10 @@ again from the installed library:
 
 | function | address | result |
 | --- | --- | --- |
-| `ZoomLevelInfo::minimumLevel()` | 0x1a6520 | 0 |
-| `ZoomLevelInfo::maximumLevel()` | 0x1a6530 | **16** |
-| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x1a6540 | levels 0..4 from the table at 0x1cd980 (16, 22, 32, 48, 64), level 5 and up `level * 16` |
-| `DolphinItemListView::setZoomLevel(int)` | 0x26e100 | clamps the incoming level to the pair of bounds at 0x1c3350, i.e. 0..=16 |
+| `ZoomLevelInfo::minimumLevel()` | 0x2a6360 | 0 |
+| `ZoomLevelInfo::maximumLevel()` | 0x2a6370 | **16** |
+| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x2a6380 | levels 0..4 from the table at 0x2cd960 (16, 22, 32, 48, 64), level 5 and up `level * 16` |
+| `DolphinItemListView::setZoomLevel(int)` | 0x26dec0 | clamps the incoming level to the 16 stored at 0x2c31c0 and then to 0, i.e. 0..=16 |
 
 Level 16 is therefore 256 px, and that is the largest preview the original can
 draw. The previous build copied that clamp into the file views (`clamp(16, 256)`
@@ -1410,7 +1416,7 @@ formula instead of stopping early: levels 17..=25 are 272, 288, 304, 320, 336,
 352, 368, 384, 400 px. Nothing at or below level 16 moves, so every measured
 size the original offers is unchanged; the four `clamp(16, 256)` calls became
 `clamp(16, 400)`, and `Pane::zoom_by` clamps to the new top. `zoomLevelForIconSize`
-(the inverse, 0x1a6560) still maps 400 px back to level 25, so a saved size
+(the inverse, 0x2a63a0) still maps 400 px back to level 25, so a saved size
 round-trips. `--selftest` covers both directions.
 
 **The switches.** `Names`, `Dimensions`, `Rounded` and `Previews` were only
@@ -2215,3 +2221,198 @@ export, an sshfs mount and a local vfat with an escaped space — and fails unle
 exactly the three shares come back, named *media*, *photos* and *data*, with the
 escaped mount point unescaped and the local drive left out. It also checks the two
 GIO folder names.
+
+## This pass: the zoom, the grid and the three view modes re-read out of the installed 26.08.3
+
+The original installed here today is Dolphin **26.08.3**. Every section above was
+written against 26.08.2 addresses, and 26.08.3 moved every function this build
+copies, so this pass opened the original again and read the functions behind the
+zoom ladder, the icon grid and the three view-mode settings, line by line. The
+numbers did not change. The addresses did — and one rule that the earlier tables
+noted but the build did not yet follow turned up: the original keeps **two** sizes
+per view mode, not one.
+
+### How it was read
+
+* `open_binary` (core target open) on `/usr/bin/dolphin`, sha256
+  `e824c204f99c17d55a51943790522807f5224f044433d45937a6bcc41d7655ac`, then on
+  `/usr/lib/libdolphinprivate.so.6`, sha256
+  `88510538e747e866b2d75b295e1326ccf5a5739fced986ca56d0058b91c95df0`.
+* `search_strings` in the main program for the panel's own words (`Add to Places`
+  0x22d613, `Show Hidden Places` 0x22dafa, the panel help text at 0x2334d8 and
+  0x233618). This is where the places panel's wording lives; `No shared folders
+  found` is **not** in the main program, it is in the private library, which is
+  why the earlier round found it there.
+* `procedure_pseudo_code` on each function below. Results and their evidence ids
+  are kept under `rea/deep5/` (`351-pseudo-updategridsize.json`,
+  `357-pseudo-iconsize.json`, `354-pseudo-detailsmode.json`, …), one file per
+  function, so a later pass can check any line quoted here.
+
+### The functions, at the addresses 26.08.3 gives them
+
+| function | 26.08.3 address | what the code says |
+| --- | --- | --- |
+| `ZoomLevelInfo::minimumLevel()` | 0x2a6360 | `return 0` |
+| `ZoomLevelInfo::maximumLevel()` | 0x2a6370 | `return 0x10` — 16 levels, the ceiling this build extends on purpose |
+| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x2a6380 | `size = level << 4`; for `level < 5` the five ints at **0x2cd960** win: 16, 22, 32, 48, 64 |
+| `ZoomLevelInfo::zoomLevelForIconSize(QSize)` | 0x2a63a0 | `32→2`; under 33: `16→0`, `22→1`; `48→3`, `64→4`; anything else `(size − 64 >> 4) + 4` |
+| `DolphinItemListView::setZoomLevel(int)` | 0x26dec0 | `min(16, level)` against the 16 at **0x2c31c0**, then `max(0, …)`; converts the level to a size; **writes that size to `PreviewSize` when previews are shown and to `IconSize` when they are not**; keeps the level at +0x1fc and the two sizes at +0x200 / +0x204; ends in `updateGridSize` |
+| `DolphinItemListView::updateGridSize()` | 0x26d940 | picks the size in force — `PreviewSize` with previews, `IconSize` without; icons cell width `exp(zoom/13) × (TextWidthIndex << 6) × (avgCharWidth/9) + 48`, floored at `exp(zoom/13) × 4 + size`; compact cell width `size + 8 + 5 × fontHeight`; details width automatic (`0xffffffff`) |
+| `DolphinItemListView::updateFont()` | 0x26d6b0 | `UseSystemFont` picks the widget font, otherwise the mode's `ViewFont`; the chosen font's metrics are what the grid formulas above divide by |
+| `DolphinView::updateDefaultZoomLevel()` | 0x27dd60 | `zoom = zoomLevelForIconSize(previewsShown ? PreviewSize : IconSize)` for the current mode |
+| `DetailsModeSettings::DetailsModeSettings()` | 0x2b0f10 | `[DetailsMode]` · `IconSize` **16** · `PreviewSize` **48** · `UseSystemFont` true · `ViewFont` · `ColumnPositions` · `LeftPadding` **20** · `RightPadding` **20** · `HighlightEntireRow` true · `ExpandableFolders` true |
+| `IconsModeSettings::IconsModeSettings()` | 0x2b1ac0 | `[IconsMode]` · `IconSize` **32** · `PreviewSize` **64** · `TextWidthIndex` **1** · `UseSystemFont` true |
+| `CompactModeSettings::CompactModeSettings()` | 0x2af670 | `[CompactMode]` · `IconSize` **16** · `PreviewSize` **48** · `MaximumTextWidthIndex` |
+| `DolphinView::setZoomLevel(int)` | 0x271380 | applies a level, remembers it for the folder through `ViewProperties`, emits `zoomLevelChanged` |
+| `ViewProperties::setZoomLevel(int)` | 0x29ce00 | stores the folder's own level, `-1` meaning "same as the mode's default" |
+| `DolphinView::emitStatusBarText(...)` | 0x272f40 | the status-bar line; the rules in the earlier section are unchanged, only the address moved |
+
+### The rule the build was missing: two sizes, one per previews state
+
+`setZoomLevel` @0x26dec0 does not store one number. It asks
+`KFileItemListView::previewsShown()` and then writes the new size into one of two
+fields, `PreviewSize` (+0x200) or `IconSize` (+0x204), keeping the other one as it
+was. `updateGridSize` @0x26d940 reads the same pair back:
+
+    size = previewsShown ? PreviewSize : IconSize
+
+So in the original, zooming a folder to 256 px *with pictures showing* and then
+turning previews off drops the tiles back to the mode's icon size (32 px by
+factory), and turning previews back on brings the 256 px tiles straight back. The
+rebuild had a single ladder per view mode, so the 256 px survived the toggle and
+the "off" state was never really the original's off state.
+
+**What changed in the build** (`app/src/state.rs`, `app/src/config.rs`,
+`app/src/main.rs`, `app/src/views.rs`):
+
+* `Pane` now carries `zoom` (the previews-on ladder, `PreviewSize`) and
+  `zoom_plain` (the previews-off ladder, `IconSize`), both indexed by view mode in
+  Icons, Compact, Details order.
+* `Pane::zoom_level()` returns the ladder in force; `Pane::set_zoom_level()` writes
+  only that one, which is exactly what setZoomLevel does; `zoom_by()` steps the
+  ladder in force. `icon_size()`, the status bar's slider, the `+` / `−` buttons,
+  `Ctrl`+wheel and the `--zoom` start-up flag all go through those three, so they
+  cannot drift apart.
+* Factory levels are the measured sizes turned into levels by
+  `zoomLevelForIconSize` @0x2a63a0: previews on **4, 3, 3** (64, 48, 48 px),
+  previews off **2, 0, 0** (32, 16, 16 px). `theme::default_zoom(previews)` already
+  computed both; the settings file now stores both, under `zoom` and `zoom_plain`.
+* `--selftest` gained *"previews on and off each keep their own size"* — it opens an
+  icon view at 64 px, steps to 80 px, turns previews off and expects 32 px, steps
+  down twice to 16 px, turns previews back on and expects 80 px again, and fails if
+  the plain ladder moved while previews were on — and *"a fresh window opens at the
+  factory size of each view"*, which pins the three (IconSize, PreviewSize) pairs
+  and the two starting ladders.
+
+### The details view's side padding, measured and now used
+
+The same constructor registers two `ItemUInt`s:
+
+    LeftPadding  = 0x14   (+0x50 of the settings object)
+    RightPadding = 0x14   (+0x54)
+
+Those are not per-row gaps: `KItemListView::setSidePadding(double, double)` and
+`KItemListWidget::setSidePadding` are the functions that consume them (both are
+imported by the library, so the names are in its symbol table), and they inset
+the header and the rows from the two edges of the view. 0x14 is **20 px** each
+side.
+
+The build had 8 px there, which was a guess. `theme::DETAILS_SIDE_PAD` is now
+20 px, and both the header and each row's three columns come from one function,
+`Pane::details_columns`, so the header and the rows can never disagree. The
+screenshot `app/shots/after-deep5-details.png` shows the result (1440×900 at
+1.6×): the list begins at x = 334 px and *Name* begins at 366 px — 32 screen px,
+i.e. 20 points. `--selftest` *"the details rows sit in the original's 20 px side
+padding"* checks that the name column starts 20 px in and the date column ends
+20 px short of the edge.
+
+### Addresses corrected in this pass
+
+Every address below was read out of the installed 26.08.3 in this pass; the number
+on the right is what the earlier sections of this sheet used to say.
+
+| function | now | was |
+| --- | --- | --- |
+| `ZoomLevelInfo::minimumLevel` | 0x2a6360 | 0x1a6520 |
+| `ZoomLevelInfo::maximumLevel` | 0x2a6370 | 0x1a6530 |
+| `ZoomLevelInfo::iconSizeForZoomLevel` | 0x2a6380 | 0x1a6540 |
+| `ZoomLevelInfo::zoomLevelForIconSize` | 0x2a63a0 | 0x1a6560 |
+| the 16,22,32,48,64 table | 0x2cd960 | 0x1cd980 |
+| the 16 `setZoomLevel` clamps against | 0x2c31c0 | 0x1c3350 |
+| `DolphinItemListView::setZoomLevel` | 0x26dec0 | 0x16e100 / 0x26e100 |
+| `DolphinItemListView::updateGridSize` | 0x26d940 | 0x26db80 |
+| `DolphinView::updateDefaultZoomLevel` | 0x27dd60 | 0x27df20 |
+| `DolphinView::setZoomLevel` | 0x271380 | 0x1715b0 / 0x2715b0 |
+| `DolphinView::emitStatusBarText` | 0x272f40 | 0x273180 |
+| `IconsModeSettings` ctor | 0x2b1ac0 | 0x2b1c80 |
+| `CompactModeSettings` ctor | 0x2af670 | 0x2af830 |
+| `DetailsModeSettings` ctor | 0x2b0f10 | 0x2b10d0 |
+
+The code comments that carried those numbers (`app/src/theme.rs`,
+`app/src/views.rs`, `app/src/state.rs`, `app/src/config.rs`, `app/src/main.rs`,
+`app/src/selftest.rs`) have the new ones, so a reader who jumps from a line of
+Rust to the original lands on the right function.
+
+### What this pass did not re-read
+
+* `DolphinView::wheelEvent` — a private override with no exported name in
+  26.08.3, so the 120-wheel-unit rule in the earlier section is still the 26.08.2
+  reading. The behaviour is unchanged in the rebuild (`state::wheel_zoom_steps`),
+  but its address is not claimed for 26.08.3.
+* The status-bar and Information-panel sections' **wording** rules: the function
+  addresses are corrected, the sentence-by-sentence reading was not repeated.
+* Anything in the places panel and the toolbar, which lives in `KFilePlacesModel`
+  and `KFilePlacesView` (KF6 KIO) rather than in the two files opened here.
+
+## Closing pass: the missing value, the strip slider, and the theme question
+
+This pass finished what the previous one left half-written and fixed one visible
+rough edge. Nothing here re-reads the original: the numbers are the ones already
+on this sheet.
+
+### The value that was missing from the ledger
+
+`mechanics.json` now carries *details view side padding (rebuild)* — 20 px,
+sourced to `app/src/theme.rs` (`DETAILS_SIDE_PAD`) and to
+`DetailsModeSettings::DetailsModeSettings` @0x2b0f10's `LeftPadding` /
+`RightPadding` of 0x14. The earlier *details row padding* value said the same
+thing in prose; the new one states the number the code uses, which is what the
+ledger is read for.
+
+### A slider inside a one-row strip
+
+egui sizes a slider's knob from the rectangle the slider is given, and that
+rectangle is the row's interacting height — `Spacing::interact_size.y`, set to 24
+in `theme::install`. The picture strip above the icon grid is 22 px tall and the
+status bar 28 px, so a plain `egui::Slider` in either of them drew a knob taller
+than the strip, standing out above and below the 4 px track (visible in
+`app/shots/fin-small.png`, taken before the fix).
+
+`theme::strip_slider(ui, value, range, width)` is now the only slider the bars
+use: it lowers `interact_size.y` to 12 for the widget's scope and switches the
+handle to `HandleShape::Circle`, so the knob is 14 px on an 18 px row and the
+track stays inside the strip. It replaced four `ui.add_sized(...)` sliders:
+the picture strip (`views::Pane::picture_options_bar`), the gallery size bar
+(`gallery::Viewer::gallery_bar`), the status bar's zoom slider and its
+thumbnail-size twin in the picture wall (`App::status_bar`).
+
+Measured after the change (`app/shots/slider-big.png`, `slider-small.png`):
+slider 18 px tall inside a 22 px strip, knob 14.2 px, nothing drawn outside the
+row. The zoom slider's own geometry is Dolphin's: `ShowZoomSlider` in
+`GeneralSettings` (`FUN_001ec540` @0x1ec540) is what shows or hides it, read
+from the status bar's context menu.
+
+`--selftest` gained *"a slider in a one-row strip stays inside the row"*: it
+draws the slider in a 22 px row and fails if the slider keeps the 24 px
+interacting height or reaches past the row's top or bottom. 90 checks pass.
+
+### The theme question, settled from the desktop itself
+
+The open question was whether the rebuild should follow the dark Breeze theme of
+the live capture or the light theme of the shipped handbook screenshots. The
+person's own `~/.config/kdeglobals` answers it: `[Colors:Window]`
+`BackgroundNormal=32,35,38`, `ForegroundNormal=252,252,252`,
+`DecorationFocus=61,174,233`, `[Icons] Theme=breeze-dark`. The rebuild's palette
+sits on those values (`theme::VIEW_BG` 35,38,41, `theme::PANEL_BG` 43,47,51,
+`theme::ACCENT` 61,174,233 exactly), so the dark theme is the right one and the
+light handbook captures are simply older marketing shots.

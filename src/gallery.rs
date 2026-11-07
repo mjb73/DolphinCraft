@@ -516,12 +516,7 @@ impl Pane {
                     .color(TEXT_DIM),
             );
             let mut px = self.thumb_px;
-            let slider = ui.add_sized(
-                Vec2::new(132.0, 16.0),
-                egui::Slider::new(&mut px, THUMB_MIN..=THUMB_MAX)
-                    .show_value(false)
-                    .step_by(1.0),
-            )
+            let slider = theme::strip_slider(ui, &mut px, THUMB_MIN..=THUMB_MAX, 132.0)
             .on_hover_text(
                 "Height of each row of thumbnails — every picture keeps its own \
                  shape and the rows fill the window, so no empty band sits \

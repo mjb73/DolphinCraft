@@ -598,7 +598,7 @@ pub fn run() -> i32 {
                 let rows = crate::views::pack_icon_rows(&widths, 1000.0, crate::views::ICON_CELL_GAP);
                 rows[0].1 - rows[0].0
             };
-            // updateGridSize @0x26db80, with the 13 px label font at roughly
+            // updateGridSize @0x26d940, with the 13 px label font at roughly
             // seven pixels a character.
             let cell32 = crate::theme::icon_grid_cell_width(2, 32.0, 7.0);
             let cell64 = crate::theme::icon_grid_cell_width(4, 64.0, 7.0);
@@ -1064,7 +1064,8 @@ pub fn run() -> i32 {
             let mut pane = crate::state::Pane::new(2, base.join("listing"));
             pane.view = crate::state::ViewMode::Icons;
             // The original stops at level 16 (256 px) — DolphinItemListView::
-            // setZoomLevel @0x26e100 clamps the level to 0..=16. The rebuild
+            // setZoomLevel @0x26dec0 clamps the level to 0..=16 (the bound is
+            // the 16 at 0x2c31c0). The rebuild
             // continues the same `level << 4` ladder to level 25 (400 px), so
             // forty steps up land there and stay there.
             for _ in 0..40 {
@@ -1088,6 +1089,193 @@ pub fn run() -> i32 {
                 ));
             }
             Ok("top is 16 / 256 px, bottom is 0 / 16 px".into())
+        })(),
+    );
+
+    // ---- the original keeps two sizes, one for each previews state ------
+    r.check(
+        "previews on and off each keep their own size",
+        (|| {
+            // `DolphinItemListView::setZoomLevel` @0x26dec0 writes the new size
+            // into `PreviewSize` while previews are shown and into `IconSize`
+            // while they are not (`this+0x200` / `this+0x204`), so the two are
+            // remembered separately and toggling previews switches between
+            // them. Factory values: PreviewSize 64 px, IconSize 32 px.
+            let mut pane = crate::state::Pane::new(3, base.join("listing"));
+            pane.view = crate::state::ViewMode::Icons;
+            pane.previews = true;
+            if (pane.zoom_level(), pane.icon_size()) != (4, 64.0) {
+                return Err(format!(
+                    "a fresh icon view with previews is level {} at {} px",
+                    pane.zoom_level(),
+                    pane.icon_size()
+                ));
+            }
+            pane.zoom_by(1);
+            if (pane.zoom_level(), pane.icon_size()) != (5, 80.0) {
+                return Err(format!(
+                    "one step up with previews gave level {} at {} px",
+                    pane.zoom_level(),
+                    pane.icon_size()
+                ));
+            }
+            pane.previews = false;
+            if (pane.zoom_level(), pane.icon_size()) != (2, 32.0) {
+                return Err(format!(
+                    "previews off should fall back to the icon size, not level {} at {} px",
+                    pane.zoom_level(),
+                    pane.icon_size()
+                ));
+            }
+            pane.zoom_by(-2);
+            if (pane.zoom_level(), pane.icon_size()) != (0, 16.0) {
+                return Err(format!(
+                    "zooming the plain icons gave level {} at {} px",
+                    pane.zoom_level(),
+                    pane.icon_size()
+                ));
+            }
+            pane.previews = true;
+            if (pane.zoom_level(), pane.icon_size()) != (5, 80.0) {
+                return Err(format!(
+                    "previews back on should be level 5 / 80 px, not level {} at {} px",
+                    pane.zoom_level(),
+                    pane.icon_size()
+                ));
+            }
+            if pane.zoom_plain[0] != 0 {
+                return Err(format!("the plain ladder moved to {}", pane.zoom_plain[0]));
+            }
+            Ok("64 px on, 80 px after a step, 32 px off, 16 px after two steps, 80 px back on".into())
+        })(),
+    );
+
+    r.check(
+        "the details rows sit in the original's 20 px side padding",
+        (|| {
+            // `DetailsModeSettings::DetailsModeSettings` @0x2b0f10 registers
+            // `LeftPadding` and `RightPadding` with 0x14 = 20 px, and the view's
+            // header and rows are inset by that much on each side.
+            use crate::state::{Pane, ViewMode};
+            let pane = Pane::new(4, base.join("listing"));
+            let rect = egui::Rect::from_min_size(
+                egui::Pos2::new(100.0, 50.0),
+                egui::Vec2::new(700.0, 26.0),
+            );
+            let (name, _size, date) = pane.details_columns(rect);
+            if pane.view != ViewMode::Icons {
+                return Err("the pane did not start in the icons view".into());
+            }
+            if (name.left() - rect.left() - crate::theme::DETAILS_SIDE_PAD).abs() > 0.01 {
+                return Err(format!(
+                    "the name column starts {:.1} px in, not 20",
+                    name.left() - rect.left()
+                ));
+            }
+            if (rect.right() - date.right() - crate::theme::DETAILS_SIDE_PAD).abs() > 0.01 {
+                return Err(format!(
+                    "the date column ends {:.1} px short of the edge, not 20",
+                    rect.right() - date.right()
+                ));
+            }
+            if (crate::theme::DETAILS_SIDE_PAD - 20.0).abs() > 0.01 {
+                return Err("the measured padding is no longer 20 px".into());
+            }
+            Ok("name starts 20 px in, date ends 20 px short".into())
+        })(),
+    );
+
+    // The picture strip above the icon grid is 22 px tall and the status bar is
+    // 28 px, yet egui sizes a slider's knob from the row's interacting height
+    // (`Spacing::interact_size.y`, 24 px here), so a plain slider dropped into a
+    // strip drew a knob taller than the strip. `theme::strip_slider` is the one
+    // slider the bars use; this check draws it inside a 22 px row and refuses to
+    // pass if the slider (and so its knob, `height / 2.5` wide) reaches past the
+    // row or keeps the full 24 px height.
+    r.check(
+        "a slider in a one-row strip stays inside the row",
+        (|| {
+            use egui::{Context, Rect};
+            let ctx = Context::default();
+            crate::theme::install(&ctx);
+            let mut seen: Option<(Rect, Rect)> = None;
+            for frame in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 200.0),
+                    )),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let row = egui::Vec2::new(400.0, 22.0);
+                        ui.allocate_ui_with_layout(
+                            row,
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let mut v = 3.0f32;
+                                let resp = crate::theme::strip_slider(ui, &mut v, 0.0..=16.0, 150.0);
+                                seen = Some((resp.rect, ui.min_rect()));
+                            },
+                        );
+                    });
+                });
+            }
+            let (slider, row) = seen.ok_or("the strip was never drawn")?;
+            if slider.height() >= 24.0 {
+                return Err(format!(
+                    "the slider kept its {:.0} px row height, so its knob is {:.1} px tall",
+                    slider.height(),
+                    slider.height() / 2.5 * 2.0
+                ));
+            }
+            if slider.top() < row.top() - 0.01 || slider.bottom() > row.bottom() + 0.01 {
+                return Err(format!(
+                    "the slider runs {:.1}..{:.1} px inside a {:.1}..{:.1} px row",
+                    slider.top(),
+                    slider.bottom(),
+                    row.top(),
+                    row.bottom()
+                ));
+            }
+            Ok(format!(
+                "slider {:.0} px tall in a {:.0} px row, knob {:.1} px",
+                slider.height(),
+                row.height(),
+                slider.height() / 2.5 * 2.0
+            ))
+        })(),
+    );
+
+    r.check(
+        "a fresh window opens at the factory size of each view",
+        (|| {
+            // Measured out of the three settings constructors in 26.08.3:
+            // DetailsModeSettings @0x2b0f10 IconSize 16 / PreviewSize 48,
+            // IconsModeSettings 0x2b1ac0 32 / 64, CompactModeSettings 0x2af670
+            // 16 / 48. `updateDefaultZoomLevel` @0x27dd60 turns the size in
+            // force into a level, so the starts are (4, 3, 3) with previews and
+            // (2, 0, 0) without.
+            if crate::theme::default_zoom(true) != [4, 3, 3] {
+                return Err(format!(
+                    "previews on starts at {:?}",
+                    crate::theme::default_zoom(true)
+                ));
+            }
+            if crate::theme::default_zoom(false) != [2, 0, 0] {
+                return Err(format!(
+                    "previews off starts at {:?}",
+                    crate::theme::default_zoom(false)
+                ));
+            }
+            if crate::theme::DEFAULT_ICON_SIZE != [32, 16, 16]
+                || crate::theme::DEFAULT_PREVIEW_SIZE != [64, 48, 48]
+            {
+                return Err("the factory sizes are not the measured ones".into());
+            }
+            Ok("icons 64/32, compact 48/16, details 48/16 px → levels 4,3,3 and 2,0,0".into())
         })(),
     );
 

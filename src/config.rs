@@ -69,6 +69,12 @@ pub struct Config {
     pub view: usize,
     #[serde(default = "default_zoom")]
     pub zoom: [u8; 3],
+    /// The previews-off ladder (`IconSize`): levels 2, 0, 0, from the measured
+    /// factory sizes 32, 16, 16 px. Written whenever the person zooms with
+    /// previews off, so the two sizes behave like the original's `IconSize`
+    /// and `PreviewSize` rather than one shared number.
+    #[serde(default = "default_zoom_plain")]
+    pub zoom_plain: [u8; 3],
     #[serde(default = "yes")]
     pub folders_first: bool,
     /// Which name comparison the Sort menu uses, as the index of the three rows
@@ -241,12 +247,17 @@ fn details() -> usize {
 
 fn default_zoom() -> [u8; 3] {
     // A config file that predates the `zoom` key must land on the same default
-    // as a fresh profile: `DolphinView::updateDefaultZoomLevel` @0x27df20 asks
+    // as a fresh profile: `DolphinView::updateDefaultZoomLevel` @0x27dd60 asks
     // each mode's settings object for `PreviewSize` while previews are shown
     // (Icons 64, Compact 48, Details 48) and for `IconSize` when they are off
     // (Icons 32, Compact 16, Details 16), then turns that size into a zoom level
-    // with `ZoomLevelInfo::zoomLevelForIconSize` @0x2a6560 → levels 4, 3, 3.
+    // with `ZoomLevelInfo::zoomLevelForIconSize` @0x2a63a0 → levels 4, 3, 3
+    // with previews and 2, 0, 0 without.
     crate::theme::default_zoom(true)
+}
+
+fn default_zoom_plain() -> [u8; 3] {
+    crate::theme::default_zoom(false)
 }
 
 impl Default for Config {
@@ -262,10 +273,11 @@ impl Default for Config {
             previews: true,
             // The original opens a fresh window in the icons view, at the zoom
             // whose size matches the mode's PreviewSize (DolphinView::
-            // updateDefaultZoomLevel @0x27df20). Measured on a fresh profile:
+            // updateDefaultZoomLevel @0x27dd60). Measured on a fresh profile:
             // icons view, 64 px tiles.
             view: 0,
             zoom: crate::theme::default_zoom(true),
+            zoom_plain: crate::theme::default_zoom(false),
             folders_first: true,
             name_sort: 0,
             sort_key: 0,

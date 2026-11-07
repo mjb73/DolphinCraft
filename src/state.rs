@@ -18,7 +18,7 @@ pub const TRASH_URI: &str = "trash:/";
 /// the rest for the next event. 120 units is one wheel notch in Qt (an eighth
 /// of a degree per unit), so one notch is one zoom step. The step itself is
 /// `setZoomLevel(level ± 1)` (`slotIncreaseZoom` @0x284b00), clamped to 0..=16
-/// by `DolphinItemListView::setZoomLevel` @0x26e100.
+/// by `DolphinItemListView::setZoomLevel` @0x26dec0.
 pub const WHEEL_UNITS_PER_STEP: f32 = 120.0;
 
 /// Add one frame's worth of Ctrl+wheel delta (in Qt's 1/8-degree units) to the
@@ -412,7 +412,18 @@ pub struct Pane {
     /// saves only the folder's own sort role and order in its view properties.
     pub preferred_desc: [Option<bool>; 4],
     pub view: ViewMode,
+    /// The previews-on ladder. The original keeps **two** sizes per view mode,
+    /// `IconSize` and `PreviewSize`, and `DolphinItemListView::setZoomLevel`
+    /// @0x26dec0 writes the new size into whichever is in force: `PreviewSize`
+    /// while previews are shown, `IconSize` while they are not. `zoom` is the
+    /// previews-on ladder (`PreviewSize`), `zoom_plain` the previews-off one
+    /// (`IconSize`), both indexed by view mode in Icons, Compact, Details order.
     pub zoom: [u8; 3],
+    /// The previews-off ladder (`IconSize`): factory levels 2, 0, 0 from the
+    /// measured factory sizes 32, 16, 16 px. Toggling `previews` switches which
+    /// ladder the view draws from, so the size you zoomed the pictures to is
+    /// waiting when you switch them back on.
+    pub zoom_plain: [u8; 3],
     /// Added feature: the picture gallery presentation, adopted from the
     /// person's image browser. It replaces the icon/detail/column layout for
     /// this folder without touching the view mode underneath, so switching it
@@ -483,6 +494,7 @@ impl Pane {
             preferred_desc: [None; 4],
             view: ViewMode::Icons,
             zoom: theme::default_zoom(true),
+            zoom_plain: theme::default_zoom(false),
             pictures: false,
             thumb_px: crate::gallery::THUMB_DEFAULT,
             gallery_names: true,
@@ -901,15 +913,40 @@ impl Pane {
     }
 
     pub fn icon_size(&self) -> f32 {
-        theme::icon_size_for_zoom(self.zoom[self.view.index()])
+        theme::icon_size_for_zoom(self.zoom_level())
+    }
+
+    /// The zoom level currently in force. The original derives it every time
+    /// from the size that is in force — `DolphinView::updateDefaultZoomLevel`
+    /// @0x27dd60 and `DolphinItemListView::updateGridSize` @0x26d940 both read
+    /// `PreviewSize` while previews are shown and `IconSize` while they are off
+    /// — so switching previews switches the size the view draws at.
+    pub fn zoom_level(&self) -> u8 {
+        let i = self.view.index();
+        if self.previews {
+            self.zoom[i]
+        } else {
+            self.zoom_plain[i]
+        }
+    }
+
+    /// Set the ladder that is in force, the way `setZoomLevel` @0x26dec0 does:
+    /// clamps to the ladder, then writes the one size the mode is using.
+    pub fn set_zoom_level(&mut self, level: u8) {
+        let i = self.view.index();
+        let level = level.min(theme::MAX_ZOOM);
+        if self.previews {
+            self.zoom[i] = level;
+        } else {
+            self.zoom_plain[i] = level;
+        }
     }
 
     pub fn zoom_by(&mut self, delta: i32) {
-        let i = self.view.index();
-        let z = self.zoom[i] as i32 + delta;
+        let z = self.zoom_level() as i32 + delta;
         // Extended past the original's 16-level ceiling so the icons view can
         // reach 400 px thumbnails (`theme::MAX_ZOOM`).
-        self.zoom[i] = z.clamp(0, theme::MAX_ZOOM as i32) as u8;
+        self.set_zoom_level(z.clamp(0, theme::MAX_ZOOM as i32) as u8);
     }
 
     pub fn start_search(&mut self) {

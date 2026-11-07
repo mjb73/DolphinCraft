@@ -28,7 +28,7 @@ pub const PAPER: Color32 = Color32::from_rgb(226, 230, 233);
 pub const PAPER_SHADE: Color32 = Color32::from_rgb(188, 194, 199);
 pub const PLACE: Color32 = Color32::from_rgb(150, 178, 198);
 
-/// The original's ceiling: `ZoomLevelInfo::maximumLevel()` @0x2a6530 returns 16,
+/// The original's ceiling: `ZoomLevelInfo::maximumLevel()` @0x2a6370 returns 16,
 /// and level 16 is 256 px. Everything up to here is measured, not chosen.
 pub const ORIGINAL_MAX_ZOOM: u8 = 16;
 /// Added feature: the ladder continues the original's own `level << 4` formula
@@ -38,6 +38,33 @@ pub const MAX_ZOOM: u8 = 25;
 /// Largest thumbnail edge the rebuilt views draw (see `MAX_ZOOM`).
 pub const MAX_ICON_PX: f32 = 400.0;
 
+/// A slider that fits inside a one-row strip (the picture strip above the icon
+/// grid, the gallery's size bar, the status bar).
+///
+/// egui takes a slider's knob radius from the rect's height, and that height is
+/// the row's interacting height — `interact_size.y`, 24 px here — so a slider
+/// dropped into a 22 px strip drew a knob taller than the strip itself, poking
+/// out above and below the 4 px track. Inside a strip the knob is a small dot
+/// and the row keeps the track's own height instead.
+pub fn strip_slider(
+    ui: &mut egui::Ui,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    width: f32,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 12.0;
+        ui.style_mut().visuals.handle_shape = egui::style::HandleShape::Circle;
+        ui.spacing_mut().slider_width = width;
+        ui.add(
+            egui::Slider::new(value, range)
+                .show_value(false)
+                .step_by(1.0),
+        )
+    })
+    .inner
+}
+
 /// Icon sizes for zoom levels 0..=25. Levels 0..=16 are measured from
 /// ZoomLevelInfo; levels 17..=25 are the added continuation.
 pub const ZOOM_SIZES: [u16; 26] = [
@@ -45,17 +72,17 @@ pub const ZOOM_SIZES: [u16; 26] = [
     320, 336, 352, 368, 384, 400,
 ];
 
-/// `ZoomLevelInfo::iconSizeForZoomLevel` @0x2a6540 in libdolphinprivate:
-/// levels 0..4 are a lookup table (0x2cd980 = 16, 22, 32, 48, 64) and level 5
-/// and up are `level << 4` — a formula that keeps working past the original's
+/// `ZoomLevelInfo::iconSizeForZoomLevel` @0x2a6380 in libdolphinprivate.so.26.08.3:
+/// `size = level << 4`, and for levels 0..4 the table at 0x2cd960 (16, 22, 32,
+/// 48, 64) overrides it — a formula that keeps working past the original's
 /// own 16-level ceiling.
 pub fn icon_size_for_zoom(zoom: u8) -> f32 {
     ZOOM_SIZES[(zoom as usize).min(MAX_ZOOM as usize)] as f32
 }
 
-/// `ZoomLevelInfo::zoomLevelForIconSize` @0x2a6560: 16→0, 22→1, 32→2, 48→3,
+/// `ZoomLevelInfo::zoomLevelForIconSize` @0x2a63a0: 16→0, 22→1, 32→2, 48→3,
 /// 64→4, otherwise `4 + (size - 64) / 16`. The original clamps to its
-/// 0..16 range (`minimumLevel` 0x2a6520 / `maximumLevel` 0x2a6530); the rebuild
+/// 0..16 range (`minimumLevel` 0x2a6360 / `maximumLevel` 0x2a6370); the rebuild
 /// clamps to the extended 0..=25 range so 400 px is reachable.
 pub fn zoom_for_icon_size(size: f32) -> u8 {
     let px = size.round() as i32;
@@ -71,15 +98,15 @@ pub fn zoom_for_icon_size(size: f32) -> u8 {
 }
 
 /// Factory icon size per view mode, read out of the settings constructors:
-/// `IconsModeSettings` 0x2b1c80 → IconSize 32, `CompactModeSettings` 0x2af830
-/// → 16, `DetailsModeSettings` 0x2b10d0 → 16. Order is Icons, Compact, Details.
+/// `IconsModeSettings` 0x2b1ac0 → IconSize 32, `CompactModeSettings` 0x2af670
+/// → 16, `DetailsModeSettings` 0x2b0f10 → 16. Order is Icons, Compact, Details.
 pub const DEFAULT_ICON_SIZE: [u16; 3] = [32, 16, 16];
 
 /// Factory preview size per mode from the same constructors: Icons 64,
 /// Compact 48, Details 48.
 pub const DEFAULT_PREVIEW_SIZE: [u16; 3] = [64, 48, 48];
 
-/// `DolphinView::updateDefaultZoomLevel` @0x27df20: the starting zoom is the
+/// `DolphinView::updateDefaultZoomLevel` @0x27dd60: the starting zoom is the
 /// level whose icon size matches this mode's `PreviewSize` when previews are
 /// on, and its `IconSize` when they are off.
 pub fn default_zoom(previews: bool) -> [u8; 3] {
@@ -95,11 +122,12 @@ pub fn default_zoom(previews: bool) -> [u8; 3] {
     out
 }
 
-/// `IconsModeSettings::TextWidthIndex` factory value (ctor 0x2b1c80).
+/// `IconsModeSettings::TextWidthIndex` factory value (ctor 0x2b1ac0: the
+/// `ItemInt` default is 1).
 pub const TEXT_WIDTH_INDEX: f32 = 1.0;
 
 /// Width of one cell in the icons view, straight out of
-/// `DolphinItemListView::updateGridSize` @0x26db80:
+/// `DolphinItemListView::updateGridSize` @0x26d940:
 ///
 ///     d = exp(zoom / 13)
 ///     width = d * TextWidthIndex * 64 * (averageCharWidth / 9) + 48
@@ -123,6 +151,14 @@ pub fn icon_grid_cell_width(zoom: u8, icon: f32, average_char_width: f32) -> f32
 pub const ORIGINAL_ICON_PITCH_160: f32 = 197.0;
 pub const ORIGINAL_ICON_COLUMNS_160: usize = 3;
 pub const ORIGINAL_ICON_VIEW_WIDTH: f32 = 592.0;
+
+/// The details view's side padding: `DetailsModeSettings::DetailsModeSettings`
+/// @0x2b0f10 registers `LeftPadding` and `RightPadding` with the factory value
+/// 0x14 = **20 px** each (`ItemUInt::ItemUInt(..., 0x14)` at +0x50 and +0x54),
+/// and `KItemListView::setSidePadding(left, right)` is what consumes them — it
+/// insets the header and every row from the two edges of the view. The rebuild
+/// draws its details columns inside the same 20 px.
+pub const DETAILS_SIDE_PAD: f32 = 20.0;
 
 /// Width of one cell in the compact view, from the same function:
 /// `iconSize + 8 + 5 * fontHeight`.

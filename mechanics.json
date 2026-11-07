@@ -6,86 +6,86 @@
    "group": "view",
    "value": 0,
    "unit": "level",
-   "source": "ZoomLevelInfo::minimumLevel @0x1a6520"
+   "source": "ZoomLevelInfo::minimumLevel @0x2a6360"
   },
   {
    "name": "zoom level maximum",
    "group": "view",
    "value": 16,
    "unit": "level",
-   "source": "ZoomLevelInfo::maximumLevel @0x1a6530"
+   "source": "ZoomLevelInfo::maximumLevel @0x2a6370"
   },
   {
    "name": "icon size at zoom 0",
    "group": "view",
    "value": 16,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
   },
   {
    "name": "icon size at zoom 1",
    "group": "view",
    "value": 22,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
   },
   {
    "name": "icon size at zoom 2",
    "group": "view",
    "value": 32,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
   },
   {
    "name": "icon size at zoom 3",
    "group": "view",
    "value": 48,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
   },
   {
    "name": "icon size at zoom 4",
    "group": "view",
    "value": 64,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
   },
   {
    "name": "icon size above zoom 4",
    "group": "view",
    "value": "level * 16",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
   },
   {
    "name": "icon size at zoom 16",
    "group": "view",
    "value": 256,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
   },
   {
    "name": "zoom level from 48 px",
    "group": "view",
    "value": 3,
-   "source": "ZoomLevelInfo::zoomLevelForIconSize @0x1a6560"
+   "source": "ZoomLevelInfo::zoomLevelForIconSize @0x2a63a0"
   },
   {
    "name": "default zoom, details view",
    "group": "view",
    "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
+   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
   },
   {
    "name": "default zoom, icons view",
    "group": "view",
    "value": 4,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 64 -> zoomLevelForIconSize @0x2a6560"
+   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 64 -> zoomLevelForIconSize @0x2a63a0"
   },
   {
    "name": "default zoom, compact view",
    "group": "view",
    "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
+   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
   },
   {
    "name": "details columns",
@@ -124,13 +124,13 @@
    "name": "status bar counts",
    "group": "view",
    "value": "0 folders, 0 files / N folders (no size) / N files (size) / N folders, M files (size)",
-   "source": "DolphinView::emitStatusBarText @0x273180; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
+   "source": "DolphinView::emitStatusBarText @0x272f40; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
   },
   {
    "name": "status bar selection",
    "group": "view",
    "value": "N folder(s) selected, M file(s) selected (size); folders alone carry no size",
-   "source": "DolphinView::emitStatusBarText @0x273180, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
+   "source": "DolphinView::emitStatusBarText @0x272f40, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
   },
   {
    "name": "status bar free space",
@@ -406,7 +406,7 @@
    "name": "thumbnail size follows the zoom level",
    "group": "previews",
    "value": true,
-   "source": "DolphinItemListView::setZoomLevel @0x16e100 (clamp 0..16, iconSizeForZoomLevel @0x1a6540, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x16db80"
+   "source": "DolphinItemListView::setZoomLevel @0x26dec0 (clamp 0..16, iconSizeForZoomLevel @0x2a6380, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x26d940"
   },
   {
    "name": "thumbnail fit in the icon box",
@@ -436,7 +436,7 @@
    "name": "preview size remembered per view mode",
    "group": "previews",
    "value": true,
-   "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x16db80 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
+   "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x26d940 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
   },
   {
    "name": "picture previews for other file types",
@@ -605,48 +605,48 @@
    "group": "view",
    "value": 32,
    "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, IconSize default"
+   "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, IconSize default"
   },
   {
    "name": "factory icon size, compact view",
    "group": "view",
    "value": 16,
    "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af830, IconSize default"
+   "source": "CompactModeSettings::CompactModeSettings @0x2af670, IconSize default"
   },
   {
    "name": "factory icon size, details view",
    "group": "view",
    "value": 16,
    "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, IconSize default at +0x2c"
+   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, IconSize default at +0x2c"
   },
   {
    "name": "factory preview size, icons view",
    "group": "previews",
    "value": 64,
    "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, PreviewSize default"
+   "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, PreviewSize default"
   },
   {
    "name": "factory preview size, compact view",
    "group": "previews",
    "value": 48,
    "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af830, PreviewSize default"
+   "source": "CompactModeSettings::CompactModeSettings @0x2af670, PreviewSize default"
   },
   {
    "name": "factory preview size, details view",
    "group": "previews",
    "value": 48,
    "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, PreviewSize default at +0x30"
+   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, PreviewSize default at +0x30"
   },
   {
    "name": "default zoom with previews off",
    "group": "view",
    "value": "2, 0, 0",
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: IconSize 32/16/16 -> zoom 2/0/0"
+   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: IconSize 32/16/16 -> zoom 2/0/0"
   },
   {
    "name": "information panel label, several items selected",
@@ -658,7 +658,7 @@
    "name": "details row padding",
    "group": "view",
    "value": "20 px left and right",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, LeftPadding/RightPadding"
+   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, LeftPadding/RightPadding"
   },
   {
    "name": "wheel zoom modifier",
@@ -703,7 +703,7 @@
    "group": "view",
    "value": "0 to 16",
    "unit": "zoom level",
-   "source": "DolphinItemListView::setZoomLevel @0x26e100 clamps to the pair of bounds at 0x1c3350"
+   "source": "DolphinItemListView::setZoomLevel @0x26dec0 clamps to the pair of bounds at 0x2c31c0"
   },
   {
    "name": "status bar zoom buttons",
@@ -902,7 +902,7 @@
    "name": "icons view maximum width steps",
    "group": "icons view",
    "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
-   "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1c80 TextWidthIndex default 1"
+   "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1ac0 TextWidthIndex default 1"
   },
   {
    "name": "details view click-to-open rows",
@@ -1031,7 +1031,7 @@
    "group": "picture wall",
    "value": 256,
    "unit": "px",
-   "source": "decompiled original: ZoomLevelInfo::maximumLevel() @0x1a6530 returns 16, ZoomLevelInfo::iconSizeForZoomLevel(int) @0x1a6540 returns level*16 above 4, so 16..256 px; the 400 px ceiling is the browser's, not the original's"
+   "source": "decompiled original: ZoomLevelInfo::maximumLevel() @0x2a6370 returns 16, ZoomLevelInfo::iconSizeForZoomLevel(int) @0x2a6380 returns level*16 above 4, so 16..256 px; the 400 px ceiling is the browser's, not the original's"
   },
   {
    "name": "slideshow interval at first",
@@ -1115,21 +1115,21 @@
    "group": "icons view",
    "value": 25,
    "unit": "level",
-   "source": "continuation of ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540 (level*16) past ZoomLevelInfo::maximumLevel @0x1a6530, which returns 16"
+   "source": "continuation of ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 (level*16) past ZoomLevelInfo::maximumLevel @0x2a6370, which returns 16"
   },
   {
    "name": "icon size at zoom 25 (added)",
    "group": "icons view",
    "value": 400,
    "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540 formula at level 25"
+   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 formula at level 25"
   },
   {
    "name": "largest thumbnail in the file views (added)",
    "group": "icons view",
    "value": 400,
    "unit": "px",
-   "source": "theme::MAX_ICON_PX; the original clamps DolphinItemListView::setZoomLevel @0x26e100 to 0..=16 (256 px)"
+   "source": "theme::MAX_ICON_PX; the original clamps DolphinItemListView::setZoomLevel @0x26dec0 to 0..=16 (256 px)"
   },
   {
    "name": "picture corner radius in the file views",
@@ -1719,6 +1719,27 @@
    "group": "network",
    "value": "the share for an SMB mount, else the last part of the mount point",
    "source": "this build; e.g. //router/media shows as media"
+  },
+  {
+   "name": "details view side padding (rebuild)",
+   "group": "details",
+   "value": 20,
+   "unit": "px",
+   "source": "app/src/theme.rs DETAILS_SIDE_PAD = 20.0, used by views::Pane::details_columns; original: DetailsModeSettings::DetailsModeSettings @0x2b0f10 sets LeftPadding/RightPadding to 0x14, read by KItemListView::setSidePadding"
+  },
+  {
+   "name": "slider in a one-row strip",
+   "group": "status bar",
+   "value": 18,
+   "unit": "px",
+   "source": "app/src/theme.rs strip_slider: interact_size.y 12 and HandleShape::Circle, so the knob is height/2.5 = 14.2 px; used by the picture strip, the gallery bar and the status bar"
+  },
+  {
+   "name": "slider knob size",
+   "group": "status bar",
+   "value": 14.2,
+   "unit": "px",
+   "source": "egui 0.33 Slider::handle_radius = rect.height() / 2.5, with the 18 px row strip_slider gives it"
   }
  ]
 }

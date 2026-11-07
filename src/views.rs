@@ -167,9 +167,9 @@ impl Pane {
         if steps == 0 {
             return false;
         }
-        let before = self.zoom[self.view.index()];
+        let before = self.zoom_level();
         self.zoom_by(steps);
-        self.zoom[self.view.index()] != before
+        self.zoom_level() != before
     }
 
     // -----------------------------------------------------------------------
@@ -496,6 +496,13 @@ impl Pane {
     // Details view
     // -----------------------------------------------------------------------
 
+    /// The three column rectangles of the details view for a row (or the header
+    /// row), inset by the original's 20 px side padding — see
+    /// `theme::DETAILS_SIDE_PAD` and `DetailsModeSettings` @0x2b0f10.
+    pub fn details_columns(&self, rect: Rect) -> (Rect, Rect, Rect) {
+        self.column_rects(rect.shrink2(Vec2::new(theme::DETAILS_SIDE_PAD, 0.0)))
+    }
+
     fn column_rects(&self, rect: Rect) -> (Rect, Rect, Rect) {
         let w = rect.width();
         let date_w = (w * 0.28).clamp(64.0, 150.0);
@@ -521,7 +528,7 @@ impl Pane {
         let header_h = 25.0;
         let (hrect, _) = ui.allocate_exact_size(Vec2::new(width, header_h), Sense::hover());
         ui.painter().rect_filled(hrect, 0.0, HEADER_BG);
-        let (name_c, size_c, date_c) = self.column_rects(hrect.shrink2(Vec2::new(8.0, 0.0)));
+        let (name_c, size_c, date_c) = self.details_columns(hrect);
         let labels = [
             (SortKey::Name, "Name", name_c, Align2::LEFT_CENTER),
             (SortKey::Size, "Size", size_c, Align2::RIGHT_CENTER),
@@ -649,7 +656,7 @@ impl Pane {
             Stroke::new(1.0, SEPARATOR.gamma_multiply(0.55)),
         );
 
-        let (name_c, size_c, date_c) = self.column_rects(rect.shrink2(Vec2::new(8.0, 0.0)));
+        let (name_c, size_c, date_c) = self.details_columns(rect);
         // The icon follows the zoom level, as it does in the original's details
         // view: Ctrl+Plus makes the rows grow instead of only changing the label
         // in the status bar.
@@ -797,12 +804,12 @@ impl Pane {
             0.0
         };
         let cell_h = icon_cell_height(icon) + dims_extra;
-        // Cell width comes from `DolphinItemListView::updateGridSize` @0x26db80:
+        // Cell width comes from `DolphinItemListView::updateGridSize` @0x26d940:
         // every cell at a given zoom is the same width, sized for the label
         // (exp(zoom/13) * 64 * averageCharWidth/9 + 48, at least exp(zoom/13)*4
         // + the icon). The width of the label therefore decides how many
         // pictures share a row, exactly as in the original.
-        let zoom = self.zoom[self.view.index()];
+        let zoom = self.zoom_level();
         // `QFontMetrics::averageCharWidth` in the original; 'n' at the label
         // size is the same width to within a pixel for the fonts in use.
         let avg_char = ui
@@ -894,11 +901,11 @@ impl Pane {
                             .size(11.5)
                             .color(TEXT_DIM),
                     );
-                    let slider = ui.add_sized(
-                        Vec2::new(150.0, 16.0),
-                        egui::Slider::new(&mut zoom, 0.0..=theme::MAX_ZOOM as f32)
-                            .show_value(false)
-                            .step_by(1.0),
+                    let slider = theme::strip_slider(
+                        ui,
+                        &mut zoom,
+                        0.0..=theme::MAX_ZOOM as f32,
+                        150.0,
                     );
                     if slider.changed() {
                         zoom_changed = true;
@@ -1114,7 +1121,7 @@ impl Pane {
         let icon = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let row_h = (icon + 6.0).max(22.0);
         // Compact cell width from `DolphinItemListView::updateGridSize`
-        // @0x26db80: iconSize + 8 + 5 * fontHeight.
+        // @0x26d940: iconSize + 8 + 5 * fontHeight.
         let font_h = ui.text_style_height(&egui::TextStyle::Body);
         let cell_w = theme::compact_cell_width(icon, font_h);
         let avail = ui.available_width();

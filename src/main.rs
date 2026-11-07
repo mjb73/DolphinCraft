@@ -389,6 +389,7 @@ pub(crate) fn apply_defaults(pane: &mut Pane) {
     let d = Config::default();
     pane.view = ViewMode::from_index(d.view.min(2));
     pane.zoom = d.zoom;
+    pane.zoom_plain = d.zoom_plain;
     pane.show_hidden = d.show_hidden;
     pane.previews = d.previews;
     pane.folders_first = d.folders_first;
@@ -409,11 +410,12 @@ pub(crate) fn apply_defaults(pane: &mut Pane) {
 /// A pane set up from the saved settings, so a tab brought back by the session
 /// starts with the view, zoom and sort the window was left with. The original
 /// reads the same set out of each folder's view properties and the mode settings
-/// (`DolphinView::updateDefaultZoomLevel` @0x27df20, `ViewProperties` @0x29fdd0).
+/// (`DolphinView::updateDefaultZoomLevel` @0x27dd60, `ViewProperties` @0x29fdd0).
 pub fn pane_from_config(id: usize, path: std::path::PathBuf, cfg: &Config) -> Pane {
     let mut pane = Pane::new(id, path);
     pane.view = ViewMode::from_index(cfg.view.min(2));
     pane.zoom = cfg.zoom;
+    pane.zoom_plain = cfg.zoom_plain;
     pane.show_hidden = cfg.show_hidden;
     pane.previews = cfg.previews;
     pane.folders_first = cfg.folders_first;
@@ -498,8 +500,7 @@ impl App {
             pane.view = ViewMode::from_index(v.min(2));
         }
         if let Some(z) = start_zoom {
-            let slot = pane.view.index();
-            pane.zoom[slot] = z.min(theme::MAX_ZOOM);
+            pane.set_zoom_level(z);
         }
         // Added feature: the gallery's own last state, restored like the rest of
         // the window's furniture.
@@ -1870,8 +1871,7 @@ impl App {
                     }
                     ui.label(egui::RichText::new(text).size(11.5).color(TEXT_DIM));
 
-                    let view_idx = self.pane().view.index();
-                    let mut zoom_value = self.pane().zoom[view_idx] as f32;
+                    let mut zoom_value = self.pane().zoom_level() as f32;
                     let icon = self.pane().icon_size() as u32;
                     let mut zoom_changed = false;
                     // In the gallery the same − slider + strip changes the
@@ -1886,12 +1886,8 @@ impl App {
                                 self.config.thumb_px = self.pane().thumb_px;
                                 self.config_dirty = true;
                             }
-                            let slider = ui.add_sized(
-                                Vec2::new(110.0, 14.0),
-                                egui::Slider::new(&mut thumb_value, 50.0..=400.0)
-                                    .show_value(false)
-                                    .step_by(1.0),
-                            );
+                            let slider =
+                                theme::strip_slider(ui, &mut thumb_value, 50.0..=400.0, 110.0);
                             if slider.changed() {
                                 let px = gallery::clamp_thumb(thumb_value);
                                 self.pane_mut().thumb_px = px;
@@ -1942,16 +1938,15 @@ impl App {
                                 self.pane_mut().zoom_by(1);
                                 zoom_changed = true;
                             }
-                            let slider = ui.add_sized(
-                                Vec2::new(110.0, 14.0),
-                                egui::Slider::new(&mut zoom_value, 0.0..=theme::MAX_ZOOM as f32)
-                                    .show_value(false)
-                                    .step_by(1.0),
+                            let slider = theme::strip_slider(
+                                ui,
+                                &mut zoom_value,
+                                0.0..=theme::MAX_ZOOM as f32,
+                                110.0,
                             );
                             if slider.changed() {
                                 let z = zoom_value.round() as u8;
-                                let vi = self.pane().view.index();
-                                self.pane_mut().zoom[vi] = z;
+                                self.pane_mut().set_zoom_level(z);
                                 zoom_changed = true;
                             }
                             if small_button(ui, "−").on_hover_text("Zoom out").clicked() {
@@ -2021,6 +2016,7 @@ impl App {
                     });
                     if zoom_changed {
                         self.config.zoom = self.pane().zoom;
+                        self.config.zoom_plain = self.pane().zoom_plain;
                         self.config_dirty = true;
                     }
                 });
@@ -2532,6 +2528,7 @@ impl App {
                 Request::ZoomChanged => {
                     let zoom = self.pane().zoom;
                     self.config.zoom = zoom;
+                    self.config.zoom_plain = self.pane().zoom_plain;
                     self.config_dirty = true;
                 }
                 Request::OpenViewer(path, play) => {
@@ -3278,6 +3275,7 @@ impl App {
         cfg.previews = self.pane().previews;
         cfg.view = self.pane().view.index();
         cfg.zoom = self.pane().zoom;
+        cfg.zoom_plain = self.pane().zoom_plain;
         cfg.folders_first = self.pane().folders_first;
         cfg.name_sort = self.pane().name_sort.index();
         cfg.sort_key = self.pane().sort.index();
@@ -3373,14 +3371,18 @@ impl App {
             "__zoomin__" => {
                 self.pane_mut().zoom_by(1);
                 self.config.zoom = self.pane().zoom;
+                self.config.zoom_plain = self.pane().zoom_plain;
             }
             "__zoomout__" => {
                 self.pane_mut().zoom_by(-1);
                 self.config.zoom = self.pane().zoom;
+                self.config.zoom_plain = self.pane().zoom_plain;
             }
             "__zoomreset__" => {
                 self.pane_mut().zoom = [4, 0, 0];
+                self.pane_mut().zoom_plain = [2, 0, 0];
                 self.config.zoom = self.pane().zoom;
+                self.config.zoom_plain = self.pane().zoom_plain;
             }
             "__back__" => self.pane_mut().go_back(),
             "__forward__" => self.pane_mut().go_forward(),
