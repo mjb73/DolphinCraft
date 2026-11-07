@@ -31,6 +31,17 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
 - **Tabs** with a path bar you can click through, and an address field (Ctrl+L).
 - **Three view modes**: icons, details and columns, each with its own zoom
   level and sort order (0–16 zoom steps, 16–256 px icons).
+- **Picture wall**: a grid of picture cards from 50 to 400 px, with rounded
+  corners, an optional size line under each name (width × height, aspect ratio,
+  megapixels) and a switch to hide the file names. Enter it with the picture
+  button in the toolbar; folders sit in the same grid.
+- **Picture viewer and slideshow**: open a picture and page through the folder,
+  zoom, and read the generation prompt, negative prompt, steps, sampler, CFG
+  scale, seed, size, model and denoising strength straight out of the file
+  (PNG text chunk or JPEG comment). The slideshow fills the screen, moves on
+  every N seconds (a number you can change while it plays) and cross-fades over
+  300 ms; the fade can be switched off.
+- **Compare two pictures** side by side, split or overlaid, with synced zoom.
 - **Sorting** by name, size, type or date, with folders-first and reverse options.
 - **Split view** for two folders side by side, with the information panel
   showing size, type, date and a preview for the current selection.
@@ -73,6 +84,12 @@ Options:
 --dir <path>              start in a folder instead of the remembered one
 --view icons|compact|details   start in a given view
 --zoom <0-16>             start at a given zoom level
+--pictures               start in the picture wall
+--thumbs <50-400>        start the wall at a given thumbnail size
+--dims                   start the wall with the size line showing
+--viewer <picture>       open a picture in the viewing window
+--play                   start the viewer's slideshow
+--compare side|split|overlay   open the comparison beside the viewer
 --keep-settings           use the saved layout instead of factory settings
 --selftest                run the built-in checks and exit
 ```

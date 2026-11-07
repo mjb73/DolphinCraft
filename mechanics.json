@@ -1,953 +1,1093 @@
 {
- "version": 1,
- "values": [
-  {
-   "name": "zoom level minimum",
-   "group": "view",
-   "value": 0,
-   "unit": "level",
-   "source": "ZoomLevelInfo::minimumLevel @0x1a6520"
-  },
-  {
-   "name": "zoom level maximum",
-   "group": "view",
-   "value": 16,
-   "unit": "level",
-   "source": "ZoomLevelInfo::maximumLevel @0x1a6530"
-  },
-  {
-   "name": "icon size at zoom 0",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
-  },
-  {
-   "name": "icon size at zoom 1",
-   "group": "view",
-   "value": 22,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
-  },
-  {
-   "name": "icon size at zoom 2",
-   "group": "view",
-   "value": 32,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
-  },
-  {
-   "name": "icon size at zoom 3",
-   "group": "view",
-   "value": 48,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
-  },
-  {
-   "name": "icon size at zoom 4",
-   "group": "view",
-   "value": 64,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
-  },
-  {
-   "name": "icon size above zoom 4",
-   "group": "view",
-   "value": "level * 16",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
-  },
-  {
-   "name": "icon size at zoom 16",
-   "group": "view",
-   "value": 256,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
-  },
-  {
-   "name": "zoom level from 48 px",
-   "group": "view",
-   "value": 3,
-   "source": "ZoomLevelInfo::zoomLevelForIconSize @0x1a6560"
-  },
-  {
-   "name": "default zoom, details view",
-   "group": "view",
-   "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
-  },
-  {
-   "name": "default zoom, icons view",
-   "group": "view",
-   "value": 4,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 64 -> zoomLevelForIconSize @0x2a6560"
-  },
-  {
-   "name": "default zoom, compact view",
-   "group": "view",
-   "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
-  },
-  {
-   "name": "details columns",
-   "group": "view",
-   "value": "Name, Size, Modified",
-   "source": "live capture of dolphin 26.08.2 details view"
-  },
-  {
-   "name": "details row height",
-   "group": "view",
-   "value": 26,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "places panel width",
-   "group": "view",
-   "value": 208,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "information panel width",
-   "group": "view",
-   "value": 288,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "information panel rows",
-   "group": "view",
-   "value": "Type, Size, Modified, Accessed",
-   "source": "live capture of dolphin 26.08.2 information panel"
-  },
-  {
-   "name": "status bar counts",
-   "group": "view",
-   "value": "0 folders, 0 files / N folders (no size) / N files (size) / N folders, M files (size)",
-   "source": "DolphinView::emitStatusBarText @0x273180; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
-  },
-  {
-   "name": "status bar selection",
-   "group": "view",
-   "value": "N folder(s) selected, M file(s) selected (size); folders alone carry no size",
-   "source": "DolphinView::emitStatusBarText @0x273180, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
-  },
-  {
-   "name": "status bar free space",
-   "group": "view",
-   "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
-   "source": "FUN_001e6a40 @0x1e6a40 in /usr/bin/dolphin; strings 0x12ec43, 0x12ec68; KCapacityBar::setValue"
-  },
-  {
-   "name": "size unit style",
-   "group": "view",
-   "value": "IEC, one decimal (1718.4 KiB)",
-   "source": "live capture of dolphin 26.08.2 status bar"
-  },
-  {
-   "name": "default sort key",
-   "group": "sorting",
-   "value": "Name",
-   "estimated": true
-  },
-  {
-   "name": "default sort ascending",
-   "group": "sorting",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "default folders first",
-   "group": "sorting",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "default sorting mode",
-   "group": "sorting",
-   "value": "Natural",
-   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin, ItemEnum SortingChoice default 0 = NaturalSorting"
-  },
-  {
-   "name": "sort options",
-   "group": "sorting",
-   "value": "Name, Size, Type, Modified",
-   "source": "strings Sort by Field / sorting keys in libdolphinprivate.so.6"
-  },
-  {
-   "name": "double click opens",
-   "group": "controls",
-   "value": true,
-   "source": "string 'Double-click triggers' in /usr/bin/dolphin"
-  },
-  {
-   "name": "split view",
-   "group": "controls",
-   "value": "F3",
-   "source": "DolphinViewActionHandler split actions, 'Split view' string"
-  },
-  {
-   "name": "toggle information panel",
-   "group": "controls",
-   "value": "F11",
-   "source": "Dolphin action shortcut, information panel string"
-  },
-  {
-   "name": "toggle hidden files",
-   "group": "controls",
-   "value": "Ctrl+H",
-   "source": "Show Hidden Files action string"
-  },
-  {
-   "name": "editable location bar",
-   "group": "controls",
-   "value": "Ctrl+L",
-   "source": "Make location bar editable string"
-  },
-  {
-   "name": "move to trash",
-   "group": "controls",
-   "value": "Del",
-   "source": "Move to Trash action string"
-  },
-  {
-   "name": "permanent delete",
-   "group": "controls",
-   "value": "Shift+Del",
-   "source": "ShowDeleteCommand action string"
-  },
-  {
-   "name": "rename",
-   "group": "controls",
-   "value": "F2",
-   "source": "Rename action string"
-  },
-  {
-   "name": "new folder",
-   "group": "controls",
-   "value": "F10",
-   "source": "create_dir action string"
-  },
-  {
-   "name": "refresh",
-   "group": "controls",
-   "value": "F5",
-   "source": "view_redisplay action string"
-  },
-  {
-   "name": "trash location",
-   "group": "files",
-   "value": "~/.local/share/Trash/{files,info}",
-   "source": "freedesktop trash spec used by dolphin; strings 'Restore to Former Location', 'Empty Trash'"
-  },
-  {
-   "name": "trash record format",
-   "group": "files",
-   "value": "[Trash Info] Path= and DeletionDate=",
-   "source": "freedesktop trash spec used by dolphin"
-  },
-  {
-   "name": "confirm before delete",
-   "group": "files",
-   "value": "always ask",
-   "source": "Confirmations tab strings 'Deleting files or folders', 'Always ask'"
-  },
-  {
-   "name": "hidden file rule",
-   "group": "files",
-   "value": "name starts with a dot",
-   "estimated": true
-  },
-  {
-   "name": "quick look key",
-   "group": "added",
-   "value": "Space",
-   "estimated": true
-  },
-  {
-   "name": "duplicate detection",
-   "group": "added",
-   "value": "size, then SHA-256",
-   "estimated": true
-  },
-  {
-   "name": "bulk rename tokens",
-   "group": "added",
-   "value": "{name} {n} {ext} {date}",
-   "estimated": true
-  },
-  {
-   "name": "shortcut panel rows",
-   "group": "shortcuts",
-   "value": "Home, Desktop, Documents, Downloads, Music, Pictures, Videos, Trash, then pinned folders",
-   "source": "strings PlacesPanel, DolphinPlacesModel, add_to_places, Add to Places; live capture of dolphin 26.08.2"
-  },
-  {
-   "name": "shortcut keys in the panel",
-   "group": "shortcuts",
-   "value": "Alt+1 to Alt+9 on the first nine rows, dim badge at the right edge",
-   "estimated": true
-  },
-  {
-   "name": "shortcut editor key",
-   "group": "shortcuts",
-   "value": "Ctrl+Shift+S",
-   "estimated": true
-  },
-  {
-   "name": "shortcut duplicate rule",
-   "group": "shortcuts",
-   "value": "a standard folder cannot be pinned twice",
-   "source": "own rule; original uses Add to Places for bookmarks only"
-  },
-  {
-   "name": "shortcut persistence",
-   "group": "shortcuts",
-   "value": "config bookmarks array + shortcuts_expanded + shortcut_keys",
-   "estimated": true
-  },
-  {
-   "name": "shortcut hints in menus",
-   "group": "shortcuts",
-   "value": "name left, key right",
-   "source": "strings Shortcuts, KShortcutsDialog, KStandardShortcut (moveToTrash, createFolder, showHideHiddenFiles); menu hints in the original"
-  },
-  {
-   "name": "new window key",
-   "group": "controls",
-   "value": "Ctrl+N",
-   "estimated": true
-  },
-  {
-   "name": "quit key",
-   "group": "controls",
-   "value": "Ctrl+Q",
-   "estimated": true
-  },
-  {
-   "name": "places panel toggle key",
-   "group": "controls",
-   "value": "F9",
-   "source": "show_places_panel / Show Places Panel action strings in /usr/bin/dolphin"
-  },
-  {
-   "name": "find duplicates key",
-   "group": "added",
-   "value": "Ctrl+Shift+D",
-   "estimated": true
-  },
-  {
-   "name": "bulk rename key",
-   "group": "added",
-   "value": "Ctrl+Shift+R",
-   "estimated": true
-  },
-  {
-   "name": "list date format",
-   "group": "view",
-   "value": "dd/MM/yyyy HH:mm",
-   "source": "live capture of dolphin 26.08.2 details view (06/11/2026 18:43)"
-  },
-  {
-   "name": "information panel date wording",
-   "group": "view",
-   "value": "N minute(s) ago, then N hour(s) ago, then a numeric date",
-   "source": "live capture of dolphin 26.08.2 information panel (14 minute(s) ago)"
-  },
-  {
-   "name": "information panel rows, full",
-   "group": "view",
-   "value": "Type, Size, Modified, Accessed, Created, Tags, Rating, Comment",
-   "source": "live capture of dolphin 26.08.2 information panel"
-  },
-  {
-   "name": "location bar editable on click",
-   "group": "controls",
-   "value": "a click to the right of the breadcrumbs",
-   "source": "string 0x132138 in /usr/bin/dolphin (sub_65ec0)"
-  },
-  {
-   "name": "location bar confirm",
-   "group": "controls",
-   "value": "Enter",
-   "source": "string 0x132138 'switch back by confirming the edited location'"
-  },
-  {
-   "name": "location bar cancel",
-   "group": "controls",
-   "value": "Escape",
-   "estimated": true
-  },
-  {
-   "name": "address text selected when the bar opens",
-   "group": "controls",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "address for a file",
-   "group": "controls",
-   "value": "open its folder and select the file",
-   "source": "DolphinView::setUrl @0x17e9b0 loads directories; DolphinView::selectFileOnceAvailable @0x173b40 selects on itemsInserted"
-  },
-  {
-   "name": "file:// links and ~ accepted",
-   "group": "controls",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "address that leads nowhere",
-   "group": "controls",
-   "value": "keep the field open and say so",
-   "estimated": true
-  },
-  {
-   "name": "thumbnail size follows the zoom level",
-   "group": "previews",
-   "value": true,
-   "source": "DolphinItemListView::setZoomLevel @0x16e100 (clamp 0..16, iconSizeForZoomLevel @0x1a6540, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x16db80"
-  },
-  {
-   "name": "thumbnail fit in the icon box",
-   "group": "previews",
-   "value": "aspect ratio kept, centred, scaled up or down to the icon box",
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 calls KPixmapModifier::scale @0x15e820 with the icon box size"
-  },
-  {
-   "name": "thumbnail re-scaled when the icon size changes",
-   "group": "previews",
-   "value": true,
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 keeps the cached target width and height at +0x1b0/+0x1b4 and rescales when they differ"
-  },
-  {
-   "name": "previews shown at the smallest zoom level",
-   "group": "previews",
-   "value": true,
-   "source": "live capture checks/orig-zoom/details-16px.png: 16 px picture thumbnails in the details view at zoom 0"
-  },
-  {
-   "name": "zoom in enlarges thumbnails in the original",
-   "group": "previews",
-   "value": "64 px to 160 px",
-   "source": "live capture checks/orig-zoom/icons-64px.png and icons-160px.png after six Ctrl+Plus steps"
-  },
-  {
-   "name": "preview size remembered per view mode",
-   "group": "previews",
-   "value": true,
-   "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x16db80 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
-  },
-  {
-   "name": "picture previews for other file types",
-   "group": "previews",
-   "value": "only pictures; other files show a file-type icon that grows with the zoom",
-   "source": "live capture checks/orig-zoom/icons-160px.png; content previews for text and documents come from KIO thumbnail plugins the rebuild does not run"
-  },
-  {
-   "name": "icon grid columns",
-   "group": "icons view",
-   "value": "floor(view width / cell width), at least 1, columns spread evenly",
-   "source": "KItemListViewLayouter::doLayout @0x161bb0 (vdivsd at 0x161c79, truncation at 0x161c8a, clamp to 1 at 0x161c90)"
-  },
-  {
-   "name": "icon grid columns at 64 px (original)",
-   "group": "icons view",
-   "value": 4,
-   "unit": "columns",
-   "source": "measured in checks/orig-zoom/icons-64px.png: 5 items in 4 columns across a 592 px view"
-  },
-  {
-   "name": "icon grid pitch at 64 px (original)",
-   "group": "icons view",
-   "value": 148,
-   "unit": "px",
-   "source": "measured in checks/orig-zoom/icons-64px.png (icon centres 148 px apart, 592 / 4)"
-  },
-  {
-   "name": "icon grid columns at 160 px (original)",
-   "group": "icons view",
-   "value": 3,
-   "unit": "columns",
-   "source": "measured in checks/orig-zoom/icons-160px.png: 5 items in 3 columns across the same 592 px view"
-  },
-  {
-   "name": "icon grid pitch at 160 px (original)",
-   "group": "icons view",
-   "value": 197,
-   "unit": "px",
-   "source": "measured in checks/orig-zoom/icons-160px.png (icon centres 197 px apart, 592 / 3)"
-  },
-  {
-   "name": "icon cell minimum width (rebuild)",
-   "group": "icons view",
-   "value": "max(icon + 24, 88)",
-   "unit": "px",
-   "source": "views::icon_grid; narrower than the original's measured pitch on purpose, as the person asked for more icons per screen"
-  },
-  {
-   "name": "icon grid gap (rebuild)",
-   "group": "icons view",
-   "value": 2,
-   "unit": "px",
-   "source": "views::ICON_CELL_GAP"
-  },
-  {
-   "name": "icon cell height (rebuild)",
-   "group": "icons view",
-   "value": "icon + 46 with two label lines, icon + 32 with one",
-   "unit": "px",
-   "source": "views::icon_cell_height"
-  },
-  {
-   "name": "label lines in icons view",
-   "group": "icons view",
-   "value": "2 at 32 px and above, 1 below",
-   "source": "views::draw_icon_cell; the original wraps icon labels to two lines (KStandardItemListWidget::updateIconsLayoutTextCache @0x1368c0)"
-  },
-  {
-   "name": "label break points (rebuild)",
-   "group": "icons view",
-   "value": "space, hyphen, underscore, dot, slash, then a hard split",
-   "source": "views::wrap_label"
-  },
-  {
-   "name": "icons per 1000 px at 64 px (rebuild)",
-   "group": "icons view",
-   "value": 13,
-   "unit": "columns",
-   "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"the icon grid packs many files into a row\""
-  },
-  {
-   "name": "original icon cell shape",
-   "group": "icons view",
-   "value": "square: a preview is scaled to fit an icon-size square, centred, aspect ratio kept",
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 -> KPixmapModifier::scale @0x15e820; KItemListViewLayouter::doLayout @0x261bb0 uses one item width for every column"
-  },
-  {
-   "name": "original column width",
-   "group": "icons view",
-   "value": "item margin + item size (the square icon box), the same for every item in the view",
-   "source": "KItemListViewLayouter::doLayout @0x261bb0: vmaxsd of the item size hint and the configured item width, then columns = floor(width / (margin + item width)) at 0x261c79"
-  },
-  {
-   "name": "icon cell width (rebuild)",
-   "group": "icons view",
-   "value": "max(picture width at this zoom, label floor) + 8",
-   "source": "views::icon_cell_width; the picture width is the aspect-fit width of the square icon box, so a portrait cell is only as wide as the picture needs"
-  },
-  {
-   "name": "picture width in the icon box (rebuild)",
-   "group": "icons view",
-   "value": "icon size x aspect ratio when the picture is taller than wide, otherwise the icon size",
-   "source": "views::thumb_size, matching drawPixmap @0x135bb0's aspect-kept fit into the square box"
-  },
-  {
-   "name": "portrait picture width at 64 px (rebuild)",
-   "group": "icons view",
-   "value": "48 px for a 3:4 photo, 36 px for a 9:16 photo, inside the same 64 px box",
-   "source": "views::thumb_size; read from the file header by search::probe_image_size"
-  },
-  {
-   "name": "label floor (rebuild)",
-   "group": "icons view",
-   "value": "clamp(icon size x 0.75, 40, 96)",
-   "unit": "px",
-   "source": "views::label_floor; stops a narrow portrait cell from squeezing its name below two or three characters a line"
-  },
-  {
-   "name": "row packing (rebuild)",
-   "group": "icons view",
-   "value": "shelf: items left to right, a new row when the next cell no longer fits, one row height for all",
-   "source": "views::pack_icon_rows"
-  },
-  {
-   "name": "icon cell padding (rebuild)",
-   "group": "icons view",
-   "value": 4,
-   "unit": "px",
-   "source": "views::ICON_CELL_PAD, 4 px on each side of the picture and label"
-  },
-  {
-   "name": "label width in a cell (rebuild)",
-   "group": "icons view",
-   "value": "cell width - 6, wrapped to two lines and shortened with an ellipsis",
-   "unit": "px",
-   "source": "views::draw_icon_cell + views::wrap_label"
-  },
-  {
-   "name": "portrait icons per 1000 px at 64 px (rebuild)",
-   "group": "icons view",
-   "value": 17,
-   "unit": "columns",
-   "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"a tall picture gets a tall, narrow cell\""
-  },
-  {
-   "name": "picture shape source (rebuild)",
-   "group": "icons view",
-   "value": "JPEG, PNG, GIF, BMP and WebP headers, read once per file and cached",
-   "source": "search::probe_image_size; a picture whose header cannot be read is treated as square"
-  },
-  {
-   "name": "disk space button hidden when the volume reports no size",
-   "group": "view",
-   "value": true,
-   "source": "FUN_001e6a40 @0x1e6a40: total == 0 falls through to QWidget::hide"
-  },
-  {
-   "name": "used space percent rounding",
-   "group": "view",
-   "value": "(total - free) * 100.0 / total + 0.5, truncated",
-   "source": "FUN_001e6a40 @0x1e6a40"
-  },
-  {
-   "name": "factory icon size, icons view",
-   "group": "view",
-   "value": 32,
-   "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, IconSize default"
-  },
-  {
-   "name": "factory icon size, compact view",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af830, IconSize default"
-  },
-  {
-   "name": "factory icon size, details view",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, IconSize default at +0x2c"
-  },
-  {
-   "name": "factory preview size, icons view",
-   "group": "previews",
-   "value": 64,
-   "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, PreviewSize default"
-  },
-  {
-   "name": "factory preview size, compact view",
-   "group": "previews",
-   "value": 48,
-   "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af830, PreviewSize default"
-  },
-  {
-   "name": "factory preview size, details view",
-   "group": "previews",
-   "value": 48,
-   "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, PreviewSize default at +0x30"
-  },
-  {
-   "name": "default zoom with previews off",
-   "group": "view",
-   "value": "2, 0, 0",
-   "source": "DolphinView::updateDefaultZoomLevel @0x27df20: IconSize 32/16/16 -> zoom 2/0/0"
-  },
-  {
-   "name": "information panel label, several items selected",
-   "group": "view",
-   "value": "%1 items selected, no size, with the dialog-information icon",
-   "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x12ed75; Baloo::FileMetaDataWidget::setItems cleared then QWidget::hide"
-  },
-  {
-   "name": "details row padding",
-   "group": "view",
-   "value": "20 px left and right",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, LeftPadding/RightPadding"
-  },
-  {
-   "name": "wheel zoom modifier",
-   "group": "view",
-   "value": "Ctrl (Control key held)",
-   "source": "DolphinView::wheelEvent @0x272710, ControlModifier bit test (byte at +0x23 & 4)"
-  },
-  {
-   "name": "wheel units per zoom step",
-   "group": "view",
-   "value": 120,
-   "unit": "1/8-degree wheel units",
-   "source": "DolphinView::wheelEvent @0x272710, threshold 0x78 = 120"
-  },
-  {
-   "name": "wheel zoom step size",
-   "group": "view",
-   "value": 1,
-   "unit": "zoom level",
-   "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level \u00b1 1)"
-  },
-  {
-   "name": "wheel zoom remainder carried between events",
-   "group": "view",
-   "value": true,
-   "source": "DolphinView::wheelEvent @0x272710: after a step it subtracts 0x78 from the stored total instead of clearing it"
-  },
-  {
-   "name": "plain wheel without Ctrl",
-   "group": "view",
-   "value": "scrolls the view, never zooms",
-   "source": "DolphinView::wheelEvent @0x272710 returns without acting when the Control bit is clear"
-  },
-  {
-   "name": "wheel zoom direction",
-   "group": "view",
-   "value": "wheel away from you zooms in",
-   "source": "DolphinView::wheelEvent @0x272710: positive delta reaches +0x78 and calls slotIncreaseZoom"
-  },
-  {
-   "name": "wheel zoom limits",
-   "group": "view",
-   "value": "0 to 16",
-   "unit": "zoom level",
-   "source": "DolphinItemListView::setZoomLevel @0x26e100 clamps to the pair of bounds at 0x1c3350"
-  },
-  {
-   "name": "status bar zoom buttons",
-   "group": "view",
-   "value": "- and + step one zoom level each",
-   "source": "KItemListController::increaseZoom @0x1f8c60 emits increaseZoomClicked, wired to DolphinView::slotIncreaseZoom @0x284b00"
-  },
-  {
-   "name": "toolbar row height",
-   "group": "controls",
-   "value": 46,
-   "unit": "px",
-   "source": "live capture of dolphin 26.08.2 toolbar, checks/sort-bar/orig-760.png"
-  },
-  {
-   "name": "toolbar controls keep their width; the location bar takes the rest",
-   "group": "controls",
-   "value": "the location box ends before the right-hand view controls",
-   "source": "live capture of dolphin 26.08.2 toolbar at 760 px, checks/sort-bar/orig-760.png"
-  },
-  {
-   "name": "toolbar control width",
-   "group": "controls",
-   "value": 30,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "location bar minimum width",
-   "group": "controls",
-   "value": 110,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "gap between the location bar and the toolbar controls",
-   "group": "controls",
-   "value": 8,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "sort control in the toolbar",
-   "group": "controls",
-   "value": "label \"Sort: Name\" above about 660 px of window width, icon only below it, sorting also in the app menu",
-   "source": "app layout rule; the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
-  },
-  {
-   "name": "long breadcrumb paths",
-   "group": "controls",
-   "value": "segments drop from the left behind a \"\u2026\"; the current folder stays",
-   "estimated": true
-  },
-  {
-   "name": "shortcut reorder",
-   "group": "shortcuts",
-   "value": "drag a row into the gap between two rows; the gap before the first and the gap after the last are allowed",
-   "source": "KFilePlacesModel::movePlace @0x96220 (Ghidra 0x196220) in libKF6KIOFileWidgets.so.6"
-  },
-  {
-   "name": "shortcut drop position",
-   "group": "shortcuts",
-   "value": "insertion slot: to == from or to == from + 1 is refused, moving down lands at to - 1, moving up at to",
-   "source": "KFilePlacesModel::movePlace @0x96220"
-  },
-  {
-   "name": "shortcut drag stays inside its section",
-   "group": "shortcuts",
-   "value": true,
-   "source": "KFilePlacesModel::movePlace @0x96220, group id at +0x118 clamps the destination"
-  },
-  {
-   "name": "shortcut order storage",
-   "group": "shortcuts",
-   "value": "the order of the bookmarks in the settings; no separate order number",
-   "source": "KFilePlacesModel::movePlace @0x96220 \u2192 KBookmarkGroup::moveBookmark"
-  },
-  {
-   "name": "shortcut drop indicator",
-   "group": "shortcuts",
-   "value": "a line drawn in the gap between rows while dragging",
-   "source": "KFilePlacesView::paintEvent @0xadb80 (Ghidra 0x1adb80)"
-  },
-  {
-   "name": "gap chosen under the pointer",
-   "group": "shortcuts",
-   "value": "nearest gap, decided by the row's centre line",
-   "estimated": true
-  },
-  {
-   "name": "shortcut colour choice",
-   "group": "shortcuts",
-   "value": 8,
-   "unit": "colours",
-   "source": "added feature; same palette as the folder colours in app/src/foldercolor.rs"
-  },
-  {
-   "name": "shortcut colour storage",
-   "group": "shortcuts",
-   "value": "the program's settings file, per shortcut path (a panel row has no folder file of its own)",
-   "source": "added feature; the original has no coloured places (only KColorScheme strings in /usr/bin/dolphin)"
-  },
-  {
-   "name": "clearing a shortcut colour",
-   "group": "shortcuts",
-   "value": "\"Normal Colour\" removes the stored entry",
-   "source": "added feature; matches the folder menu's \"Normal Colour\""
-  },
-  {
-   "name": "shortcut colour kept when its row is marked",
-   "group": "shortcuts",
-   "value": true,
-   "source": "person's report 2026-11-06; App::place_icon_colour in app/src/main.rs"
-  },
-  {
-   "name": "marked-row colour lift",
-   "group": "shortcuts",
-   "value": 0.32,
-   "unit": "fraction toward white",
-   "source": "rebuild design choice, theme::SELECTION_LIFT; makes the chosen colour readable on the selection band",
-   "estimated": true
-  },
-  {
-   "name": "marked row with no colour of its own",
-   "group": "shortcuts",
-   "value": "#b8cbd8",
-   "source": "theme::PLACE #96b2c6 lifted by 0.32; measured in app/shots/marked-plain.png"
-  },
-  {
-   "name": "marked row with the Red shortcut colour",
-   "group": "shortcuts",
-   "value": "#d7837e",
-   "source": "palette Red #c44842 lifted by 0.32; measured in app/shots/marked-colour.png"
-  },
-  {
-   "name": "places icon colour in the original",
-   "group": "places",
-   "value": "#fcfcfc, selected and unselected alike",
-   "source": "app/shots/orig-places.png (Dolphin 26.08.2, fresh profile, Home row selected)"
-  },
-  {
-   "name": "location bar resolves dots in a path",
-   "group": "controls",
-   "value": true,
-   "source": "fsutil::tidy_path, called from Pane::load; the original's bar is built from the folder it is in (DolphinView::url @0x173f90)"
-  },
-  {
-   "name": "dot-dot above the root",
-   "group": "controls",
-   "value": "/",
-   "source": "fsutil::tidy_path"
-  },
-  {
-   "name": "virtual locations left as they are",
-   "group": "controls",
-   "value": "trash:/ keeps its spelling",
-   "source": "fsutil::tidy_path"
-  },
-  {
-   "name": "window title",
-   "group": "window",
-   "value": "DolphinCraft",
-   "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
-  },
-  {
-   "name": "window app id",
-   "group": "window",
-   "value": "dolphincraft",
-   "source": "follows the asked-for window title (the original's desktop id is dolphin)"
-  },
-  {
-   "name": "name comparison modes",
-   "group": "sorting",
-   "value": "Natural, Alphabetical case insensitive, Alphabetical case sensitive \u2014 in that row order",
-   "source": "FUN_001e5750 @0x1e5750 in /usr/bin/dolphin; strings at analysed addresses 0x22eaf2, 0x2372e0, 0x22eafa"
-  },
-  {
-   "name": "default name comparison",
-   "group": "sorting",
-   "value": "Natural",
-   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin (main program): ItemEnum \"SortingChoice\" with NaturalSorting/CaseInsensitiveSorting/CaseSensitiveSorting, default index 0"
-  },
-  {
-   "name": "name comparison config key",
-   "group": "sorting",
-   "value": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting",
-   "source": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting, GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin"
-  },
-  {
-   "name": "status bar capacity bar share",
-   "group": "view",
-   "value": "(total - free) * 100.0 / total + 0.5, truncated \u2014 same value as the tooltip",
-   "source": "FUN_001e6a40 @0x1e6a40, KCapacityBar::setValue(iVar4)"
-  },
-  {
-   "name": "icons view maximum width steps",
-   "group": "icons view",
-   "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
-   "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1c80 TextWidthIndex default 1"
-  },
-  {
-   "name": "details view click-to-open rows",
-   "group": "view",
-   "value": "By clicking anywhere on the row / By clicking on icon or name",
-   "source": "FUN_001dcdb0 @0x1dcdb0 (@option:radio how files/folders are opened)"
-  },
-  {
-   "name": "panel widths",
-   "group": "view",
-   "value": "remembered from the splitter, not fixed in the code",
-   "source": "QSplitter::setSizes call sites 0x90e2a, 0x927f3, 0x94673, 0x986eb in /usr/bin/dolphin (saved config or live widths)"
-  },
-  {
-   "name": "folder size display in the list",
-   "group": "sorting",
-   "value": "the number of items in the folder (no recursive size)",
-   "unit": "enum 0 = ContentCount",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70 in /usr/bin/dolphin, ItemEnum DirectorySizeMode default 0"
-  },
-  {
-   "name": "folder size mode options",
-   "group": "sorting",
-   "value": "0 Show number of items, 1 Show size of contents up to N, 2 Show no size",
-   "source": "FUN_001e5750 @0x1e5750 builds the three radios (strings 0x22eb26, 0x22eb3b, 0x22eb59); FUN_001e7af0 @0x1e7af0 stores DirectorySizeMode 0/1/2"
-  },
-  {
-   "name": "recursive directory size limit",
-   "group": "sorting",
-   "value": 10,
-   "unit": "items",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemUInt RecursiveDirectorySizeLimit default 10"
-  },
-  {
-   "name": "relative dates in the information panel",
-   "group": "details",
-   "value": true,
-   "unit": "bool",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemBool UseShortRelativeDates default true"
-  },
-  {
-   "name": "sort tie-break",
-   "group": "sorting",
-   "value": "the chosen name comparison, for every sort key",
-   "source": "one SortingChoice (FUN_001e5750 @0x1e5750, saved by FUN_001e7af0 @0x1e7af0) governs name order everywhere; state::sort_entries"
-  }
- ]
+  "version": 1,
+  "values": [
+    {
+      "name": "zoom level minimum",
+      "group": "view",
+      "value": 0,
+      "unit": "level",
+      "source": "ZoomLevelInfo::minimumLevel @0x1a6520"
+    },
+    {
+      "name": "zoom level maximum",
+      "group": "view",
+      "value": 16,
+      "unit": "level",
+      "source": "ZoomLevelInfo::maximumLevel @0x1a6530"
+    },
+    {
+      "name": "icon size at zoom 0",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+    },
+    {
+      "name": "icon size at zoom 1",
+      "group": "view",
+      "value": 22,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+    },
+    {
+      "name": "icon size at zoom 2",
+      "group": "view",
+      "value": 32,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+    },
+    {
+      "name": "icon size at zoom 3",
+      "group": "view",
+      "value": 48,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+    },
+    {
+      "name": "icon size at zoom 4",
+      "group": "view",
+      "value": 64,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540, table @0x1cd980"
+    },
+    {
+      "name": "icon size above zoom 4",
+      "group": "view",
+      "value": "level * 16",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
+    },
+    {
+      "name": "icon size at zoom 16",
+      "group": "view",
+      "value": 256,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540"
+    },
+    {
+      "name": "zoom level from 48 px",
+      "group": "view",
+      "value": 3,
+      "source": "ZoomLevelInfo::zoomLevelForIconSize @0x1a6560"
+    },
+    {
+      "name": "default zoom, details view",
+      "group": "view",
+      "value": 3,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
+    },
+    {
+      "name": "default zoom, icons view",
+      "group": "view",
+      "value": 4,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 64 -> zoomLevelForIconSize @0x2a6560"
+    },
+    {
+      "name": "default zoom, compact view",
+      "group": "view",
+      "value": 3,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27df20: PreviewSize 48 -> zoom 3"
+    },
+    {
+      "name": "details columns",
+      "group": "view",
+      "value": "Name, Size, Modified",
+      "source": "live capture of dolphin 26.08.2 details view"
+    },
+    {
+      "name": "details row height",
+      "group": "view",
+      "value": 26,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "places panel width",
+      "group": "view",
+      "value": 208,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "information panel width",
+      "group": "view",
+      "value": 288,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "information panel rows",
+      "group": "view",
+      "value": "Type, Size, Modified, Accessed",
+      "source": "live capture of dolphin 26.08.2 information panel"
+    },
+    {
+      "name": "status bar counts",
+      "group": "view",
+      "value": "0 folders, 0 files / N folders (no size) / N files (size) / N folders, M files (size)",
+      "source": "DolphinView::emitStatusBarText @0x273180; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
+    },
+    {
+      "name": "status bar selection",
+      "group": "view",
+      "value": "N folder(s) selected, M file(s) selected (size); folders alone carry no size",
+      "source": "DolphinView::emitStatusBarText @0x273180, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
+    },
+    {
+      "name": "status bar free space",
+      "group": "view",
+      "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
+      "source": "FUN_001e6a40 @0x1e6a40 in /usr/bin/dolphin; strings 0x12ec43, 0x12ec68; KCapacityBar::setValue"
+    },
+    {
+      "name": "size unit style",
+      "group": "view",
+      "value": "IEC, one decimal (1718.4 KiB)",
+      "source": "live capture of dolphin 26.08.2 status bar"
+    },
+    {
+      "name": "default sort key",
+      "group": "sorting",
+      "value": "Name",
+      "estimated": true
+    },
+    {
+      "name": "default sort ascending",
+      "group": "sorting",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "default folders first",
+      "group": "sorting",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "default sorting mode",
+      "group": "sorting",
+      "value": "Natural",
+      "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin, ItemEnum SortingChoice default 0 = NaturalSorting"
+    },
+    {
+      "name": "sort options",
+      "group": "sorting",
+      "value": "Name, Size, Type, Modified",
+      "source": "strings Sort by Field / sorting keys in libdolphinprivate.so.6"
+    },
+    {
+      "name": "double click opens",
+      "group": "controls",
+      "value": true,
+      "source": "string 'Double-click triggers' in /usr/bin/dolphin"
+    },
+    {
+      "name": "split view",
+      "group": "controls",
+      "value": "F3",
+      "source": "DolphinViewActionHandler split actions, 'Split view' string"
+    },
+    {
+      "name": "toggle information panel",
+      "group": "controls",
+      "value": "F11",
+      "source": "Dolphin action shortcut, information panel string"
+    },
+    {
+      "name": "toggle hidden files",
+      "group": "controls",
+      "value": "Ctrl+H",
+      "source": "Show Hidden Files action string"
+    },
+    {
+      "name": "editable location bar",
+      "group": "controls",
+      "value": "Ctrl+L",
+      "source": "Make location bar editable string"
+    },
+    {
+      "name": "move to trash",
+      "group": "controls",
+      "value": "Del",
+      "source": "Move to Trash action string"
+    },
+    {
+      "name": "permanent delete",
+      "group": "controls",
+      "value": "Shift+Del",
+      "source": "ShowDeleteCommand action string"
+    },
+    {
+      "name": "rename",
+      "group": "controls",
+      "value": "F2",
+      "source": "Rename action string"
+    },
+    {
+      "name": "new folder",
+      "group": "controls",
+      "value": "F10",
+      "source": "create_dir action string"
+    },
+    {
+      "name": "refresh",
+      "group": "controls",
+      "value": "F5",
+      "source": "view_redisplay action string"
+    },
+    {
+      "name": "trash location",
+      "group": "files",
+      "value": "~/.local/share/Trash/{files,info}",
+      "source": "freedesktop trash spec used by dolphin; strings 'Restore to Former Location', 'Empty Trash'"
+    },
+    {
+      "name": "trash record format",
+      "group": "files",
+      "value": "[Trash Info] Path= and DeletionDate=",
+      "source": "freedesktop trash spec used by dolphin"
+    },
+    {
+      "name": "confirm before delete",
+      "group": "files",
+      "value": "always ask",
+      "source": "Confirmations tab strings 'Deleting files or folders', 'Always ask'"
+    },
+    {
+      "name": "hidden file rule",
+      "group": "files",
+      "value": "name starts with a dot",
+      "estimated": true
+    },
+    {
+      "name": "quick look key",
+      "group": "added",
+      "value": "Space",
+      "estimated": true
+    },
+    {
+      "name": "duplicate detection",
+      "group": "added",
+      "value": "size, then SHA-256",
+      "estimated": true
+    },
+    {
+      "name": "bulk rename tokens",
+      "group": "added",
+      "value": "{name} {n} {ext} {date}",
+      "estimated": true
+    },
+    {
+      "name": "shortcut panel rows",
+      "group": "shortcuts",
+      "value": "Home, Desktop, Documents, Downloads, Music, Pictures, Videos, Trash, then pinned folders",
+      "source": "strings PlacesPanel, DolphinPlacesModel, add_to_places, Add to Places; live capture of dolphin 26.08.2"
+    },
+    {
+      "name": "shortcut keys in the panel",
+      "group": "shortcuts",
+      "value": "Alt+1 to Alt+9 on the first nine rows, dim badge at the right edge",
+      "estimated": true
+    },
+    {
+      "name": "shortcut editor key",
+      "group": "shortcuts",
+      "value": "Ctrl+Shift+S",
+      "estimated": true
+    },
+    {
+      "name": "shortcut duplicate rule",
+      "group": "shortcuts",
+      "value": "a standard folder cannot be pinned twice",
+      "source": "own rule; original uses Add to Places for bookmarks only"
+    },
+    {
+      "name": "shortcut persistence",
+      "group": "shortcuts",
+      "value": "config bookmarks array + shortcuts_expanded + shortcut_keys",
+      "estimated": true
+    },
+    {
+      "name": "shortcut hints in menus",
+      "group": "shortcuts",
+      "value": "name left, key right",
+      "source": "strings Shortcuts, KShortcutsDialog, KStandardShortcut (moveToTrash, createFolder, showHideHiddenFiles); menu hints in the original"
+    },
+    {
+      "name": "new window key",
+      "group": "controls",
+      "value": "Ctrl+N",
+      "estimated": true
+    },
+    {
+      "name": "quit key",
+      "group": "controls",
+      "value": "Ctrl+Q",
+      "estimated": true
+    },
+    {
+      "name": "places panel toggle key",
+      "group": "controls",
+      "value": "F9",
+      "source": "show_places_panel / Show Places Panel action strings in /usr/bin/dolphin"
+    },
+    {
+      "name": "find duplicates key",
+      "group": "added",
+      "value": "Ctrl+Shift+D",
+      "estimated": true
+    },
+    {
+      "name": "bulk rename key",
+      "group": "added",
+      "value": "Ctrl+Shift+R",
+      "estimated": true
+    },
+    {
+      "name": "list date format",
+      "group": "view",
+      "value": "dd/MM/yyyy HH:mm",
+      "source": "live capture of dolphin 26.08.2 details view (06/11/2026 18:43)"
+    },
+    {
+      "name": "information panel date wording",
+      "group": "view",
+      "value": "N minute(s) ago, then N hour(s) ago, then a numeric date",
+      "source": "live capture of dolphin 26.08.2 information panel (14 minute(s) ago)"
+    },
+    {
+      "name": "information panel rows, full",
+      "group": "view",
+      "value": "Type, Size, Modified, Accessed, Created, Tags, Rating, Comment",
+      "source": "live capture of dolphin 26.08.2 information panel"
+    },
+    {
+      "name": "location bar editable on click",
+      "group": "controls",
+      "value": "a click to the right of the breadcrumbs",
+      "source": "string 0x132138 in /usr/bin/dolphin (sub_65ec0)"
+    },
+    {
+      "name": "location bar confirm",
+      "group": "controls",
+      "value": "Enter",
+      "source": "string 0x132138 'switch back by confirming the edited location'"
+    },
+    {
+      "name": "location bar cancel",
+      "group": "controls",
+      "value": "Escape",
+      "estimated": true
+    },
+    {
+      "name": "address text selected when the bar opens",
+      "group": "controls",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "address for a file",
+      "group": "controls",
+      "value": "open its folder and select the file",
+      "source": "DolphinView::setUrl @0x17e9b0 loads directories; DolphinView::selectFileOnceAvailable @0x173b40 selects on itemsInserted"
+    },
+    {
+      "name": "file:// links and ~ accepted",
+      "group": "controls",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "address that leads nowhere",
+      "group": "controls",
+      "value": "keep the field open and say so",
+      "estimated": true
+    },
+    {
+      "name": "thumbnail size follows the zoom level",
+      "group": "previews",
+      "value": true,
+      "source": "DolphinItemListView::setZoomLevel @0x16e100 (clamp 0..16, iconSizeForZoomLevel @0x1a6540, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x16db80"
+    },
+    {
+      "name": "thumbnail fit in the icon box",
+      "group": "previews",
+      "value": "aspect ratio kept, centred, scaled up or down to the icon box",
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 calls KPixmapModifier::scale @0x15e820 with the icon box size"
+    },
+    {
+      "name": "thumbnail re-scaled when the icon size changes",
+      "group": "previews",
+      "value": true,
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 keeps the cached target width and height at +0x1b0/+0x1b4 and rescales when they differ"
+    },
+    {
+      "name": "previews shown at the smallest zoom level",
+      "group": "previews",
+      "value": true,
+      "source": "live capture checks/orig-zoom/details-16px.png: 16 px picture thumbnails in the details view at zoom 0"
+    },
+    {
+      "name": "zoom in enlarges thumbnails in the original",
+      "group": "previews",
+      "value": "64 px to 160 px",
+      "source": "live capture checks/orig-zoom/icons-64px.png and icons-160px.png after six Ctrl+Plus steps"
+    },
+    {
+      "name": "preview size remembered per view mode",
+      "group": "previews",
+      "value": true,
+      "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x16db80 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
+    },
+    {
+      "name": "picture previews for other file types",
+      "group": "previews",
+      "value": "only pictures; other files show a file-type icon that grows with the zoom",
+      "source": "live capture checks/orig-zoom/icons-160px.png; content previews for text and documents come from KIO thumbnail plugins the rebuild does not run"
+    },
+    {
+      "name": "icon grid columns",
+      "group": "icons view",
+      "value": "floor(view width / cell width), at least 1, columns spread evenly",
+      "source": "KItemListViewLayouter::doLayout @0x161bb0 (vdivsd at 0x161c79, truncation at 0x161c8a, clamp to 1 at 0x161c90)"
+    },
+    {
+      "name": "icon grid columns at 64 px (original)",
+      "group": "icons view",
+      "value": 4,
+      "unit": "columns",
+      "source": "measured in checks/orig-zoom/icons-64px.png: 5 items in 4 columns across a 592 px view"
+    },
+    {
+      "name": "icon grid pitch at 64 px (original)",
+      "group": "icons view",
+      "value": 148,
+      "unit": "px",
+      "source": "measured in checks/orig-zoom/icons-64px.png (icon centres 148 px apart, 592 / 4)"
+    },
+    {
+      "name": "icon grid columns at 160 px (original)",
+      "group": "icons view",
+      "value": 3,
+      "unit": "columns",
+      "source": "measured in checks/orig-zoom/icons-160px.png: 5 items in 3 columns across the same 592 px view"
+    },
+    {
+      "name": "icon grid pitch at 160 px (original)",
+      "group": "icons view",
+      "value": 197,
+      "unit": "px",
+      "source": "measured in checks/orig-zoom/icons-160px.png (icon centres 197 px apart, 592 / 3)"
+    },
+    {
+      "name": "icon cell minimum width (rebuild)",
+      "group": "icons view",
+      "value": "max(icon + 24, 88)",
+      "unit": "px",
+      "source": "views::icon_grid; narrower than the original's measured pitch on purpose, as the person asked for more icons per screen"
+    },
+    {
+      "name": "icon grid gap (rebuild)",
+      "group": "icons view",
+      "value": 2,
+      "unit": "px",
+      "source": "views::ICON_CELL_GAP"
+    },
+    {
+      "name": "icon cell height (rebuild)",
+      "group": "icons view",
+      "value": "icon + 46 with two label lines, icon + 32 with one",
+      "unit": "px",
+      "source": "views::icon_cell_height"
+    },
+    {
+      "name": "label lines in icons view",
+      "group": "icons view",
+      "value": "2 at 32 px and above, 1 below",
+      "source": "views::draw_icon_cell; the original wraps icon labels to two lines (KStandardItemListWidget::updateIconsLayoutTextCache @0x1368c0)"
+    },
+    {
+      "name": "label break points (rebuild)",
+      "group": "icons view",
+      "value": "space, hyphen, underscore, dot, slash, then a hard split",
+      "source": "views::wrap_label"
+    },
+    {
+      "name": "icons per 1000 px at 64 px (rebuild)",
+      "group": "icons view",
+      "value": 13,
+      "unit": "columns",
+      "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"the icon grid packs many files into a row\""
+    },
+    {
+      "name": "original icon cell shape",
+      "group": "icons view",
+      "value": "square: a preview is scaled to fit an icon-size square, centred, aspect ratio kept",
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 -> KPixmapModifier::scale @0x15e820; KItemListViewLayouter::doLayout @0x261bb0 uses one item width for every column"
+    },
+    {
+      "name": "original column width",
+      "group": "icons view",
+      "value": "item margin + item size (the square icon box), the same for every item in the view",
+      "source": "KItemListViewLayouter::doLayout @0x261bb0: vmaxsd of the item size hint and the configured item width, then columns = floor(width / (margin + item width)) at 0x261c79"
+    },
+    {
+      "name": "icon cell width (rebuild)",
+      "group": "icons view",
+      "value": "max(picture width at this zoom, label floor) + 8",
+      "source": "views::icon_cell_width; the picture width is the aspect-fit width of the square icon box, so a portrait cell is only as wide as the picture needs"
+    },
+    {
+      "name": "picture width in the icon box (rebuild)",
+      "group": "icons view",
+      "value": "icon size x aspect ratio when the picture is taller than wide, otherwise the icon size",
+      "source": "views::thumb_size, matching drawPixmap @0x135bb0's aspect-kept fit into the square box"
+    },
+    {
+      "name": "portrait picture width at 64 px (rebuild)",
+      "group": "icons view",
+      "value": "48 px for a 3:4 photo, 36 px for a 9:16 photo, inside the same 64 px box",
+      "source": "views::thumb_size; read from the file header by search::probe_image_size"
+    },
+    {
+      "name": "label floor (rebuild)",
+      "group": "icons view",
+      "value": "clamp(icon size x 0.75, 40, 96)",
+      "unit": "px",
+      "source": "views::label_floor; stops a narrow portrait cell from squeezing its name below two or three characters a line"
+    },
+    {
+      "name": "row packing (rebuild)",
+      "group": "icons view",
+      "value": "shelf: items left to right, a new row when the next cell no longer fits, one row height for all",
+      "source": "views::pack_icon_rows"
+    },
+    {
+      "name": "icon cell padding (rebuild)",
+      "group": "icons view",
+      "value": 4,
+      "unit": "px",
+      "source": "views::ICON_CELL_PAD, 4 px on each side of the picture and label"
+    },
+    {
+      "name": "label width in a cell (rebuild)",
+      "group": "icons view",
+      "value": "cell width - 6, wrapped to two lines and shortened with an ellipsis",
+      "unit": "px",
+      "source": "views::draw_icon_cell + views::wrap_label"
+    },
+    {
+      "name": "portrait icons per 1000 px at 64 px (rebuild)",
+      "group": "icons view",
+      "value": 17,
+      "unit": "columns",
+      "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"a tall picture gets a tall, narrow cell\""
+    },
+    {
+      "name": "picture shape source (rebuild)",
+      "group": "icons view",
+      "value": "JPEG, PNG, GIF, BMP and WebP headers, read once per file and cached",
+      "source": "search::probe_image_size; a picture whose header cannot be read is treated as square"
+    },
+    {
+      "name": "disk space button hidden when the volume reports no size",
+      "group": "view",
+      "value": true,
+      "source": "FUN_001e6a40 @0x1e6a40: total == 0 falls through to QWidget::hide"
+    },
+    {
+      "name": "used space percent rounding",
+      "group": "view",
+      "value": "(total - free) * 100.0 / total + 0.5, truncated",
+      "source": "FUN_001e6a40 @0x1e6a40"
+    },
+    {
+      "name": "factory icon size, icons view",
+      "group": "view",
+      "value": 32,
+      "unit": "px",
+      "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, IconSize default"
+    },
+    {
+      "name": "factory icon size, compact view",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "CompactModeSettings::CompactModeSettings @0x2af830, IconSize default"
+    },
+    {
+      "name": "factory icon size, details view",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, IconSize default at +0x2c"
+    },
+    {
+      "name": "factory preview size, icons view",
+      "group": "previews",
+      "value": 64,
+      "unit": "px",
+      "source": "IconsModeSettings::IconsModeSettings @0x2b1c80, PreviewSize default"
+    },
+    {
+      "name": "factory preview size, compact view",
+      "group": "previews",
+      "value": 48,
+      "unit": "px",
+      "source": "CompactModeSettings::CompactModeSettings @0x2af830, PreviewSize default"
+    },
+    {
+      "name": "factory preview size, details view",
+      "group": "previews",
+      "value": 48,
+      "unit": "px",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, PreviewSize default at +0x30"
+    },
+    {
+      "name": "default zoom with previews off",
+      "group": "view",
+      "value": "2, 0, 0",
+      "source": "DolphinView::updateDefaultZoomLevel @0x27df20: IconSize 32/16/16 -> zoom 2/0/0"
+    },
+    {
+      "name": "information panel label, several items selected",
+      "group": "view",
+      "value": "%1 items selected, no size, with the dialog-information icon",
+      "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x12ed75; Baloo::FileMetaDataWidget::setItems cleared then QWidget::hide"
+    },
+    {
+      "name": "details row padding",
+      "group": "view",
+      "value": "20 px left and right",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b10d0, LeftPadding/RightPadding"
+    },
+    {
+      "name": "wheel zoom modifier",
+      "group": "view",
+      "value": "Ctrl (Control key held)",
+      "source": "DolphinView::wheelEvent @0x272710, ControlModifier bit test (byte at +0x23 & 4)"
+    },
+    {
+      "name": "wheel units per zoom step",
+      "group": "view",
+      "value": 120,
+      "unit": "1/8-degree wheel units",
+      "source": "DolphinView::wheelEvent @0x272710, threshold 0x78 = 120"
+    },
+    {
+      "name": "wheel zoom step size",
+      "group": "view",
+      "value": 1,
+      "unit": "zoom level",
+      "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level ± 1)"
+    },
+    {
+      "name": "wheel zoom remainder carried between events",
+      "group": "view",
+      "value": true,
+      "source": "DolphinView::wheelEvent @0x272710: after a step it subtracts 0x78 from the stored total instead of clearing it"
+    },
+    {
+      "name": "plain wheel without Ctrl",
+      "group": "view",
+      "value": "scrolls the view, never zooms",
+      "source": "DolphinView::wheelEvent @0x272710 returns without acting when the Control bit is clear"
+    },
+    {
+      "name": "wheel zoom direction",
+      "group": "view",
+      "value": "wheel away from you zooms in",
+      "source": "DolphinView::wheelEvent @0x272710: positive delta reaches +0x78 and calls slotIncreaseZoom"
+    },
+    {
+      "name": "wheel zoom limits",
+      "group": "view",
+      "value": "0 to 16",
+      "unit": "zoom level",
+      "source": "DolphinItemListView::setZoomLevel @0x26e100 clamps to the pair of bounds at 0x1c3350"
+    },
+    {
+      "name": "status bar zoom buttons",
+      "group": "view",
+      "value": "- and + step one zoom level each",
+      "source": "KItemListController::increaseZoom @0x1f8c60 emits increaseZoomClicked, wired to DolphinView::slotIncreaseZoom @0x284b00"
+    },
+    {
+      "name": "toolbar row height",
+      "group": "controls",
+      "value": 46,
+      "unit": "px",
+      "source": "live capture of dolphin 26.08.2 toolbar, checks/sort-bar/orig-760.png"
+    },
+    {
+      "name": "toolbar controls keep their width; the location bar takes the rest",
+      "group": "controls",
+      "value": "the location box ends before the right-hand view controls",
+      "source": "live capture of dolphin 26.08.2 toolbar at 760 px, checks/sort-bar/orig-760.png"
+    },
+    {
+      "name": "toolbar control width",
+      "group": "controls",
+      "value": 30,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "location bar minimum width",
+      "group": "controls",
+      "value": 110,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "gap between the location bar and the toolbar controls",
+      "group": "controls",
+      "value": 8,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "sort control in the toolbar",
+      "group": "controls",
+      "value": "label \"Sort: Name\" above about 660 px of window width, icon only below it, sorting also in the app menu",
+      "source": "app layout rule; the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
+    },
+    {
+      "name": "long breadcrumb paths",
+      "group": "controls",
+      "value": "segments drop from the left behind a \"…\"; the current folder stays",
+      "estimated": true
+    },
+    {
+      "name": "shortcut reorder",
+      "group": "shortcuts",
+      "value": "drag a row into the gap between two rows; the gap before the first and the gap after the last are allowed",
+      "source": "KFilePlacesModel::movePlace @0x96220 (Ghidra 0x196220) in libKF6KIOFileWidgets.so.6"
+    },
+    {
+      "name": "shortcut drop position",
+      "group": "shortcuts",
+      "value": "insertion slot: to == from or to == from + 1 is refused, moving down lands at to - 1, moving up at to",
+      "source": "KFilePlacesModel::movePlace @0x96220"
+    },
+    {
+      "name": "shortcut drag stays inside its section",
+      "group": "shortcuts",
+      "value": true,
+      "source": "KFilePlacesModel::movePlace @0x96220, group id at +0x118 clamps the destination"
+    },
+    {
+      "name": "shortcut order storage",
+      "group": "shortcuts",
+      "value": "the order of the bookmarks in the settings; no separate order number",
+      "source": "KFilePlacesModel::movePlace @0x96220 → KBookmarkGroup::moveBookmark"
+    },
+    {
+      "name": "shortcut drop indicator",
+      "group": "shortcuts",
+      "value": "a line drawn in the gap between rows while dragging",
+      "source": "KFilePlacesView::paintEvent @0xadb80 (Ghidra 0x1adb80)"
+    },
+    {
+      "name": "gap chosen under the pointer",
+      "group": "shortcuts",
+      "value": "nearest gap, decided by the row's centre line",
+      "estimated": true
+    },
+    {
+      "name": "shortcut colour choice",
+      "group": "shortcuts",
+      "value": 8,
+      "unit": "colours",
+      "source": "added feature; same palette as the folder colours in app/src/foldercolor.rs"
+    },
+    {
+      "name": "shortcut colour storage",
+      "group": "shortcuts",
+      "value": "the program's settings file, per shortcut path (a panel row has no folder file of its own)",
+      "source": "added feature; the original has no coloured places (only KColorScheme strings in /usr/bin/dolphin)"
+    },
+    {
+      "name": "clearing a shortcut colour",
+      "group": "shortcuts",
+      "value": "\"Normal Colour\" removes the stored entry",
+      "source": "added feature; matches the folder menu's \"Normal Colour\""
+    },
+    {
+      "name": "shortcut colour kept when its row is marked",
+      "group": "shortcuts",
+      "value": true,
+      "source": "person's report 2026-11-06; App::place_icon_colour in app/src/main.rs"
+    },
+    {
+      "name": "marked-row colour lift",
+      "group": "shortcuts",
+      "value": 0.32,
+      "unit": "fraction toward white",
+      "source": "rebuild design choice, theme::SELECTION_LIFT; makes the chosen colour readable on the selection band",
+      "estimated": true
+    },
+    {
+      "name": "marked row with no colour of its own",
+      "group": "shortcuts",
+      "value": "#b8cbd8",
+      "source": "theme::PLACE #96b2c6 lifted by 0.32; measured in app/shots/marked-plain.png"
+    },
+    {
+      "name": "marked row with the Red shortcut colour",
+      "group": "shortcuts",
+      "value": "#d7837e",
+      "source": "palette Red #c44842 lifted by 0.32; measured in app/shots/marked-colour.png"
+    },
+    {
+      "name": "places icon colour in the original",
+      "group": "places",
+      "value": "#fcfcfc, selected and unselected alike",
+      "source": "app/shots/orig-places.png (Dolphin 26.08.2, fresh profile, Home row selected)"
+    },
+    {
+      "name": "location bar resolves dots in a path",
+      "group": "controls",
+      "value": true,
+      "source": "fsutil::tidy_path, called from Pane::load; the original's bar is built from the folder it is in (DolphinView::url @0x173f90)"
+    },
+    {
+      "name": "dot-dot above the root",
+      "group": "controls",
+      "value": "/",
+      "source": "fsutil::tidy_path"
+    },
+    {
+      "name": "virtual locations left as they are",
+      "group": "controls",
+      "value": "trash:/ keeps its spelling",
+      "source": "fsutil::tidy_path"
+    },
+    {
+      "name": "window title",
+      "group": "window",
+      "value": "DolphinCraft",
+      "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
+    },
+    {
+      "name": "window app id",
+      "group": "window",
+      "value": "dolphincraft",
+      "source": "follows the asked-for window title (the original's desktop id is dolphin)"
+    },
+    {
+      "name": "name comparison modes",
+      "group": "sorting",
+      "value": "Natural, Alphabetical case insensitive, Alphabetical case sensitive — in that row order",
+      "source": "FUN_001e5750 @0x1e5750 in /usr/bin/dolphin; strings at analysed addresses 0x22eaf2, 0x2372e0, 0x22eafa"
+    },
+    {
+      "name": "default name comparison",
+      "group": "sorting",
+      "value": "Natural",
+      "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin (main program): ItemEnum \"SortingChoice\" with NaturalSorting/CaseInsensitiveSorting/CaseSensitiveSorting, default index 0"
+    },
+    {
+      "name": "name comparison config key",
+      "group": "sorting",
+      "value": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting",
+      "source": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting, GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin"
+    },
+    {
+      "name": "status bar capacity bar share",
+      "group": "view",
+      "value": "(total - free) * 100.0 / total + 0.5, truncated — same value as the tooltip",
+      "source": "FUN_001e6a40 @0x1e6a40, KCapacityBar::setValue(iVar4)"
+    },
+    {
+      "name": "icons view maximum width steps",
+      "group": "icons view",
+      "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
+      "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1c80 TextWidthIndex default 1"
+    },
+    {
+      "name": "details view click-to-open rows",
+      "group": "view",
+      "value": "By clicking anywhere on the row / By clicking on icon or name",
+      "source": "FUN_001dcdb0 @0x1dcdb0 (@option:radio how files/folders are opened)"
+    },
+    {
+      "name": "panel widths",
+      "group": "view",
+      "value": "remembered from the splitter, not fixed in the code",
+      "source": "QSplitter::setSizes call sites 0x90e2a, 0x927f3, 0x94673, 0x986eb in /usr/bin/dolphin (saved config or live widths)"
+    },
+    {
+      "name": "folder size display in the list",
+      "group": "sorting",
+      "value": "the number of items in the folder (no recursive size)",
+      "unit": "enum 0 = ContentCount",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70 in /usr/bin/dolphin, ItemEnum DirectorySizeMode default 0"
+    },
+    {
+      "name": "folder size mode options",
+      "group": "sorting",
+      "value": "0 Show number of items, 1 Show size of contents up to N, 2 Show no size",
+      "source": "FUN_001e5750 @0x1e5750 builds the three radios (strings 0x22eb26, 0x22eb3b, 0x22eb59); FUN_001e7af0 @0x1e7af0 stores DirectorySizeMode 0/1/2"
+    },
+    {
+      "name": "recursive directory size limit",
+      "group": "sorting",
+      "value": 10,
+      "unit": "items",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemUInt RecursiveDirectorySizeLimit default 10"
+    },
+    {
+      "name": "relative dates in the information panel",
+      "group": "details",
+      "value": true,
+      "unit": "bool",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemBool UseShortRelativeDates default true"
+    },
+    {
+      "name": "sort tie-break",
+      "group": "sorting",
+      "value": "the chosen name comparison, for every sort key",
+      "source": "one SortingChoice (FUN_001e5750 @0x1e5750, saved by FUN_001e7af0 @0x1e7af0) governs name order everywhere; state::sort_entries"
+    },
+    {
+      "name": "thumbnail size minimum",
+      "group": "picture wall",
+      "value": 50,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider min=50"
+    },
+    {
+      "name": "thumbnail size maximum",
+      "group": "picture wall",
+      "value": 400,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider max=400"
+    },
+    {
+      "name": "thumbnail size at first",
+      "group": "picture wall",
+      "value": 200,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider value=200"
+    },
+    {
+      "name": "thumbnail size slider step",
+      "group": "picture wall",
+      "value": 1,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider (range input, whole pixels)"
+    },
+    {
+      "name": "picture wall gap between cards",
+      "group": "picture wall",
+      "value": 12,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), static/css/browser.css .images { gap: 12px }"
+    },
+    {
+      "name": "picture wall padding in a card",
+      "group": "picture wall",
+      "value": 8,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), static/css/browser.css .image { padding: 8px }"
+    },
+    {
+      "name": "picture corner radius",
+      "group": "picture wall",
+      "value": 10,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), static/css/browser.css .image img { border-radius: 10px }"
+    },
+    {
+      "name": "dimension caption format",
+      "group": "picture wall",
+      "value": "W×H:AR a.bc:MP d.dd",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html line 203 (the show_dims block)"
+    },
+    {
+      "name": "original's largest preview box",
+      "group": "picture wall",
+      "value": 256,
+      "unit": "px",
+      "source": "decompiled original: ZoomLevelInfo::maximumLevel() @0x1a6530 returns 16, ZoomLevelInfo::iconSizeForZoomLevel(int) @0x1a6540 returns level*16 above 4, so 16..256 px; the 400 px ceiling is the browser's, not the original's"
+    },
+    {
+      "name": "slideshow interval at first",
+      "group": "slideshow",
+      "value": 1.0,
+      "unit": "s",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #slide-interval value=1"
+    },
+    {
+      "name": "slideshow interval step",
+      "group": "slideshow",
+      "value": 0.5,
+      "unit": "s",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #slide-interval step=0.5"
+    },
+    {
+      "name": "slideshow interval range",
+      "group": "slideshow",
+      "value": "0.5..30",
+      "unit": "s",
+      "source": "the person's image browser (image-browser-styled), #slide-interval min=0.5; upper limit 30 s chosen in this build"
+    },
+    {
+      "name": "slideshow fade length",
+      "group": "slideshow",
+      "value": 300,
+      "unit": "ms",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js startSlideshow: setTimeout(..., 300)"
+    },
+    {
+      "name": "slideshow fade on by default",
+      "group": "slideshow",
+      "value": true,
+      "unit": "bool",
+      "source": "the person's image browser (image-browser-styled), the fade is unconditional in startSlideshow; this build makes it a switch that starts on"
+    },
+    {
+      "name": "comparison modes",
+      "group": "comparison",
+      "value": "side, split, overlay",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), #compare-modal toolbar"
+    },
+    {
+      "name": "comparison overlay opacity at first",
+      "group": "comparison",
+      "value": 50,
+      "unit": "%",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #compareOpacitySlider value=50"
+    },
+    {
+      "name": "comparison zoom range",
+      "group": "comparison",
+      "value": "0.1..20",
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js stepCompareZoom clamp"
+    },
+    {
+      "name": "comparison zoom button step",
+      "group": "comparison",
+      "value": 1.25,
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js compareZoomIn / compareZoomOut"
+    },
+    {
+      "name": "comparison wheel zoom",
+      "group": "comparison",
+      "value": "1.1 in, 0.9 out",
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js initCompareZoomWheel"
+    },
+    {
+      "name": "prompt fields read from a picture",
+      "group": "prompt",
+      "value": "steps, sampler, cfg scale, seed, size, model, denoising strength, prompt, negative prompt",
+      "unit": "text",
+      "source": "PNG tEXt 'parameters' chunk and JPEG Exif UserComment, as written by Stable Diffusion / ComfyUI / A1111; parsed by the rebuild, no original-counterpart in Dolphin"
+    }
+  ]
 }

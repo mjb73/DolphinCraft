@@ -284,6 +284,12 @@ pub enum Request {
     /// Added feature: give folders a colour of the person's choosing (`None`
     /// clears it back to the normal one).
     FolderColor(Vec<PathBuf>, Option<[u8; 3]>),
+    /// Added feature: show this picture in the full-window viewer adopted from
+    /// the image browser. The flag starts its slideshow at once.
+    OpenViewer(PathBuf, bool),
+    /// Added feature: the gallery's thumbnail size or caption switches changed,
+    /// so the choice is worth remembering.
+    GalleryChanged,
     OpenPath(PathBuf),
     Cut,
     Copy,
@@ -314,6 +320,19 @@ pub struct Pane {
     pub folders_first: bool,
     pub view: ViewMode,
     pub zoom: [u8; 3],
+    /// Added feature: the picture gallery presentation, adopted from the
+    /// person's image browser. It replaces the icon/detail/column layout for
+    /// this folder without touching the view mode underneath, so switching it
+    /// off puts the folder back exactly as it was.
+    pub pictures: bool,
+    /// Thumbnail edge in the gallery, 50..=400 px (browser's own slider range).
+    pub thumb_px: f32,
+    /// Show the file name under a gallery thumbnail.
+    pub gallery_names: bool,
+    /// Show the "1920×1080:AR 1.78:MP 2.07" caption under a thumbnail.
+    pub gallery_dims: bool,
+    /// Rounded corners on the gallery's thumbnails.
+    pub gallery_round: bool,
     pub show_hidden: bool,
     pub previews: bool,
     pub filter: String,
@@ -357,6 +376,11 @@ impl Pane {
             folders_first: true,
             view: ViewMode::Icons,
             zoom: theme::default_zoom(true),
+            pictures: false,
+            thumb_px: crate::gallery::THUMB_DEFAULT,
+            gallery_names: true,
+            gallery_dims: false,
+            gallery_round: true,
             show_hidden: false,
             previews: true,
             filter: String::new(),
@@ -693,5 +717,33 @@ impl Pane {
 
     pub fn path_is_dir(&self) -> bool {
         Path::new(&self.path).is_dir()
+    }
+
+    // -----------------------------------------------------------------------
+    // Added feature: the picture gallery
+    // -----------------------------------------------------------------------
+
+    /// The pictures the gallery and its viewer work on, in the order the pane
+    /// shows them: the visible listing (search results while searching), with
+    /// folders and non-picture files dropped. The image browser pages through
+    /// exactly this list, so arrow keys step through pictures, not files.
+    pub fn gallery_images(&self) -> Vec<PathBuf> {
+        self.display_entries()
+            .iter()
+            .filter(|e| !e.is_dir && e.is_image())
+            .map(|e| e.path.clone())
+            .collect()
+    }
+
+    /// Whether the gallery has anything to lay out: a folder of only documents
+    /// still shows its files, as the browser shows HTML files beside pictures.
+    pub fn pictures_shown(&self) -> bool {
+        self.pictures
+    }
+
+    /// Step the gallery's thumbnail size by one slider notch, staying inside
+    /// the browser's 50..400 px range.
+    pub fn thumb_by(&mut self, delta: f32) {
+        self.thumb_px = crate::gallery::clamp_thumb(self.thumb_px + delta);
     }
 }

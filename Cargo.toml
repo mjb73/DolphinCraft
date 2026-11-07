@@ -13,7 +13,14 @@ keywords = ["file-manager", "files", "egui", "dolphin", "desktop"]
 [dependencies]
 eframe = { version = "0.33", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
 egui = "0.33"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "bmp",
+    "tiff",
+    "webp",
+] }
 chrono = "0.4"
 libc = "0.2"
 walkdir = "2"

@@ -920,6 +920,113 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // ---- added feature: the picture wall, its captions and its prompt reader ----
+    r.check(
+        "thumbnail size stops at 400 px",
+        (|| {
+            use crate::gallery::{card_size, clamp_thumb, THUMB_MAX, THUMB_MIN};
+            if clamp_thumb(9999.0) != THUMB_MAX {
+                return Err(format!("a huge size becomes {}", clamp_thumb(9999.0)));
+            }
+            if clamp_thumb(1.0) != THUMB_MIN {
+                return Err(format!("a tiny size becomes {}", clamp_thumb(1.0)));
+            }
+            let small = card_size(THUMB_MIN, true, true);
+            let large = card_size(THUMB_MAX, true, true);
+            if !(large.x > small.x && large.y > small.y) {
+                return Err("the biggest card is not bigger than the smallest".into());
+            }
+            Ok(format!(
+                "{THUMB_MIN:.0}..{THUMB_MAX:.0} px, a 400 px card is {:.0}×{:.0}",
+                large.x, large.y
+            ))
+        })(),
+    );
+    r.check(
+        "a picture's dimension caption reads like the browser's",
+        (|| {
+            let caption = crate::gallery::dims_caption(Some((1920, 1080)));
+            if caption != "1920×1080:AR 1.78:MP 2.07" {
+                return Err(format!("caption reads {caption:?}"));
+            }
+            let ratio = crate::gallery::ratio_label(1200, 900);
+            if ratio != "4:3" {
+                return Err(format!("1200×900 reads as {ratio:?}"));
+            }
+            Ok(format!("{caption}, 1200×900 is {ratio}"))
+        })(),
+    );
+    r.check(
+        "the slideshow waits for its interval and then moves on",
+        (|| {
+            use crate::gallery::{clamp_slide, Slide, SLIDE_MAX, SLIDE_MIN};
+            let mut slide = Slide::new(1.0);
+            let start = slide.started;
+            if slide.tick(start) {
+                return Err("the first picture was replaced at once".into());
+            }
+            if !slide.tick(start + Duration::from_millis(1100)) {
+                return Err("the second picture never came".into());
+            }
+            if clamp_slide(0.01) != SLIDE_MIN || clamp_slide(999.0) != SLIDE_MAX {
+                return Err("the interval is not held inside its range".into());
+            }
+            if crate::gallery::FADE_MS != 300 {
+                return Err("the fade is not 300 ms".into());
+            }
+            Ok(format!(
+                "1 s interval, {SLIDE_MIN}..{SLIDE_MAX} s, {} ms fade",
+                crate::gallery::FADE_MS
+            ))
+        })(),
+    );
+    r.check(
+        "a generated picture's prompt is read from its own file",
+        (|| {
+            use crate::imagemeta;
+            // A PNG needs only its signature, a tEXt chunk and IEND for the
+            // reader; the pixels are irrelevant to metadata, and writing a real
+            // compressed image here would need a compressor.
+            let png = base.join("metadata/prompt.png");
+            let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+            let text = b"parameters\0a lighthouse at dusk\nNegative prompt: blurry\nSteps: 28, Sampler: DPM++ 2M, CFG scale: 6.5, Seed: 42, Size: 832x1216, Model: horizon-xl";
+            bytes.extend_from_slice(&(text.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(b"tEXt");
+            bytes.extend_from_slice(text);
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            bytes.extend_from_slice(b"IEND");
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            write(&png, &bytes)?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+            if meta.prompt.as_deref() != Some("a lighthouse at dusk") {
+                return Err(format!("prompt reads {:?}", meta.prompt));
+            }
+            if meta.negative.as_deref() != Some("blurry") {
+                return Err(format!("negative reads {:?}", meta.negative));
+            }
+            let field = |k: &str| {
+                meta.fields
+                    .iter()
+                    .find(|(a, _)| a == k)
+                    .map(|(_, v)| v.as_str())
+                    .unwrap_or("")
+            };
+            if field("Steps") != "28" || field("Seed") != "42" || field("Model") != "horizon-xl" {
+                return Err(format!("fields read {:?}", meta.fields));
+            }
+            let plain = base.join("metadata/plain.png");
+            write(&plain, b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IEND\x00\x00\x00\x00")?;
+            if imagemeta::read(&plain).is_some() {
+                return Err("a plain PNG was given a prompt".into());
+            }
+            Ok(format!(
+                "prompt, negative and {} fields read from the tEXt chunk",
+                meta.fields.len()
+            ))
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

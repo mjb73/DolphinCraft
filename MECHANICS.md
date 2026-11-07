@@ -144,6 +144,16 @@ These do not exist in the original and are labelled as additions in the UI:
    these tools against a throw-away folder and a throw-away home, so trash
    records, duplicate grouping, bulk rename and search can be verified without
    touching the person's own files.
+10. Picture wall — a grid of picture cards (with folders beside them) replacing
+    the list, thumbnail size 50..400 px, rounded corners, hide-names and
+    show-dimensions switches. Values read from the person's image browser; see
+    the section at the end of this sheet.
+11. Full-window picture viewer with zoom, pan and a Prompt panel that reads the
+    generation settings out of the picture file.
+12. Full-screen slideshow with an interval in seconds and a 300 ms cross-fade,
+    both changeable while it plays.
+13. Side-by-side picture comparison, with the browser's three modes (side,
+    split, overlay), synced zoom and a swap.
 
 ## Thumbnails follow the zoom level (asked for by the person)
 
@@ -1054,3 +1064,59 @@ row all read it, and `--selftest` has a case that fails if it stops being
 `"DolphinCraft"`. The application-menu shortcut that was installed for this build
 was renamed to match, and its window-class hint now says `dolphincraft` as well,
 so the task bar groups the window under the right name instead of the original's.
+
+## The picture wall, the viewer, the slideshow and the comparison (asked for by the person)
+
+This is the second batch of additions: a wall of picture cards inside the file
+manager, a full-window viewer that reads a generated picture's prompt out of the
+file, a full-screen slideshow with a switchable fade, and a side-by-side picture
+comparison.
+
+None of these exist in the original. Checked, not assumed: the string table of
+`/usr/bin/dolphin` and of `libdolphinprivate.so.6` has no "slideshow", no
+"full screen" viewer and no image comparison — its only "Compare" is
+`compareFiles` / "Compare Files", which diffs two text files. So there is no
+original code to decompile for these features, and no dolphin constant to copy.
+The numbers come from the person's own image browser
+(`~/personal-files/python-projects/image-browser-styled`), which is what they
+were comparing against; each value below was read from those sources, not
+guessed, and the sources are the ones the browser uses at runtime.
+
+| what | value | where it comes from |
+| --- | --- | --- |
+| thumbnail size slider | 50 … 400 px, first value 200 px | `templates/browser.html` `#sizeSlider` `min="50" max="400" value="200"` |
+| grid gap between cards | 12 px | `static/css/browser.css` `.images { gap: 12px }` |
+| padding inside a card | 8 px | `static/css/browser.css` `.image { padding: 8px }` |
+| picture corner radius ("rounded") | 10 px | `static/css/browser.css` `.image img { border-radius: 10px }` |
+| dimension line | `W×H:AR a.bc:MP d.dd` | `templates/browser.html` line 203, the `show_dims` block: `{{ width }}×{{ height }}:AR {{ aspect_ratio }}:MP {{ megapixels }}` |
+| slideshow interval | 1 s first, 0.5 s steps | `templates/browser.html` `#slide-interval` `min="0.5" value="1" step="0.5"` |
+| slideshow fade | 300 ms | `static/js/browser.js` `startSlideshow`, the second `setTimeout(..., 300)` around the picture swap |
+| comparison modes | side, split, overlay | `#compare-modal` toolbar |
+| comparison overlay opacity | 50 % first | `#compareOpacitySlider` `min="0" max="100" value="50"` |
+| comparison zoom | ×1.25 / ÷1.25 buttons, ×1.1 / ×0.9 per wheel notch, clamped 0.1 … 20 | `compareZoomIn`, `compareZoomOut`, `initCompareZoomWheel`, `stepCompareZoom` |
+
+The original's own picture size ladder was measured for contrast: it stops at
+**256 px** (`ZoomLevelInfo::maximumLevel()` @0x1a6530 returns 16 and
+`ZoomLevelInfo::iconSizeForZoomLevel(int)` @0x1a6540 returns `level * 16` above
+level 4), so a 400 px ceiling is an addition, not a copy. The 30 s upper limit of
+the slideshow, the fade switch, and the "Hide names / Show dimensions / Rounded"
+toggles as separate switches are this build's own: the browser carries those
+choices as URL parameters (`hide=1`, `dims=1`) and always fades, so there was no
+number to read for them. They are recorded as such in `mechanics.json`.
+
+Two things the browser does that this build deliberately does not: its
+"explode" folder mode (folders opened into the grid) and its browser-page
+navigation buttons. Folders simply sit in the wall as folder cards, and the
+file manager's own path bar does the navigation.
+
+The prompt reader is not from the browser either — it reads the file format
+itself: the PNG `tEXt` chunk named `parameters` (A1111 / Forge) or
+`workflow`/`prompt` JSON (ComfyUI), and the JPEG `Exif` `UserComment`
+(A1111-written JPEGs). Fields lifted out: prompt, negative prompt, steps,
+sampler, CFG scale, seed, size, model, denoising strength. A picture with none
+of these shows no Prompt panel rather than invented text.
+
+Verified in the running window (pictures in `app/shots/final/`): `wall400.png`
+(400 px cards), `wall-dims.png` (the dimension line under each name),
+`viewer.png` (the Prompt panel with the 9 fields read from a hand-built PNG),
+`compare3.png` (two pictures side by side with the Side/Split/Overlay bar).

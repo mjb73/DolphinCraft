@@ -1041,6 +1041,110 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: &str, tint: Color3
                 PathStroke::NONE,
             ));
         }
+        // Added feature — the gallery's own small marks: a picture frame, a
+        // minus sign, fit-to-window corners, play/pause, and the compare mark.
+        "pictures" => {
+            let frame = Rect::from_center_size(c, Vec2::splat(s * 1.9));
+            painter.rect_stroke(frame, CornerRadius::same(2), Stroke::new(1.5, tint), egui::StrokeKind::Inside);
+            // A little horizon and a sun, so the frame reads as a photograph.
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(frame.left() + s * 0.25, frame.bottom() - s * 0.25),
+                    Pos2::new(frame.left() + s * 0.85, frame.center().y + s * 0.1),
+                    Pos2::new(frame.right() - s * 0.25, frame.bottom() - s * 0.25),
+                ],
+                tint,
+                PathStroke::NONE,
+            ));
+            painter.circle_filled(
+                Pos2::new(frame.right() - s * 0.55, frame.top() + s * 0.55),
+                s * 0.2,
+                tint,
+            );
+        }
+        "minus" => {
+            painter.line_segment(
+                [Pos2::new(c.x - s * 0.7, c.y), Pos2::new(c.x + s * 0.7, c.y)],
+                st,
+            );
+        }
+        "fit" => {
+            let b = Rect::from_center_size(c, Vec2::splat(s * 1.7));
+            let arm = s * 0.55;
+            for (corner, dx, dy) in [
+                (Pos2::new(b.left(), b.top()), 1.0f32, 1.0f32),
+                (Pos2::new(b.right(), b.top()), -1.0, 1.0),
+                (Pos2::new(b.left(), b.bottom()), 1.0, -1.0),
+                (Pos2::new(b.right(), b.bottom()), -1.0, -1.0),
+            ] {
+                painter.line_segment([corner, Pos2::new(corner.x + arm * dx, corner.y)], st);
+                painter.line_segment([corner, Pos2::new(corner.x, corner.y + arm * dy)], st);
+            }
+        }
+        "play" => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(c.x - s * 0.5, c.y - s * 0.85),
+                    Pos2::new(c.x + s * 0.85, c.y),
+                    Pos2::new(c.x - s * 0.5, c.y + s * 0.85),
+                ],
+                tint,
+                PathStroke::NONE,
+            ));
+        }
+        "pause" => {
+            for dx in [-0.35f32, 0.35] {
+                painter.rect_filled(
+                    Rect::from_center_size(
+                        Pos2::new(c.x + s * dx, c.y),
+                        Vec2::new(s * 0.4, s * 1.7),
+                    ),
+                    CornerRadius::same(1),
+                    tint,
+                );
+            }
+        }
+        "compare" => {
+            for (dx, dy) in [(-0.25f32, -0.25f32), (0.25, 0.25)] {
+                painter.rect_stroke(
+                    Rect::from_center_size(
+                        Pos2::new(c.x + s * dx, c.y + s * dy),
+                        Vec2::splat(s * 1.25),
+                    ),
+                    CornerRadius::same(1),
+                    Stroke::new(1.4, tint),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        "chevron_left" => {
+            painter.line_segment(
+                [Pos2::new(c.x + s * 0.3, c.y - s * 0.6), Pos2::new(c.x - s * 0.4, c.y)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x - s * 0.4, c.y), Pos2::new(c.x + s * 0.3, c.y + s * 0.6)],
+                st,
+            );
+        }
+        "swap" => {
+            painter.line_segment(
+                [Pos2::new(c.x - s, c.y - s * 0.35), Pos2::new(c.x + s * 0.8, c.y - s * 0.35)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x - s, c.y + s * 0.35), Pos2::new(c.x + s * 0.8, c.y + s * 0.35)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x + s * 0.8, c.y - s * 0.35), Pos2::new(c.x + s * 0.4, c.y - s * 0.7)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x - s * 0.8, c.y + s * 0.35), Pos2::new(c.x - s * 0.4, c.y + s * 0.7)],
+                st,
+            );
+        }
         _ => {}
     }
 }

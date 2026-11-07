@@ -9,6 +9,8 @@ pub const APP_NAME: &str = "DolphinCraft";
 mod config;
 mod foldercolor;
 mod fsutil;
+mod gallery;
+mod imagemeta;
 mod panels;
 mod search;
 mod selftest;
@@ -59,7 +61,7 @@ pub const TOOLBAR_BAR_MIN: f32 = 110.0;
 /// Seven icon buttons, the two 4 px separators (each also costs one item gap)
 /// and the nine item gaps between the ten things in the cluster.
 pub const TOOLBAR_CLUSTER_FIXED: f32 =
-    7.0 * TOOLBAR_ICON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP) + 9.0 * TOOLBAR_ITEM_GAP;
+    8.0 * TOOLBAR_ICON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP) + 10.0 * TOOLBAR_ITEM_GAP;
 
 /// How much of the sort control is shown. It gives way, label first, so the
 /// location bar keeps a workable width in a narrow window.
@@ -191,6 +193,18 @@ pub struct App {
     pub size_rx: Receiver<(PathBuf, u64)>,
     pub size_tx: Sender<(PathBuf, u64)>,
     pub shot: Option<Shot>,
+    /// Added feature: the picture viewer, when one is open, and the loader that
+    /// feeds it full-size pictures.
+    pub viewer: Option<gallery::Viewer>,
+    pub big: gallery::BigCache,
+    /// A picture asked for on the command line, opened on the first frame.
+    pub pending_viewer: Option<(PathBuf, bool)>,
+    /// What each picture's own file says about how it was generated. Read once
+    /// per file and kept, so the information panel does not parse a PNG every
+    /// frame.
+    pub image_meta: HashMap<PathBuf, Option<imagemeta::ImageMeta>>,
+    /// Open the viewer's comparison as soon as that picture is up.
+    pub pending_compare: Option<gallery::CompareMode>,
     pub frames: u64,
     pub config_dirty: bool,
     pub next_pane_id: usize,
@@ -210,6 +224,11 @@ impl App {
         start_zoom: Option<u8>,
         start_view: Option<usize>,
         keep_settings: bool,
+        start_viewer: Option<(PathBuf, bool)>,
+        start_pictures: bool,
+        start_thumbs: Option<f32>,
+        start_compare: Option<gallery::CompareMode>,
+        start_dims: bool,
     ) -> Self {
         theme::install(&cc.egui_ctx);
         if shot.is_some() {
@@ -260,6 +279,17 @@ impl App {
         pane.previews = cfg.previews;
         pane.folders_first = cfg.folders_first;
         pane.name_sort = state::NameSort::from_index(cfg.name_sort);
+        // Added feature: the gallery's own last state, restored like the rest of
+        // the window's furniture.
+        pane.pictures = cfg.pictures || start_pictures;
+        pane.thumb_px = gallery::clamp_thumb(start_thumbs.unwrap_or(cfg.thumb_px));
+        pane.gallery_names = cfg.gallery_names;
+        pane.gallery_dims = cfg.gallery_dims;
+        if start_dims {
+            // `--dims` starts the wall with the size line already showing.
+            pane.gallery_dims = true;
+        }
+        pane.gallery_round = cfg.gallery_round;
         if cfg.show_hidden {
             pane.reload();
         }
@@ -294,6 +324,11 @@ impl App {
                 path: p,
                 requested: false,
             }),
+            viewer: None,
+            big: gallery::BigCache::new(),
+            pending_viewer: start_viewer,
+            image_meta: HashMap::new(),
+            pending_compare: start_compare,
             frames: 0,
             config_dirty: false,
             next_pane_id: next_id,
@@ -521,6 +556,18 @@ impl App {
                             self.config_dirty = true;
                         }
                         ui.add_space(4.0);
+                        // Added feature: the picture gallery, one button beside
+                        // the three view modes it stands in for.
+                        let pictures = self.pane().pictures;
+                        if toolbar_button_active(ui, "pictures", pictures)
+                            .on_hover_text("Pictures — thumbnails of this folder (F4)")
+                            .clicked()
+                        {
+                            let pane = self.pane_mut();
+                            pane.pictures = !pane.pictures;
+                            self.config.pictures = pane.pictures;
+                            self.config_dirty = true;
+                        }
                         for mode in [ViewMode::Details, ViewMode::Compact, ViewMode::Icons] {
                             let glyph = match mode {
                                 ViewMode::Icons => "grid",
@@ -1170,8 +1217,64 @@ impl App {
                     let mut zoom_value = self.pane().zoom[view_idx] as f32;
                     let icon = self.pane().icon_size() as u32;
                     let mut zoom_changed = false;
+                    // In the gallery the same − slider + strip changes the
+                    // thumbnail size instead, over the browser's 50..400 px range.
+                    let pictures = self.pane().pictures;
+                    let mut thumb_value = self.pane().thumb_px;
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if pictures {
+                            if small_button(ui, "+").on_hover_text("Bigger thumbnails").clicked() {
+                                self.pane_mut().thumb_by(25.0);
+                                self.config.thumb_px = self.pane().thumb_px;
+                                self.config_dirty = true;
+                            }
+                            let slider = ui.add_sized(
+                                Vec2::new(110.0, 14.0),
+                                egui::Slider::new(&mut thumb_value, 50.0..=400.0)
+                                    .show_value(false)
+                                    .step_by(1.0),
+                            );
+                            if slider.changed() {
+                                let px = gallery::clamp_thumb(thumb_value);
+                                self.pane_mut().thumb_px = px;
+                                self.config.thumb_px = px;
+                                self.config_dirty = true;
+                            }
+                            if small_button(ui, "−").on_hover_text("Smaller thumbnails").clicked() {
+                                self.pane_mut().thumb_by(-25.0);
+                                self.config.thumb_px = self.pane().thumb_px;
+                                self.config_dirty = true;
+                            }
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} px",
+                                    self.pane().thumb_px.round() as u32
+                                ))
+                                .size(11.0)
+                                .color(TEXT_FAINT),
+                            );
+                            ui.add_space(14.0);
+                            if let Some((f, t)) = fsutil::free_space(&self.pane().current_dir()) {
+                                if t > 0 {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} free",
+                                            fsutil::format_size(f)
+                                        ))
+                                        .size(11.0)
+                                        .color(TEXT_FAINT),
+                                    )
+                                    .on_hover_text(format!(
+                                        "{} free out of {} ({}% used)",
+                                        fsutil::format_size(f),
+                                        fsutil::format_size(t),
+                                        fsutil::used_percent(f, t)
+                                    ));
+                                }
+                            }
+                            return;
+                        }
                         if small_button(ui, "+").on_hover_text("Zoom in").clicked() {
                             self.pane_mut().zoom_by(1);
                             zoom_changed = true;
@@ -1697,7 +1800,29 @@ impl App {
                     self.config.zoom = zoom;
                     self.config_dirty = true;
                 }
-                Request::Toast(msg) => self.toast(&msg),
+                Request::OpenViewer(path, play) => {
+                    self.open_viewer(&path, play);
+                }
+                Request::GalleryChanged => {
+                    self.config.thumb_px = self.pane().thumb_px;
+                    self.config.gallery_names = self.pane().gallery_names;
+                    self.config.gallery_dims = self.pane().gallery_dims;
+                    self.config.gallery_round = self.pane().gallery_round;
+                    self.config_dirty = true;
+                }
+                Request::Toast(msg) => {
+                    if let Some(partner) = msg.strip_prefix("__compare__") {
+                        if let Some(viewer) = self.viewer.as_mut() {
+                            if viewer.start_compare() {
+                                if let Some(cmp) = viewer.compare.as_mut() {
+                                    cmp.b = PathBuf::from(partner);
+                                }
+                            }
+                        }
+                    } else {
+                        self.toast(&msg)
+                    }
+                }
             }
         }
         self.poll_background();
@@ -1921,6 +2046,12 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // The picture viewer is a layer of its own: while it is open it owns the
+        // keyboard, so no file-manager shortcut can fire behind it.
+        if self.viewer.is_some() {
+            self.viewer_keys(ctx);
+            return;
+        }
         let typing = ctx.wants_keyboard_input();
         let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if esc {
@@ -2045,6 +2176,9 @@ impl App {
             if i.consume_key(Modifiers::NONE, Key::F3) {
                 reqs.push(Request::Toast("__split__".into()));
             }
+            if i.consume_key(Modifiers::NONE, Key::F4) {
+                reqs.push(Request::Toast("__pictures__".into()));
+            }
             if i.consume_key(Modifiers::NONE, Key::F5) {
                 reqs.push(Request::Toast("__refresh__".into()));
             }
@@ -2165,6 +2299,13 @@ impl App {
             "__forward__" => self.pane_mut().go_forward(),
             "__up__" => self.pane_mut().go_up(),
             "__refresh__" => self.pane_mut().reload(),
+            "__pictures__" => {
+                // Added feature: the picture gallery on and off (F4).
+                let pane = self.pane_mut();
+                pane.pictures = !pane.pictures;
+                self.config.pictures = pane.pictures;
+                self.config_dirty = true;
+            }
             "__split__" => {
                 if self.split {
                     self.unsplit();
@@ -2353,6 +2494,31 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // A picture named on the command line opens on the very first frame, so
+        // a captured window shows the viewer and not an empty desktop.
+        if let Some((path, play)) = self.pending_viewer.take() {
+            if path.is_file() {
+                self.open_viewer(&path, play);
+            }
+        }
+        // A comparison asked for on the command line is asked for before the
+        // folder has been read, so the viewer may still hold only the picture it
+        // was opened with. Keep the request until the list has a second picture
+        // instead of dropping it on the first frame; then it is applied once.
+        if let Some(mode) = self.pending_compare {
+            let mut applied = false;
+            if let Some(viewer) = self.viewer.as_mut() {
+                if viewer.items.len() >= 2 && viewer.start_compare() {
+                    if let Some(cmp) = viewer.compare.as_mut() {
+                        cmp.mode = mode;
+                    }
+                    applied = true;
+                }
+            }
+            if applied || self.viewer.is_none() || self.frames > 240 {
+                self.pending_compare = None;
+            }
+        }
         self.handle_shortcuts(ctx);
         self.top_toolbar(ctx);
         self.tab_strip(ctx);
@@ -2363,7 +2529,11 @@ impl eframe::App for App {
         self.handle_requests(ctx);
         self.toast_ui(ctx);
         self.dialogs(ctx);
+        // The viewer is drawn last, over everything, the way the browser's
+        // viewer covers its page.
+        self.viewer_ui(ctx);
         self.thumbs.poll(ctx);
+        self.big.poll(ctx);
 
         // A captured picture must not rewrite the person's settings.
         if self.config_dirty && self.shot.is_none() {
@@ -2377,6 +2547,11 @@ impl eframe::App for App {
             cfg.zoom = self.pane().zoom;
             cfg.folders_first = self.pane().folders_first;
             cfg.name_sort = self.pane().name_sort.index();
+            cfg.pictures = self.pane().pictures;
+            cfg.thumb_px = self.pane().thumb_px;
+            cfg.gallery_names = self.pane().gallery_names;
+            cfg.gallery_dims = self.pane().gallery_dims;
+            cfg.gallery_round = self.pane().gallery_round;
             cfg.last_dir = self.pane().current_dir().display().to_string();
             cfg.save();
             self.config = cfg;
@@ -2848,6 +3023,14 @@ fn main() -> eframe::Result<()> {
     // `--keep-settings` takes the picture with the saved settings instead of
     // factory ones: the person's own shortcuts, colours and layout.
     let mut keep_settings = false;
+    // Added feature: start in the picture gallery, or straight in the viewer on
+    // a named picture (with `--play` running its slideshow).
+    let mut start_pictures = false;
+    let mut start_viewer: Option<(PathBuf, bool)> = None;
+    let mut play = false;
+    let mut start_compare: Option<gallery::CompareMode> = None;
+    let mut start_thumbs: Option<f32> = None;
+    let mut start_dims = false;
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--selftest") {
         std::process::exit(selftest::run());
@@ -2888,6 +3071,35 @@ fn main() -> eframe::Result<()> {
             "--keep-settings" => {
                 keep_settings = true;
             }
+            "--pictures" | "--gallery" => start_pictures = true,
+            "--dims" => start_dims = true,
+            "--play" | "--slideshow" => play = true,
+            "--compare" => {
+                start_compare = Some(match args.get(i + 1).map(|s| s.as_str()) {
+                    Some("split") => gallery::CompareMode::Split,
+                    Some("overlay") => gallery::CompareMode::Overlay,
+                    Some("side") => gallery::CompareMode::Side,
+                    _ => gallery::CompareMode::Side,
+                });
+                if matches!(
+                    args.get(i + 1).map(|s| s.as_str()),
+                    Some("split") | Some("overlay") | Some("side")
+                ) {
+                    i += 1;
+                }
+            }
+            "--thumbs" => {
+                if i + 1 < args.len() {
+                    start_thumbs = args[i + 1].parse::<f32>().ok();
+                    i += 1;
+                }
+            }
+            "--viewer" => {
+                if i + 1 < args.len() {
+                    start_viewer = Some((PathBuf::from(&args[i + 1]), play));
+                    i += 1;
+                }
+            }
             other => {
                 if start_dir.is_none() {
                     let p = PathBuf::from(other);
@@ -2912,6 +3124,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     let shot = screenshot.clone();
+    let viewer_arg = start_viewer.clone().map(|(path, _)| (path, play));
     eframe::run_native(
         APP_NAME,
         options,
@@ -2923,6 +3136,11 @@ fn main() -> eframe::Result<()> {
                 start_zoom,
                 start_view,
                 keep_settings,
+                viewer_arg.clone(),
+                start_pictures,
+                start_thumbs,
+                start_compare,
+                start_dims,
             )))
         }),
     )

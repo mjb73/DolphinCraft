@@ -86,10 +86,16 @@ impl Pane {
             vctx.reqs.push(Request::ZoomChanged);
         }
 
-        match self.view {
-            ViewMode::Details => self.ui_details(&mut child, vctx),
-            ViewMode::Icons => self.ui_icons(&mut child, vctx),
-            ViewMode::Compact => self.ui_compact(&mut child, vctx),
+        if self.pictures {
+            // The gallery replaces whichever of the three layouts is underneath,
+            // so turning it off puts the folder back exactly as it was.
+            self.ui_pictures(&mut child, vctx);
+        } else {
+            match self.view {
+                ViewMode::Details => self.ui_details(&mut child, vctx),
+                ViewMode::Icons => self.ui_icons(&mut child, vctx),
+                ViewMode::Compact => self.ui_compact(&mut child, vctx),
+            }
         }
 
         // Active view marker: a thin line along the top of the focused view.
@@ -994,7 +1000,7 @@ impl Pane {
     // Shared row behaviour
     // -----------------------------------------------------------------------
 
-    fn handle_row_interaction(
+    pub(crate) fn handle_row_interaction(
         &mut self,
         ui: &mut egui::Ui,
         _rect: Rect,
@@ -1014,7 +1020,20 @@ impl Pane {
         }
         if resp.double_clicked() {
             self.select_single(idx);
-            self.open_entry(idx, vctx.reqs);
+            let picture = self
+                .display_entries()
+                .get(idx)
+                .map(|e| !e.is_dir && e.is_image())
+                .unwrap_or(false);
+            if self.pictures && picture {
+                // In the gallery a double click opens the picture in the
+                // viewer, the way clicking one opens it in the browser.
+                if let Some(entry) = self.display_entries().get(idx) {
+                    vctx.reqs.push(Request::OpenViewer(entry.path.clone(), false));
+                }
+            } else {
+                self.open_entry(idx, vctx.reqs);
+            }
         }
         if resp.middle_clicked() {
             if let Some(entry) = self.display_entries().get(idx).cloned() {
@@ -1051,6 +1070,14 @@ impl Pane {
                 }
                 if ui.button("Open").clicked() {
                     vctx.reqs.push(Request::OpenPath(entry.path.clone()));
+                    ui.close();
+                }
+                if !entry.is_dir && entry.is_image() && ui.button("Open in Picture Viewer").clicked() {
+                    vctx.reqs.push(Request::OpenViewer(entry.path.clone(), false));
+                    ui.close();
+                }
+                if !entry.is_dir && entry.is_image() && ui.button("Picture Slideshow").clicked() {
+                    vctx.reqs.push(Request::OpenViewer(entry.path.clone(), true));
                     ui.close();
                 }
                 if entry.is_dir {

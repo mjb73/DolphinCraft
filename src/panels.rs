@@ -101,6 +101,33 @@ impl App {
         if ui.checkbox(&mut previews, "Show Preview").changed() {
             self.pane_mut().previews = previews;
         }
+        // Added feature: the picture gallery, and its viewer for whichever
+        // picture is selected.
+        let mut pictures = self.pane().pictures;
+        if ui
+            .checkbox(&mut pictures, "Pictures (Gallery)")
+            .on_hover_text("Thumbnails of this folder at 50–400 px, with a viewer and a slideshow (F4)")
+            .changed()
+        {
+            self.pane_mut().pictures = pictures;
+            self.config.pictures = pictures;
+            self.config_dirty = true;
+        }
+        let picture = self
+            .pane()
+            .primary_selection()
+            .filter(|e| !e.is_dir && e.is_image())
+            .map(|e| e.path.clone());
+        if let Some(path) = picture {
+            if crate::menu_row(ui, "Open in Picture Viewer", "C").clicked() {
+                self.reqs.push(Request::OpenViewer(path.clone(), false));
+                ui.close();
+            }
+            if crate::menu_row(ui, "Slideshow from Here", "Space").clicked() {
+                self.reqs.push(Request::OpenViewer(path, true));
+                ui.close();
+            }
+        }
         let mut split = self.split;
         if ui.checkbox(&mut split, "Split View").changed() {
             if split {
@@ -360,6 +387,24 @@ impl App {
                     fsutil::format_size(entry.size)
                 };
                 info_row(ui, "Type", &entry.type_label());
+                // Added feature, adopted from the image browser's dimension
+                // caption: the pixel size, the ratio and the megapixels of a
+                // picture, read from its header rather than by decoding it.
+                if !entry.is_dir && entry.is_image() {
+                    if let Some((w, h)) = crate::search::probe_image_size(&entry.path) {
+                        info_row(ui, "Dimensions", &format!("{} × {} px", w, h));
+                        info_row(
+                            ui,
+                            "Aspect ratio",
+                            &format!(
+                                "{} ({:.2}:1)",
+                                crate::gallery::ratio_label(w, h),
+                                w as f32 / h.max(1) as f32
+                            ),
+                        );
+                        info_row(ui, "Pixels", &crate::gallery::megapixels(w, h));
+                    }
+                }
                 info_row(ui, "Size", &size_text);
                 info_row(ui, "Modified", &fsutil::human_date(entry.modified));
                 info_row(ui, "Accessed", &fsutil::human_date(entry.accessed));
@@ -374,6 +419,26 @@ impl App {
                 );
                 if let Some(orig) = &entry.original {
                     info_row(ui, "Originally", &orig.display().to_string());
+                }
+                // Added feature: what the picture itself says — its pixel size
+                // and, for a picture made by a text-to-image tool, the prompt
+                // stored in its metadata.
+                if entry.is_image() {
+                    ui.add_space(4.0);
+                    if let Some((w, h)) = crate::search::probe_image_size(&entry.path) {
+                        info_row(ui, "Dimensions", &format!("{w} × {h}"));
+                        info_row(ui, "Aspect", &crate::gallery::ratio_label(w, h));
+                        info_row(ui, "Pixels", &crate::gallery::megapixels(w, h));
+                    }
+                    ui.add_space(6.0);
+                    let path = entry.path.clone();
+                    if !self.image_meta.contains_key(&path) {
+                        let meta = crate::imagemeta::read(&path);
+                        self.image_meta.insert(path.clone(), meta);
+                    }
+                    let meta = self.image_meta.get(&path).and_then(|m| m.as_ref());
+                    crate::gallery::prompt_panel(ui, meta);
+                    ui.add_space(4.0);
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {

@@ -57,6 +57,34 @@ pub struct Config {
     /// Colours the person gave to rows of the Shortcuts panel, keyed by folder.
     #[serde(default)]
     pub shortcut_colors: Vec<ShortcutColor>,
+    /// Added feature: the picture gallery was the last presentation used, and
+    /// how big its thumbnails were, whether names and dimension captions were
+    /// shown. The gallery's own size range is 50..400 px.
+    #[serde(default)]
+    pub pictures: bool,
+    #[serde(default = "gallery_thumb")]
+    pub thumb_px: f32,
+    #[serde(default = "yes")]
+    pub gallery_names: bool,
+    #[serde(default)]
+    pub gallery_dims: bool,
+    /// Rounded corners on the gallery's thumbnails.
+    #[serde(default = "yes")]
+    pub gallery_round: bool,
+    /// Slideshow interval in seconds and whether pictures cross-fade. Kept
+    /// between runs so the show starts the way the person left it.
+    #[serde(default = "slide_secs")]
+    pub slide_secs: f32,
+    #[serde(default = "yes")]
+    pub slide_fade: bool,
+}
+
+fn slide_secs() -> f32 {
+    crate::gallery::SLIDE_DEFAULT
+}
+
+fn gallery_thumb() -> f32 {
+    crate::gallery::THUMB_DEFAULT
 }
 
 fn yes() -> bool {
@@ -98,6 +126,13 @@ impl Default for Config {
             shortcuts_expanded: true,
             shortcut_keys: true,
             shortcut_colors: Vec::new(),
+            pictures: false,
+            thumb_px: crate::gallery::THUMB_DEFAULT,
+            gallery_names: true,
+            gallery_dims: false,
+            gallery_round: true,
+            slide_secs: crate::gallery::SLIDE_DEFAULT,
+            slide_fade: true,
         }
     }
 }
