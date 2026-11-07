@@ -40,6 +40,13 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   in the picture wall, the same 16–400 px ladder here), plus switches for
   **Names**, **Dimensions**, **Rounded** corners and **Previews**. The same
   switches are in the app menu under *Pictures*.
+- **Find in Files** (Ctrl+Shift+F): the find bar filters *names*; this window
+  reads inside them. Three modes worded the way Dolphin words them — *File
+  names*, *File names and contents*, *File contents* — with a *Case sensitive*
+  switch and an *Include binary files* switch, one row per file carrying the
+  line the phrase was written on, and **Show** / **Open** beside every row. It
+  never follows links, leaves hidden folders out, skips anything over 4 MB, and
+  its summary line says exactly what it passed over.
 - **Picture wall**: a wall of picture cards from 50 to 400 px. Every thumbnail is
   cut to its picture's own shape and every row is packed at exactly the size on
   the slider — the last row too, so no row jumps out bigger than the rest — with
