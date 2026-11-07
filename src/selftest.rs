@@ -3757,6 +3757,28 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
         })(),
     );
     r.check(
+        "the size of what is marked is added up off the drawing thread",
+        (|| {
+            let dir = base.join("arch-size");
+            write(&dir.join("tree/a"), b"1234567890")?;
+            write(&dir.join("tree/sub/b"), b"12345")?;
+            let mut c = crate::archive::Compress::new(vec![dir.join("tree")], dir.clone());
+            if c.total.is_some() {
+                return Err("the size was there before the walk could have run".into());
+            }
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while c.total.is_none() && Instant::now() < deadline {
+                c.poll_total();
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            match c.total {
+                None => Err("the size never arrived".into()),
+                Some(15) => Ok("15 bytes, counted in the background".into()),
+                Some(other) => Err(format!("the walk reported {other} bytes, wanted 15")),
+            }
+        })(),
+    );
+    r.check(
         "a folder whose name ends in .zip is a folder, not an archive",
         (|| {
             let fake = arc.join("not-really.zip");

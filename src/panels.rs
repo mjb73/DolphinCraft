@@ -1273,6 +1273,10 @@ impl App {
         if c.running() {
             ctx.request_repaint_after(Duration::from_millis(120));
         }
+        c.poll_total();
+        if c.total.is_none() {
+            ctx.request_repaint_after(Duration::from_millis(120));
+        }
         // The archive program's answer, once it has one.
         let mut finished: Option<PathBuf> = None;
         if let Some(answer) = c.poll() {
@@ -1294,8 +1298,12 @@ impl App {
             }
             return;
         }
-        let total = c.total();
+        let total = c.total;
         let count = c.paths.len();
+        let size_line = match total {
+            Some(bytes) => fsutil::format_size(bytes),
+            None => "adding up…".to_string(),
+        };
         let mut win_open = true;
         let mut go = false;
         let mut close = false;
@@ -1308,7 +1316,7 @@ impl App {
                         "{} item{} ({})",
                         count,
                         if count == 1 { "" } else { "s" },
-                        fsutil::format_size(total)
+                        size_line
                     ))
                     .size(12.0)
                     .color(TEXT),

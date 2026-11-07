@@ -318,11 +318,21 @@ pub struct Compress {
     pub error: Option<String>,
     pub job: Option<Job>,
     pub last_dest: Option<PathBuf>,
+    /// The size of everything marked, added up in the background when the
+    /// window opens: walking a large folder on the frame that draws the window
+    /// would freeze it for as long as the walk takes.
+    total_rx: Receiver<u64>,
+    pub total: Option<u64>,
 }
 
 impl Compress {
     pub fn new(paths: Vec<PathBuf>, dir: PathBuf) -> Self {
         let name = default_name(&paths, &dir);
+        let (tx, total_rx) = channel();
+        let counted = paths.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(total_size(&counted));
+        });
         Self {
             paths,
             dir,
@@ -331,11 +341,18 @@ impl Compress {
             error: None,
             job: None,
             last_dest: None,
+            total_rx,
+            total: None,
         }
     }
 
-    pub fn total(&self) -> u64 {
-        total_size(&self.paths)
+    /// Take the size once the background walk has it.
+    pub fn poll_total(&mut self) {
+        if self.total.is_none() {
+            if let Ok(size) = self.total_rx.try_recv() {
+                self.total = Some(size);
+            }
+        }
     }
 
     pub fn running(&self) -> bool {

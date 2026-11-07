@@ -2489,6 +2489,7 @@ they keep the plugin's own naming where it exists.
 | where an archive unpacks | a folder named after the archive (`holiday.tar.gz` → `holiday`), or the folder on show when the tick box is cleared | the plugin's extract-to-subfolder behaviour, **added** here |
 | which archives open | ZIP through `unzip -q -o … -d`, the tar family through `tar -xf … -C` | **added**; a missing program is reported as "… is not installed on this computer." |
 | a folder named `.zip` | a folder, never an archive | **added**, and checked |
+| the size shown in the window | counted on a background thread when the window opens, never on a drawing frame | **added**: walking a large folder while drawing would freeze the window |
 
 `--selftest` runs the real round trip: a folder with a hidden file and a
 sub-folder is compressed with the code the window uses, the archive is unpacked
