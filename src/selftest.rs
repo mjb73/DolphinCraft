@@ -33,6 +33,22 @@ fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
+/// A PNG carrying one `tEXt` chunk. That is all the prompt reader looks at, so
+/// the pixels can be left out — a real compressed image would need a compressor
+/// this program does not ship.
+fn png_with_prompt(text: &str) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    let chunk = format!("parameters\0{text}");
+    bytes.extend_from_slice(&(chunk.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(b"tEXt");
+    bytes.extend_from_slice(chunk.as_bytes());
+    bytes.extend_from_slice(&[0, 0, 0, 0]); // CRC, not checked by the reader
+    bytes.extend_from_slice(&[0, 0, 0, 0]);
+    bytes.extend_from_slice(b"IEND");
+    bytes.extend_from_slice(&[0, 0, 0, 0]);
+    bytes
+}
+
 fn wait_dup(scan: &mut DupScan) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     while scan.scanning && Instant::now() < deadline {
@@ -518,6 +534,41 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // A picture carrying a prompt can have its text chunk written before the
+    // image header. The size line used to read the width straight out of that
+    // text chunk and print numbers in the billions; the header is now hunted
+    // for down the chunk list.
+    r.check(
+        "a PNG with its text chunk before the image header reports its real size",
+        (|| {
+            use crate::search::probe_image_size;
+            let dir = base.join("headers");
+            let odd = dir.join("text-first.png");
+            let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+            let text = b"parameters\0a wide empty beach";
+            bytes.extend_from_slice(&(text.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(b"tEXt");
+            bytes.extend_from_slice(text);
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            let mut ihdr = Vec::new();
+            ihdr.extend_from_slice(&640u32.to_be_bytes());
+            ihdr.extend_from_slice(&480u32.to_be_bytes());
+            ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+            bytes.extend_from_slice(&(ihdr.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(b"IHDR");
+            bytes.extend_from_slice(&ihdr);
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            bytes.extend_from_slice(&0u32.to_be_bytes());
+            bytes.extend_from_slice(b"IEND");
+            bytes.extend_from_slice(&[0, 0, 0, 0]);
+            write(&odd, &bytes)?;
+            match probe_image_size(&odd) {
+                Some((640, 480)) => Ok("640 × 480 read past a text chunk of 26 bytes".into()),
+                other => Err(format!("the size line read {other:?} instead of 640 × 480")),
+            }
+        })(),
+    );
+
     // ---- status bar wording and the free-space share --------------------
     r.check(
         "the status bar counts folders and files the way the original does",
@@ -607,12 +658,16 @@ pub fn run() -> i32 {
                 pane.sort = crate::state::SortKey::Size;
                 pane.name_sort = mode;
                 pane.asc = true;
+                // The pane keeps the whole folder in `all` and the visible list in
+                // `entries`, so both are seeded here.
                 pane.entries.clear();
+                pane.all.clear();
                 for name in ["B.txt", "a.txt"] {
                     let mut e = fsutil::Entry::from_path(std::path::Path::new(&format!("/tmp/{name}")));
                     e.name = name.to_string();
                     e.size = 10;
-                    pane.entries.push(e);
+                    pane.entries.push(e.clone());
+                    pane.all.push(e);
                 }
                 pane.sort_entries();
                 pane.entries.iter().map(|e| e.name.clone()).collect()
@@ -651,6 +706,94 @@ pub fn run() -> i32 {
                 return Err(format!("an unreported volume read {none}%"));
             }
             Ok(format!("999/1000 → {pct}%, 510/1010 → {down}%"))
+        })(),
+    );
+
+    r.check(
+        "size of contents stops at the folder limit",
+        (|| {
+            // `ContentDisplaySettings::RecursiveDirectorySizeLimit` is handed to
+            // the size job as a folder count: factory 10, the View → Display page
+            // allows 1..20 (`FUN_001e5750` @0x1e5750, setRange(1, 20)).
+            let deep = base.join("depth");
+            let _ = write(&deep.join("one/two/three/leaf.txt"), &vec![b'x'; 700]);
+            let _ = write(&deep.join("one/two/mid.txt"), &vec![b'x'; 30]);
+            let _ = write(&deep.join("one/near.txt"), &vec![b'x'; 5]);
+            let one = search::dir_size_limited(&deep, Some(1));
+            let two = search::dir_size_limited(&deep, Some(2));
+            let all = search::dir_size(&deep);
+            if one != 5 {
+                return Err(format!("one folder deep read {one} bytes, expected 5"));
+            }
+            if two != 35 {
+                return Err(format!("two folders deep read {two} bytes, expected 35"));
+            }
+            if all != 735 {
+                return Err(format!("the whole tree read {all} bytes, expected 735"));
+            }
+            if search::SIZE_LIMIT_DEFAULT != 10
+                || search::SIZE_LIMIT_MIN != 1
+                || search::SIZE_LIMIT_MAX != 20
+            {
+                return Err("the limit's factory value or range drifted".into());
+            }
+            Ok(format!("1 → {one} B, 2 → {two} B, all → {all} B, default 10, 1..20"))
+        })(),
+    );
+
+    r.check(
+        "a preview is skipped above the file-size limit",
+        (|| {
+            // `[PreviewSettings] MaximumSize`, in MiB; the spin box's 0 shows as
+            // "files of any size" and means no cap.
+            const MIB: u64 = 1024 * 1024;
+            if !search::preview_allowed(50 * MIB, 0) {
+                return Err("0 MiB (any size) refused a big file".into());
+            }
+            if !search::preview_allowed(2 * MIB, 3) {
+                return Err("a 2 MiB file was refused under a 3 MiB limit".into());
+            }
+            if search::preview_allowed(4 * MIB, 3) {
+                return Err("a 4 MiB file was allowed under a 3 MiB limit".into());
+            }
+            if !search::preview_allowed(3 * MIB, 3) {
+                return Err("exactly 3 MiB was refused under a 3 MiB limit".into());
+            }
+            Ok("0 = any size, 2/3 MiB in, 4 MiB out, 3 MiB exactly in".to_string())
+        })(),
+    );
+
+    r.check(
+        "the zoom slider, the size limit and the preview cap survive a restart",
+        (|| {
+            use crate::config::Config;
+            let fresh = Config::default();
+            if !fresh.show_zoom_slider {
+                return Err("this build opens with the zoom slider hidden".into());
+            }
+            if fresh.size_limit != search::SIZE_LIMIT_DEFAULT || fresh.preview_max_mib != 0 {
+                return Err(format!(
+                    "factory values read {} folders and {} MiB",
+                    fresh.size_limit, fresh.preview_max_mib
+                ));
+            }
+            let mut changed = Config::default();
+            changed.show_zoom_slider = false;
+            changed.size_limit = 3;
+            changed.preview_max_mib = 8;
+            let text = serde_json::to_string(&changed).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            if back.show_zoom_slider || back.size_limit != 3 || back.preview_max_mib != 8 {
+                return Err("a saved choice did not come back".into());
+            }
+            // A settings file written before these keys existed keeps the
+            // original's factory values instead of failing to load.
+            let old = r#"{"last_dir":"/tmp"}"#;
+            let old: Config = serde_json::from_str(old).map_err(|e| e.to_string())?;
+            if !old.show_zoom_slider || old.size_limit != 10 || old.preview_max_mib != 0 {
+                return Err("an older settings file lost its defaults".into());
+            }
+            Ok("on/10 folders/any size by default, off/3/8 MiB after a restart".to_string())
         })(),
     );
 
@@ -698,13 +841,14 @@ pub fn run() -> i32 {
         (|| {
             let mut pane = crate::state::Pane::new(2, base.join("listing"));
             pane.view = crate::state::ViewMode::Icons;
-            // Twenty steps up from the factory size must land on
-            // level 16 (256 px) and stay there, as DolphinItemListView::
-            // setZoomLevel @0x26e100 clamps the level to 0..=16.
-            for _ in 0..20 {
+            // The original stops at level 16 (256 px) — DolphinItemListView::
+            // setZoomLevel @0x26e100 clamps the level to 0..=16. The rebuild
+            // continues the same `level << 4` ladder to level 25 (400 px), so
+            // forty steps up land there and stay there.
+            for _ in 0..40 {
                 pane.zoom_by(1);
             }
-            if (pane.zoom[0], pane.icon_size()) != (16, 256.0) {
+            if (pane.zoom[0], pane.icon_size()) != (25, 400.0) {
                 return Err(format!(
                     "the top is level {} at {} px",
                     pane.zoom[0],
@@ -737,7 +881,7 @@ pub fn run() -> i32 {
                 // The left-hand navigation cluster takes about 180 px of the row.
                 let avail = window as f32 - 180.0;
                 for label_w in [48.0f32, 58.0, 72.0, 84.0] {
-                    let m = toolbar_metrics(avail, label_w, true);
+                    let m = toolbar_metrics(avail, label_w, true, 104.0);
                     // Wherever a bar is drawn at all it must fit beside the cluster.
                     if m.bar_w > 0.0 {
                         let used = m.bar_w + m.cluster_w + TOOLBAR_CLUSTER_GAP;
@@ -759,8 +903,8 @@ pub fn run() -> i32 {
             }
             // The label gives way before the bar dies: at 1440 px it still shows
             // the sort key, at a very narrow width it falls back to an icon.
-            let wide = toolbar_metrics(1260.0, 72.0, true);
-            let narrow = toolbar_metrics(420.0, 72.0, true);
+            let wide = toolbar_metrics(1260.0, 72.0, true, 104.0);
+            let narrow = toolbar_metrics(420.0, 72.0, true, 104.0);
             if wide.sort != SortControl::Label {
                 return Err("a 1440 px window drops the sort label".into());
             }
@@ -777,7 +921,7 @@ pub fn run() -> i32 {
     r.check(
         "split view gives the whole toolbar row to the buttons",
         (|| {
-            let m = crate::toolbar_metrics(1260.0, 72.0, false);
+            let m = crate::toolbar_metrics(1260.0, 72.0, false, 104.0);
             if m.bar_w != 0.0 {
                 return Err(format!("split view still reserves {:.0} px for a bar", m.bar_w));
             }
@@ -924,22 +1068,136 @@ pub fn run() -> i32 {
     r.check(
         "thumbnail size stops at 400 px",
         (|| {
-            use crate::gallery::{card_size, clamp_thumb, THUMB_MAX, THUMB_MIN};
+            use crate::gallery::{clamp_thumb, wall_rows, THUMB_MAX, THUMB_MIN};
             if clamp_thumb(9999.0) != THUMB_MAX {
                 return Err(format!("a huge size becomes {}", clamp_thumb(9999.0)));
             }
             if clamp_thumb(1.0) != THUMB_MIN {
                 return Err(format!("a tiny size becomes {}", clamp_thumb(1.0)));
             }
-            let small = card_size(THUMB_MIN, true, true);
-            let large = card_size(THUMB_MAX, true, true);
-            if !(large.x > small.x && large.y > small.y) {
-                return Err("the biggest card is not bigger than the smallest".into());
+            let (small, _) = wall_rows(&[1.5; 6], 1000.0, THUMB_MIN, 12.0, 32.0);
+            let (large, _) = wall_rows(&[1.5; 6], 1000.0, THUMB_MAX, 12.0, 32.0);
+            let small_h = small.first().map(|r| r.pic_h).unwrap_or(0.0);
+            let large_h = large.first().map(|r| r.pic_h).unwrap_or(0.0);
+            if !(large_h > small_h) {
+                return Err("the biggest wall is not taller than the smallest".into());
             }
             Ok(format!(
-                "{THUMB_MIN:.0}..{THUMB_MAX:.0} px, a 400 px card is {:.0}×{:.0}",
-                large.x, large.y
+                "{THUMB_MIN:.0}..{THUMB_MAX:.0} px, a row measured {:.0} px at the top",
+                large_h
             ))
+        })(),
+    );
+    r.check(
+        "every picture is as wide as its own shape, so no bands sit between them",
+        (|| {
+            use crate::gallery::{wall_pic_width, wall_rows};
+            // A wide shot, a portrait and a square, as on a real phone roll.
+            let aspects = [16.0 / 9.0, 9.0 / 16.0, 1.0, 4.0 / 3.0, 3.0 / 2.0];
+            let avail = 1000.0;
+            let gap = 12.0;
+            let (rows, _) = wall_rows(&aspects, avail, 200.0, gap, 32.0);
+            let mut pictures = 0usize;
+            for row in &rows {
+                let mut w = 0.0;
+                for k in row.start..row.end {
+                    w += wall_pic_width(row, aspects[k]);
+                    pictures += 1;
+                }
+                w += gap * (row.end - row.start - 1) as f32;
+                if w > avail + 1.0 {
+                    return Err(format!("a row is {w:.1} px wide on a {avail:.0} px wall"));
+                }
+                // The frame follows the picture: a 16:9 shot is much wider than
+                // it is tall, a 9:16 one much narrower.
+                let wide = wall_pic_width(row, 16.0 / 9.0);
+                let tall = wall_pic_width(row, 9.0 / 16.0);
+                if row.pic_h > 1.0 && !(wide > tall * 2.0) {
+                    return Err("a wide and a tall picture get the same width".into());
+                }
+            }
+            if pictures != aspects.len() {
+                return Err(format!("{pictures} of {} pictures were packed", aspects.len()));
+            }
+            Ok(format!(
+                "{} rows for {} pictures, none wider than the {avail:.0} px wall",
+                rows.len(),
+                aspects.len()
+            ))
+        })(),
+    );
+    r.check(
+        "every row of the picture wall is the size the person set, the last one too",
+        (|| {
+            use crate::gallery::{wall_pic_width, wall_rows, THUMB_MAX};
+            // Twelve pictures of mixed shapes in a 1400 px wall at 400 px: the
+            // rows before the last one used to be stretched to fill the width
+            // and came out shorter than the size on the slider, while the last
+            // one stayed at 400.
+            let aspects = [
+                16.0 / 9.0,
+                3.0 / 4.0,
+                9.0 / 16.0,
+                1.0,
+                4.0 / 3.0,
+                2.0 / 3.0,
+                3.0 / 2.0,
+                1.0,
+                1.78,
+                0.75,
+                0.56,
+                1.0,
+            ];
+            let avail = 1400.0;
+            let (rows, _) = wall_rows(&aspects, avail, THUMB_MAX, 12.0, 32.0);
+            if rows.len() < 3 {
+                return Err(format!("{} rows is not enough to judge", rows.len()));
+            }
+            for (n, row) in rows.iter().enumerate() {
+                if (row.pic_h - THUMB_MAX).abs() > 0.5 {
+                    return Err(format!(
+                        "row {} is {:.0} px tall where the wall was set to {THUMB_MAX:.0} px",
+                        n + 1,
+                        row.pic_h
+                    ));
+                }
+                let mut w = 0.0;
+                for k in row.start..row.end {
+                    w += wall_pic_width(row, aspects[k]);
+                }
+                w += 12.0 * (row.end - row.start - 1) as f32;
+                if w > avail + 1.0 {
+                    return Err(format!("row {} is {w:.0} px wide", n + 1));
+                }
+            }
+            // The last row is a row like any other, not a leftover.
+            let last = rows.last().unwrap();
+            if last.end - last.start == 0 {
+                return Err("the last row holds nothing".into());
+            }
+            Ok(format!(
+                "{} rows, every picture {THUMB_MAX:.0} px tall including the {} in the last row",
+                rows.len(),
+                last.end - last.start
+            ))
+        })(),
+    );
+    r.check(
+        "a 400 px thumbnail is drawn 400 px across in the file view",
+        (|| {
+            use crate::theme::{icon_size_for_zoom, zoom_for_icon_size};
+            let square = crate::views::thumb_size(400.0, 1.0);
+            if (square.x, square.y) != (400.0, 400.0) {
+                return Err(format!("a square 400 px picture became {}×{}", square.x, square.y));
+            }
+            if icon_size_for_zoom(25) != 400.0 || zoom_for_icon_size(400.0) != 25 {
+                return Err(format!(
+                    "level 25 is {} px and 400 px maps back to level {}",
+                    icon_size_for_zoom(25),
+                    zoom_for_icon_size(400.0)
+                ));
+            }
+            Ok("level 25 = 400 px, a square thumbnail fills 400×400".into())
         })(),
     );
     r.check(
@@ -957,25 +1215,102 @@ pub fn run() -> i32 {
         })(),
     );
     r.check(
-        "the slideshow waits for its interval and then moves on",
+        "the size line under a picture is written exactly like the file name",
         (|| {
-            use crate::gallery::{clamp_slide, Slide, SLIDE_MAX, SLIDE_MIN};
-            let mut slide = Slide::new(1.0);
+            use crate::gallery::{
+                caption_colour, caption_font, wall_caption, CAPTION_SIZE, CAPTION_STEP,
+            };
+            let font = caption_font();
+            if font.size != CAPTION_SIZE || CAPTION_SIZE != 12.0 {
+                return Err(format!(
+                    "the caption font is {} px where the name is 12 px",
+                    font.size
+                ));
+            }
+            if font.family != eframe::egui::FontFamily::Proportional {
+                return Err(format!("the caption font family is {:?}", font.family));
+            }
+            if caption_colour(false) != crate::theme::TEXT {
+                return Err("a plain size line is not drawn in the text colour".into());
+            }
+            if caption_colour(true) != eframe::egui::Color32::WHITE {
+                return Err("a marked picture's size line is not lifted to white".into());
+            }
+            // The wall gives the size line the same room it gives the name, so
+            // the two lines sit as far apart as two lines of text.
+            let two_lines = wall_caption(true, true);
+            let one_line = wall_caption(true, false);
+            if (two_lines - one_line - CAPTION_STEP).abs() > 0.01 {
+                return Err(format!(
+                    "the wall reserves {} px for the size line and {} px for the name",
+                    two_lines - one_line,
+                    CAPTION_STEP
+                ));
+            }
+            // Names off still leaves the size line on one caption line.
+            if wall_caption(false, true) != CAPTION_STEP {
+                return Err("the size line alone reserves a different room".into());
+            }
+            Ok(format!(
+                "{CAPTION_SIZE} px, proportional, text colour (white when marked), {CAPTION_STEP} px step"
+            ))
+        })(),
+    );
+    r.check(
+        "a fresh slideshow starts at 1.5 s and then moves on",
+        (|| {
+            use crate::gallery::{
+                clamp_slide, Slide, SLIDE_DEFAULT, SLIDE_MAX, SLIDE_MIN, SLIDE_STEP,
+            };
+            if SLIDE_DEFAULT != 1.5 || SLIDE_STEP != 0.5 {
+                return Err(format!(
+                    "the fresh interval reads {SLIDE_DEFAULT} s (step {SLIDE_STEP})"
+                ));
+            }
+            let mut slide = Slide::new(SLIDE_DEFAULT);
             let start = slide.started;
             if slide.tick(start) {
                 return Err("the first picture was replaced at once".into());
             }
-            if !slide.tick(start + Duration::from_millis(1100)) {
+            if slide.tick(start + Duration::from_millis(1400)) {
+                return Err("a picture moved before 1.5 s had passed".into());
+            }
+            if !slide.tick(start + Duration::from_millis(1600)) {
                 return Err("the second picture never came".into());
             }
             if clamp_slide(0.01) != SLIDE_MIN || clamp_slide(999.0) != SLIDE_MAX {
                 return Err("the interval is not held inside its range".into());
             }
+            // Space restarts at the person's own interval and fade, not at the
+            // factory default.
+            let again = Slide::remembered(4.0, false);
+            if again.interval != 4.0 || again.fade {
+                return Err("a restarted show forgot the person's interval or fade".into());
+            }
+            // A settings file written before this change holds the old 1 s
+            // default. It is lifted to 1.5 s once; a chosen 3 s is left alone.
+            let mut old = crate::config::Config::default();
+            old.settings_version = 0;
+            old.slide_secs = 1.0;
+            old.migrate();
+            if old.slide_secs != SLIDE_DEFAULT {
+                return Err(format!(
+                    "an old 1 s setting stayed at {} s",
+                    old.slide_secs
+                ));
+            }
+            let mut chosen = crate::config::Config::default();
+            chosen.settings_version = 0;
+            chosen.slide_secs = 3.0;
+            chosen.migrate();
+            if chosen.slide_secs != 3.0 {
+                return Err("a chosen 3 s interval was overwritten".into());
+            }
             if crate::gallery::FADE_MS != 300 {
                 return Err("the fade is not 300 ms".into());
             }
             Ok(format!(
-                "1 s interval, {SLIDE_MIN}..{SLIDE_MAX} s, {} ms fade",
+                "1.5 s fresh interval, {SLIDE_MIN}..{SLIDE_MAX} s, {} ms fade",
                 crate::gallery::FADE_MS
             ))
         })(),
@@ -1024,6 +1359,960 @@ pub fn run() -> i32 {
                 "prompt, negative and {} fields read from the tEXt chunk",
                 meta.fields.len()
             ))
+        })(),
+    );
+
+    r.check(
+        "a saved prompt lands beside the picture and is never overwritten",
+        (|| {
+            use crate::imagemeta;
+            let dir = base.join("metadata/save");
+            let png = dir.join("castle.png");
+            write(&png, &png_with_prompt(
+                "a castle on a hill, morning mist\nNegative prompt: people\nSteps: 30, Sampler: Euler a, CFG scale: 5, Seed: 7, Size: 512x768, Model: dream-v3",
+            ))?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+            let first = meta.save_beside(&png).map_err(|e| e.to_string())?;
+            if first.file_name().and_then(|s| s.to_str()) != Some("castle.prompt.txt") {
+                return Err(format!("first save landed at {}", first.display()));
+            }
+            let body = fs::read_to_string(&first).map_err(|e| e.to_string())?;
+            if !body.contains("a castle on a hill") || !body.contains("Steps: 30") {
+                return Err(format!("the saved text reads {:?}", body));
+            }
+            let second = meta.save_beside(&png).map_err(|e| e.to_string())?;
+            if second == first {
+                return Err("the second save overwrote the first".into());
+            }
+            if second.file_name().and_then(|s| s.to_str()) != Some("castle.2.prompt.txt") {
+                return Err(format!("second save landed at {}", second.display()));
+            }
+            Ok("castle.prompt.txt, then castle.2.prompt.txt".into())
+        })(),
+    );
+
+    r.check(
+        "several pictures give up their prompts in one block",
+        (|| {
+            use crate::imagemeta;
+            let dir = base.join("metadata/batch");
+            let one = dir.join("first.png");
+            let two = dir.join("second.png");
+            let plain = dir.join("holiday-photo.png");
+            write(
+                &one,
+                &png_with_prompt("a red fox in the snow\nSteps: 20, Sampler: Euler a, CFG scale: 7"),
+            )?;
+            write(&two, &png_with_prompt("a paper boat on a pond"))?;
+            write(
+                &plain,
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IEND\x00\x00\x00\x00",
+            )?;
+            let (text, n) =
+                imagemeta::prompts_of(&[one.clone(), plain.clone(), two.clone()]);
+            if n != 2 {
+                return Err(format!("{n} prompts were copied, expected 2"));
+            }
+            for wanted in [
+                "first.png",
+                "a red fox in the snow",
+                "second.png",
+                "a paper boat on a pond",
+            ] {
+                if !text.contains(wanted) {
+                    return Err(format!("the block is missing {wanted:?}: {text:?}"));
+                }
+            }
+            if text.contains("holiday-photo.png") {
+                return Err("a picture with no prompt was copied anyway".into());
+            }
+            Ok(format!("{n} prompts, {} lines", text.lines().count()))
+        })(),
+    );
+
+    // The person's own words: "the field containing the prompt needs to be
+    // selectable so it can easily be copied to the clipboard". A read-only text
+    // field is only worth anything if dragging over it selects and Ctrl+C puts
+    // that selection on the clipboard, so the check drives the real widget with
+    // a press, a drag, a release and the copy event the window sends for Ctrl+C.
+    // The person's words: "the prompt area should be collapsable as it is not
+    // always needed". The check clicks the block's own title row and watches the
+    // text box disappear and come back.
+    r.check(
+        "the prompt area folds away when its title row is clicked, and opens again",
+        (|| {
+            use crate::imagemeta;
+            use eframe::egui;
+            let dir = base.join("metadata/folding");
+            let png = dir.join("harbour.png");
+            write(
+                &png,
+                &png_with_prompt("a stone harbour at low tide, gulls, flat grey light"),
+            )?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(340.0, 560.0));
+            let mut open = true;
+            let mut header: Option<egui::Rect> = None;
+            let mut box_seen = [false; 5];
+            let mut collapsed_seen = [false; 5];
+            let mut click_at: Option<egui::Pos2> = None;
+
+            for frame in 0..5 {
+                let mut events: Vec<egui::Event> = Vec::new();
+                if let (1, Some(p)) = (frame, click_at) {
+                    events.push(egui::Event::PointerMoved(p));
+                    events.push(egui::Event::PointerButton {
+                        pos: p,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                    events.push(egui::Event::PointerButton {
+                        pos: p,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                if let (3, Some(p)) = (frame, click_at) {
+                    events.push(egui::Event::PointerMoved(p));
+                    events.push(egui::Event::PointerButton {
+                        pos: p,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                    events.push(egui::Event::PointerButton {
+                        pos: p,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(frame as f64 / 60.0),
+                    events,
+                    ..Default::default()
+                };
+                let output = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let shown =
+                            crate::gallery::prompt_panel(ui, Some(&meta), Some(&png), &mut open);
+                        if let Some(h) = shown.header {
+                            header = Some(h);
+                        }
+                        box_seen[frame] = shown.field.is_some();
+                        collapsed_seen[frame] = shown.collapsed;
+                    });
+                });
+                let _ = output;
+                if frame == 0 {
+                    let h = header.ok_or("the title row was never drawn")?;
+                    click_at = Some(egui::pos2(h.center().x, h.center().y));
+                }
+            }
+            if !box_seen[0] || collapsed_seen[0] {
+                return Err("the prompt box was not there while the block was open".into());
+            }
+            if box_seen[2] || !collapsed_seen[2] {
+                return Err(format!(
+                    "after the click the block reads open={}, box drawn={}",
+                    open, box_seen[2]
+                ));
+            }
+            if !box_seen[4] || collapsed_seen[4] {
+                return Err("a second click did not bring the prompt back".into());
+            }
+            Ok("open, folded by a click on the title row, back again by a second click".into())
+        })(),
+    );
+
+    // The person's own words: "the picture details panel should be closed by
+    // default". It used to open itself the first time a picture carrying a
+    // prompt came up, which meant the recipe covered the right-hand side of the
+    // picture whether or not the person wanted it. The check opens the viewer on
+    // such a picture, lets it read the recipe exactly as the window does, pages
+    // to a second one, and refuses to pass if the panel comes up open at any
+    // point — the info button and the I key are the only ways in now.
+    r.check(
+        "the picture details panel is closed when a picture opens, and stays closed when paging",
+        (|| {
+            use crate::gallery::Viewer;
+            let dir = base.join("metadata/details");
+            let one = dir.join("first.png");
+            let two = dir.join("second.png");
+            write(
+                &one,
+                &png_with_prompt("a lighthouse at dusk\nSteps: 28, Model: horizon-xl"),
+            )?;
+            write(&two, &png_with_prompt("a paper boat on a pond\nSteps: 20"))?;
+            let mut v = Viewer::new(
+                dir.clone(),
+                vec![one.clone(), two.clone()],
+                0,
+                true,
+            );
+            if v.show_info {
+                return Err("the details panel was open as soon as the viewer started".into());
+            }
+            v.sync_meta();
+            let read = v
+                .meta
+                .as_ref()
+                .and_then(|(_, m)| m.as_ref())
+                .and_then(|m| m.prompt.clone());
+            if read.as_deref() != Some("a lighthouse at dusk") {
+                return Err(format!(
+                    "the picture's own recipe was not read behind the panel: {read:?}"
+                ));
+            }
+            if v.show_info {
+                return Err("the panel opened itself once the recipe was read".into());
+            }
+            v.step(1);
+            v.sync_meta();
+            let second = v
+                .meta
+                .as_ref()
+                .and_then(|(_, m)| m.as_ref())
+                .and_then(|m| m.prompt.clone());
+            if second.as_deref() != Some("a paper boat on a pond") {
+                return Err(format!("paging did not read the next recipe: {second:?}"));
+            }
+            if v.show_info {
+                return Err("paging to a second picture with a prompt opened the panel".into());
+            }
+            Ok("closed on opening and after paging, with both recipes read".into())
+        })(),
+    );
+
+    r.check(
+        "the prompt text can be dragged over and copied with Ctrl+C",
+        (|| {
+            use crate::imagemeta;
+            use eframe::egui;
+            let dir = base.join("metadata/selectable");
+            let png = dir.join("lighthouse.png");
+            let prompt = "a lighthouse on a granite cliff at dusk, long exposure, volumetric fog, muted teal and amber palette";
+            write(
+                &png,
+                &png_with_prompt(&format!(
+                    "{prompt}\nNegative prompt: blurry, text\nSteps: 28, Sampler: DPM++ 2M, CFG scale: 6.5"
+                )),
+            )?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 620.0));
+            let mut field: Option<egui::Rect> = None;
+            let mut copied: Vec<String> = Vec::new();
+            let mut press = egui::Pos2::ZERO;
+            let mut release = egui::Pos2::ZERO;
+            let mut ran = 0;
+
+            for frame in 0..6 {
+                let mut events: Vec<egui::Event> = Vec::new();
+                match frame {
+                    1 => {
+                        let f = field.ok_or("the prompt box was never drawn")?;
+                        press = egui::pos2(f.left() + 6.0, f.top() + 7.0);
+                        events.push(egui::Event::PointerMoved(press));
+                        events.push(egui::Event::PointerButton {
+                            pos: press,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    2 => {
+                        let f = field.ok_or("the prompt box was never drawn")?;
+                        release = egui::pos2(f.left() + f.width() * 0.45, f.top() + 7.0);
+                        events.push(egui::Event::PointerMoved(release));
+                    }
+                    3 => {
+                        events.push(egui::Event::PointerButton {
+                            pos: release,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    4 => {
+                        // What the window layer sends when Ctrl+C is pressed.
+                        events.push(egui::Event::Copy);
+                    }
+                    _ => {}
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(frame as f64 / 60.0),
+                    events,
+                    ..Default::default()
+                };
+                let output = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut prompt_open = true;
+                        let shown =
+                            crate::gallery::prompt_panel(ui, Some(&meta), Some(&png), &mut prompt_open);
+                        if let Some(rect) = shown.field {
+                            field = Some(rect);
+                        }
+                    });
+                });
+                ran += 1;
+                for command in output.platform_output.commands {
+                    if let egui::OutputCommand::CopyText(text) = command {
+                        copied.push(text);
+                    }
+                }
+            }
+
+            if ran < 6 {
+                return Err(format!("only {ran} frames were drawn"));
+            }
+            let picked = copied
+                .last()
+                .ok_or("dragging over the prompt and pressing Ctrl+C copied nothing")?;
+            let picked = picked.trim();
+            if picked.is_empty() {
+                return Err("the copied text was empty".into());
+            }
+            if !prompt.contains(picked) {
+                return Err(format!(
+                    "the copied text is not part of the prompt: {picked:?}"
+                ));
+            }
+            if picked.len() >= prompt.len() {
+                return Err("the whole prompt was copied without a drag selection".into());
+            }
+            Ok(format!("copied {:?} of {} characters", picked, prompt.len()))
+        })(),
+    );
+
+    // The person's follow-up: "the prompt selection options should allow text
+    // to be selected taking scrolling into account". A long prompt does not fit
+    // its box, so a drag has to keep scrolling and keep selecting past the edge
+    // — otherwise the last third of every prompt is impossible to copy. This
+    // drives that exact gesture: press at the top, hold the pointer on the
+    // bottom edge until the box scrolls, release, Ctrl+C, and read what came
+    // out. The marker sits at the very end of the prompt, far below the fold.
+    r.check(
+        "a long prompt keeps selecting while the box scrolls under the drag",
+        (|| {
+            use crate::imagemeta;
+            use eframe::egui;
+            let dir = base.join("metadata/scroll-select");
+            let png = dir.join("long-prompt.png");
+            let head = "a wide empty beach at low tide, wet sand holding a pink evening sky";
+            let marker = "TIDEMARK_AT_THE_END";
+            let filler = "drifting cloud, soft gradient, distant gulls, fine grain, ".repeat(24);
+            let prompt = format!("{head}, {filler}and finally {marker}");
+            write(&png, &png_with_prompt(&prompt))?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 620.0));
+            let mut view: Option<egui::Rect> = None;
+            let mut scroll = 0.0f32;
+            let mut selection: Option<(usize, usize)> = None;
+            let mut copied: Vec<String> = Vec::new();
+            let mut release_at = egui::Pos2::ZERO;
+
+            for frame in 0..74 {
+                let mut events: Vec<egui::Event> = Vec::new();
+                if frame == 1 {
+                    let v = view.ok_or("the prompt box was never drawn")?;
+                    release_at = egui::pos2(v.left() + 8.0, v.top() + 8.0);
+                    events.push(egui::Event::PointerMoved(release_at));
+                    events.push(egui::Event::PointerButton {
+                        pos: release_at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                } else if (2..=60).contains(&frame) {
+                    // Held still on the bottom edge: the box is expected to
+                    // scroll and the far end of the selection to follow.
+                    let v = view.ok_or("the prompt box was never drawn")?;
+                    let p = egui::pos2(v.left() + v.width() * 0.7, v.bottom() - 3.0);
+                    events.push(egui::Event::PointerMoved(p));
+                } else if (61..=68).contains(&frame) {
+                    // The rest of the prompt is now in view: run to its end.
+                    let v = view.ok_or("the prompt box was never drawn")?;
+                    let p = egui::pos2(v.right() - 6.0, v.bottom() - 6.0);
+                    events.push(egui::Event::PointerMoved(p));
+                } else if frame == 69 {
+                    events.push(egui::Event::PointerButton {
+                        pos: release_at,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                } else if frame == 70 {
+                    events.push(egui::Event::Copy);
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(frame as f64 / 60.0),
+                    events,
+                    ..Default::default()
+                };
+                let output = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut prompt_open = true;
+                        let shown =
+                            crate::gallery::prompt_panel(ui, Some(&meta), Some(&png), &mut prompt_open);
+                        if let Some(v) = shown.view {
+                            view = Some(v);
+                        }
+                        scroll = scroll.max(shown.scroll);
+                        selection = shown.selection.or(selection);
+                    });
+                });
+                for command in output.platform_output.commands {
+                    if let egui::OutputCommand::CopyText(text) = command {
+                        copied.push(text);
+                    }
+                }
+            }
+
+            if scroll <= 0.0 {
+                return Err("the prompt box never scrolled while the drag was held at its edge".into());
+            }
+            let picked = copied
+                .last()
+                .ok_or("the drag across a scrolling prompt copied nothing")?;
+            if !picked.contains(marker) {
+                let tail: String = picked
+                    .chars()
+                    .rev()
+                    .take(48)
+                    .collect::<Vec<char>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                return Err(format!(
+                    "the copy stopped before the end of the prompt (scrolled {scroll:.0} px), it ends {:?}",
+                    tail
+                ));
+            }
+            if !picked.contains("beach at low tide") {
+                return Err("the selection lost the start of the prompt".into());
+            }
+            let (a, b) = selection.ok_or("the block reported no selection")?;
+            if b <= a {
+                return Err("the selection is empty".into());
+            }
+            Ok(format!(
+                "scrolled {scroll:.0} px, {} of {} characters selected",
+                b - a,
+                prompt.chars().count()
+            ))
+        })(),
+    );
+
+    // The other half of "taking scrolling into account": the wheel. A person
+    // clicks at the top of a prompt, scrolls with the wheel to see the rest and
+    // Shift+clicks at the bottom, expecting the range to join up. That only
+    // works if the selection survives the wheel — the reason a text field that
+    // owned its own scroll could not do it.
+    r.check(
+        "a selection survives the wheel and a Shift+click extends it",
+        (|| {
+            use crate::imagemeta;
+            use eframe::egui;
+            let dir = base.join("metadata/wheel-select");
+            let png = dir.join("wheel.png");
+            let head = "a quiet harbour at dawn";
+            let marker = "WHEELMARK_AT_THE_BOTTOM";
+            let filler = "mooring ropes, painted hulls, gulls on the pilings, ".repeat(26);
+            let prompt = format!("{head}, {filler}and {marker}");
+            write(&png, &png_with_prompt(&prompt))?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 620.0));
+            let mut view: Option<egui::Rect> = None;
+            let mut copied: Vec<String> = Vec::new();
+            let mut scroll = 0.0f32;
+            let mut last = egui::Pos2::ZERO;
+
+            for frame in 0..22 {
+                let mut events: Vec<egui::Event> = Vec::new();
+                let v = view;
+                // 100 ms a frame, so the Shift+click is a separate click rather
+                // than the second half of a double-click.
+                let _ = frame;
+                match frame {
+                    0 => {}
+                    1 => {
+                        let v = v.ok_or("the prompt box was never drawn")?;
+                        last = egui::pos2(v.left() + 8.0, v.top() + 8.0);
+                        events.push(egui::Event::PointerMoved(last));
+                        events.push(egui::Event::PointerButton {
+                            pos: last,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    2 => {
+                        events.push(egui::Event::PointerButton {
+                            pos: last,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    3..=8 => {
+                        // One wheel notch per frame, pointer resting on the text.
+                        events.push(egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -60.0),
+                            modifiers: egui::Modifiers::default(),
+                        });
+                    }
+                    9 => {
+                        let v = v.ok_or("the prompt box was never drawn")?;
+                        let p = egui::pos2(v.right() - 8.0, v.bottom() - 6.0);
+                        events.push(egui::Event::PointerMoved(p));
+                        events.push(egui::Event::PointerButton {
+                            pos: p,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::SHIFT,
+                        });
+                    }
+                    10 => {
+                        let v = v.ok_or("the prompt box was never drawn")?;
+                        events.push(egui::Event::PointerButton {
+                            pos: egui::pos2(v.right() - 8.0, v.bottom() - 6.0),
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::SHIFT,
+                        });
+                    }
+                    12 => events.push(egui::Event::Copy),
+                    _ => {}
+                }
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(frame as f64 / 10.0),
+                    events,
+                    // The window layer reports the held modifiers on every
+                    // frame, which is how a shifted click is recognised.
+                    modifiers: if (9..=10).contains(&frame) {
+                        egui::Modifiers::SHIFT
+                    } else {
+                        egui::Modifiers::default()
+                    },
+                    ..Default::default()
+                };
+                let output = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut prompt_open = true;
+                        let shown =
+                            crate::gallery::prompt_panel(ui, Some(&meta), Some(&png), &mut prompt_open);
+                        if let Some(rect) = shown.view {
+                            view = Some(rect);
+                        }
+                        scroll = scroll.max(shown.scroll);
+                    });
+                });
+                for command in output.platform_output.commands {
+                    if let egui::OutputCommand::CopyText(text) = command {
+                        copied.push(text);
+                    }
+                }
+            }
+
+            if scroll <= 0.0 {
+                return Err("the wheel did not scroll the prompt box".into());
+            }
+            let picked = copied.last().ok_or("nothing was copied")?;
+            if !picked.starts_with(head) {
+                return Err(format!(
+                    "the copy does not start at the click that set the anchor: {:?}",
+                    picked.chars().take(40).collect::<String>()
+                ));
+            }
+            if !picked.contains(marker) {
+                return Err("the Shift+click did not reach the end of the prompt".into());
+            }
+            Ok(format!(
+                "wheel scrolled {scroll:.0} px, {} characters from the first click to the last",
+                picked.chars().count()
+            ))
+        })(),
+    );
+
+    // The button in the prompt's title row uses the same selection the drag
+    // builds, so it has to reach the block: it writes the range into the store
+    // the block reads and the next frame draws it.
+    r.check(
+        "the Select all button selects the whole prompt",
+        (|| {
+            use crate::imagemeta;
+            use eframe::egui;
+            let dir = base.join("metadata/select-all");
+            let png = dir.join("select-all.png");
+            let prompt = "a brass diving helmet on a wet dock, morning haze, salt on the glass";
+            write(&png, &png_with_prompt(prompt))?;
+            let meta = imagemeta::read(&png).ok_or("no metadata was found")?;
+
+            let ctx = egui::Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(360.0, 620.0));
+            let mut seen: Option<(usize, usize)> = None;
+            let mut open = true;
+            let id = egui::Id::new("prompt-selectable-text");
+            for frame in 0..3 {
+                if frame == 1 {
+                    crate::selectable::select_all(&ctx, id, meta.prompt_only().chars().count());
+                }
+                ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        time: Some(frame as f64 / 60.0),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            let shown =
+                                crate::gallery::prompt_panel(ui, Some(&meta), Some(&png), &mut open);
+                            if shown.selection.is_some() {
+                                seen = shown.selection;
+                            }
+                        });
+                    },
+                );
+            }
+            let (a, b) = seen.ok_or("pressing Select all left nothing selected")?;
+            let want = meta.prompt_only().chars().count();
+            if a != 0 || b != want {
+                return Err(format!("the selection is {a}..{b}, expected 0..{want}"));
+            }
+            Ok(format!("{want} characters selected"))
+        })(),
+    );
+
+    // ---- comparison view: zoom and pan ----------------------------------
+    // These are the rules the person reported as broken: each picture zooms
+    // around the pointer, a drag cannot throw a picture out of its pane, one
+    // wheel notch is one step, and Sync decides whether the pair moves together.
+    r.check(
+        "a wheel notch over a picture is exactly one zoom step",
+        (|| {
+            use crate::gallery::{Wheel, ZOOM_WHEEL_IN};
+            let mut wheel = Wheel::default();
+            // The notch arrives as a press and a release 7 ms apart.
+            let first = wheel.steps(1.000, 120.0);
+            let second = wheel.steps(1.007, 120.0);
+            if first != 1 || second != 0 {
+                return Err(format!("the two halves of one notch gave {first} and {second} steps"));
+            }
+            let third = wheel.steps(1.500, 120.0);
+            if third != 1 {
+                return Err(format!("a second, separate notch gave {third} steps"));
+            }
+            let z = crate::gallery::zoom_step(1.0, ZOOM_WHEEL_IN);
+            let z = crate::gallery::zoom_step(z, ZOOM_WHEEL_IN);
+            Ok(format!("2 notches = {:.0} %", z * 100.0))
+        })(),
+    );
+
+    r.check(
+        "zooming keeps the point under the pointer in place",
+        (|| {
+            use crate::gallery::{fitted_size, zoom_about, ZOOM_WHEEL_IN};
+            use egui::Vec2;
+            let pane = Vec2::new(700.0, 800.0);
+            let src = [1920usize, 1080usize];
+            let anchor = Vec2::new(260.0, -120.0); // pointer, from the pane middle
+            let (z, pan) = zoom_about(1.0, Vec2::ZERO, anchor, ZOOM_WHEEL_IN);
+            // The picture point under the pointer before the zoom.
+            let before = fitted_size(src, 1.0, pane);
+            let point = (anchor - Vec2::ZERO) / 1.0;
+            let _ = before;
+            let after = point * z + pan;
+            if (after - anchor).length() > 0.01 {
+                return Err(format!("the point moved {:.2} px", (after - anchor).length()));
+            }
+            Ok(format!(
+                "{:.0} % with the point held at {:.0},{:.0}",
+                z * 100.0,
+                after.x,
+                after.y
+            ))
+        })(),
+    );
+
+    r.check(
+        "a drag cannot throw a picture out of its pane",
+        (|| {
+            use crate::gallery::{clamp_pan, fitted_size};
+            use egui::Vec2;
+            let pane = Vec2::new(700.0, 800.0);
+            let src = [1920usize, 1080usize];
+            // At 100 % the picture fits, so it does not move at all.
+            let fits = fitted_size(src, 1.0, pane);
+            if clamp_pan(Vec2::new(500.0, -300.0), fits, pane) != Vec2::ZERO {
+                return Err("a picture that still fits was panned".into());
+            }
+            // At 200 % it may move until an edge reaches the pane edge.
+            let big = fitted_size(src, 2.0, pane);
+            let limit = Vec2::new(
+                ((big.x - pane.x) * 0.5).max(0.0),
+                ((big.y - pane.y) * 0.5).max(0.0),
+            );
+            let clamped = clamp_pan(Vec2::new(9999.0, -9999.0), big, pane);
+            if (clamped.x - limit.x).abs() > 0.01 || (clamped.y + limit.y).abs() > 0.01 {
+                return Err(format!(
+                    "clamped to {:.0},{:.0} instead of {:.0},{:.0}",
+                    clamped.x, clamped.y, limit.x, -limit.y
+                ));
+            }
+            Ok(format!(
+                "stops at {:.0} px sideways, {:.0} px up and down",
+                limit.x, limit.y
+            ))
+        })(),
+    );
+
+    r.check(
+        "only the side-by-side pair has a Sync switch",
+        (|| {
+            use crate::gallery::{compare_synced, CompareMode};
+            if compare_synced(CompareMode::Side, false) {
+                return Err("side mode ignored its own switch".into());
+            }
+            if !compare_synced(CompareMode::Side, true) {
+                return Err("side mode ignored Sync on".into());
+            }
+            if !compare_synced(CompareMode::Split, false)
+                || !compare_synced(CompareMode::Overlay, false)
+            {
+                return Err("split or overlay did not stay locked together".into());
+            }
+            Ok("split and overlay always follow; side follows the switch".into())
+        })(),
+    );
+
+    // The sheet's measured icon grid: the original fits 3 columns across a
+    // 592 px view at 160 px icons and spreads them to a 197 px pitch
+    // (checks/orig-zoom/icons-160px.png). The rebuild packs each cell to its
+    // picture's own width instead of reserving that spread, so what it must
+    // match is the column count: never fewer than the original's 3.
+    r.check(
+        "the icon grid fits the original's three 160 px columns",
+        (|| {
+            use crate::theme;
+            use crate::views::{icon_cell_width, pack_icon_rows, ICON_CELL_GAP};
+            let avail = theme::ORIGINAL_ICON_VIEW_WIDTH;
+            let pitch = avail / theme::ORIGINAL_ICON_COLUMNS_160 as f32;
+            if (pitch.round() - theme::ORIGINAL_ICON_PITCH_160).abs() > 0.5 {
+                return Err(format!(
+                    "592 / 3 is {pitch:.1} px, not the measured {}",
+                    theme::ORIGINAL_ICON_PITCH_160
+                ));
+            }
+            let cell = icon_cell_width(160.0, 1.0);
+            let rows = pack_icon_rows(&vec![cell; 5], avail, ICON_CELL_GAP);
+            let columns = rows.first().map(|r| r.1 - r.0).unwrap_or(0);
+            if columns < theme::ORIGINAL_ICON_COLUMNS_160 {
+                return Err(format!(
+                    "{columns} columns of {cell:.0} px in {avail:.0} px, fewer than the original's {}",
+                    theme::ORIGINAL_ICON_COLUMNS_160
+                ));
+            }
+            Ok(format!(
+                "{columns} columns of {cell:.0} px in {avail:.0} px; the original's pitch is {}",
+                theme::ORIGINAL_ICON_PITCH_160
+            ))
+        })(),
+    );
+
+    // ---- the find bar narrows the listing --------------------------------
+    // Typing used to change the words and nothing else, so this walks the same
+    // path a keystroke does — words in, narrow, count what is left — and then
+    // the path the bar's close button takes.
+    let find = base.join("find");
+    for name in ["apple.txt", "apricot.txt", "banana.txt"] {
+        let _ = write(&find.join(name), b"x");
+    }
+    let _ = fs::create_dir_all(find.join("apps"));
+    r.check(
+        "the find bar narrows the listing to the names that match",
+        (|| {
+            use crate::state::Pane;
+            let mut pane = Pane::new(1, find.clone());
+            let all = pane.entries.len();
+            if all != 4 {
+                return Err(format!("expected 4 items before typing, got {all}"));
+            }
+            pane.filter_on = true;
+            pane.filter = "ap".into();
+            pane.refilter();
+            let shown: Vec<String> = pane.entries.iter().map(|e| e.name.clone()).collect();
+            if shown.len() != 3 || shown.iter().any(|n| n.to_lowercase().contains("banana")) {
+                return Err(format!("“ap” left {} items: {shown:?}", shown.len()));
+            }
+            // What is selected has to be one of the items still on screen.
+            pane.select_all();
+            if pane.sel.len() != shown.len() {
+                return Err(format!(
+                    "selecting all took {} of {} shown items",
+                    pane.sel.len(),
+                    shown.len()
+                ));
+            }
+            // Closing the bar puts the whole folder back.
+            pane.filter_on = false;
+            pane.filter.clear();
+            pane.refilter();
+            if pane.entries.len() != all {
+                return Err(format!("closing the bar left {} of {all}", pane.entries.len()));
+            }
+            Ok(format!("{all} → {} → {all} items", shown.len()))
+        })(),
+    );
+
+    // ---- the find bar keeps its words when the folder changes ----------
+    r.check(
+        "a find survives a step into a folder and still narrows it",
+        (|| {
+            use crate::state::Pane;
+            let mut pane = Pane::new(1, find.clone());
+            pane.filter_on = true;
+            pane.filter = "banana".into();
+            pane.refilter();
+            pane.navigate(find.join("apps"));
+            // An empty folder has nothing to match, which is the honest answer:
+            // the words are still in the bar, so it stays narrowed.
+            if !pane.filter_on || pane.filter != "banana" {
+                return Err("the words were dropped on the way into a folder".into());
+            }
+            if !pane.entries.is_empty() {
+                return Err(format!("an empty folder showed {} items", pane.entries.len()));
+            }
+            pane.navigate(find.clone());
+            if pane.entries.len() != 1 || pane.entries[0].name != "banana.txt" {
+                return Err(format!("back in the folder, {} items showed", pane.entries.len()));
+            }
+            Ok("empty folder, then the one match".into())
+        })(),
+    );
+
+    // ---- the three verbs and the location bar never share pixels --------
+    r.check(
+        "the three button words survive an ordinary window and give way in order",
+        (|| {
+            use crate::toolbar_metrics;
+            let words = 110.0; // "Find" + "Open in" + "Menu" at 12 px
+            let label = 62.0; // "Sort: Modified"
+            let wide = toolbar_metrics(900.0, label, true, words);
+            if !wide.labeled {
+                return Err("the words were dropped in a 900 px window".into());
+            }
+            if wide.bar_w < crate::TOOLBAR_BAR_MIN {
+                return Err(format!("the location bar was left {:.0} px", wide.bar_w));
+            }
+            // At every width the location bar and the buttons must not overlap,
+            // and the words only go when even the barest worded row — words,
+            // no sort button — cannot fit beside a workable location bar.
+            let gap = crate::TOOLBAR_CLUSTER_GAP;
+            let worded_floor = crate::TOOLBAR_CLUSTER_FIXED + words
+                + crate::TOOLBAR_LABEL_EXTRA
+                - crate::TOOLBAR_ICON_W
+                - crate::TOOLBAR_ITEM_GAP
+                + gap
+                + crate::TOOLBAR_BAR_MIN;
+            for w in (360..=1600).step_by(20) {
+                let m = toolbar_metrics(w as f32, label, true, words);
+                if m.bar_w + gap + m.cluster_w > w as f32 + 0.5 {
+                    return Err(format!("at {w} px the bar and buttons overlap"));
+                }
+                if !m.labeled && (w as f32) >= worded_floor {
+                    return Err(format!(
+                        "at {w} px the words went while {worded_floor:.0} px would still fit them"
+                    ));
+                }
+            }
+            Ok(format!("900 px keeps the words, bar {:.0} px", wide.bar_w))
+        })(),
+    );
+
+    // ---- a menu button opens on an ordinary click ------------------------
+    // The toolbar's Menu button used to sit on a right-click-only popup, so a
+    // plain click did nothing. This drives the same egui call the button makes
+    // with a real press and release, and counts the frames its body ran.
+    r.check(
+        "a menu button opens on an ordinary click",
+        (|| {
+            use egui::{Context, Event, PointerButton, Pos2, RawInput, Rect, Sense, Vec2};
+            let ctx = Context::default();
+            let rect = Rect::from_min_size(Pos2::new(10.0, 10.0), Vec2::new(90.0, 24.0));
+            let mut bodies = 0usize;
+            fn step(ctx: &Context, rect: Rect, bodies: &mut usize, events: Vec<Event>, time: f64) {
+                ctx.run(
+                    RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            Vec2::new(400.0, 300.0),
+                        )),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            let resp = ui.allocate_rect(rect, Sense::click());
+                            egui::Popup::menu(&resp).show(|ui| {
+                                *bodies += 1;
+                                ui.label("menu");
+                            });
+                        });
+                    },
+                );
+            }
+            step(&ctx, rect, &mut bodies, vec![], 0.0);
+            let before = bodies;
+            let centre = rect.center();
+            step(&ctx, rect, &mut bodies, vec![Event::PointerMoved(centre)], 0.1);
+            step(
+                &ctx,
+                rect,
+                &mut bodies,
+                vec![Event::PointerButton {
+                    pos: centre,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                }],
+                0.2,
+            );
+            step(
+                &ctx,
+                rect,
+                &mut bodies,
+                vec![Event::PointerButton {
+                    pos: centre,
+                    button: PointerButton::Primary,
+                    pressed: false,
+                    modifiers: Default::default(),
+                }],
+                0.3,
+            );
+            step(&ctx, rect, &mut bodies, vec![], 0.4);
+            if before != 0 {
+                return Err(format!("the menu was already drawn {before} times"));
+            }
+            if bodies == 0 {
+                return Err("a click did not open the menu".into());
+            }
+            Ok(format!("closed, then {bodies} frame(s) of menu after one click"))
         })(),
     );
 

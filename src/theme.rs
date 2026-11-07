@@ -28,21 +28,35 @@ pub const PAPER: Color32 = Color32::from_rgb(226, 230, 233);
 pub const PAPER_SHADE: Color32 = Color32::from_rgb(188, 194, 199);
 pub const PLACE: Color32 = Color32::from_rgb(150, 178, 198);
 
-/// Icon sizes for zoom levels 0..=16 — measured from ZoomLevelInfo.
-pub const ZOOM_SIZES: [u16; 17] = [
-    16, 22, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256,
+/// The original's ceiling: `ZoomLevelInfo::maximumLevel()` @0x2a6530 returns 16,
+/// and level 16 is 256 px. Everything up to here is measured, not chosen.
+pub const ORIGINAL_MAX_ZOOM: u8 = 16;
+/// Added feature: the ladder continues the original's own `level << 4` formula
+/// past its ceiling, so a folder of photographs can be browsed at 400 px.
+/// Levels 17..=25 are 272, 288, … 400 px; nothing below level 17 changes.
+pub const MAX_ZOOM: u8 = 25;
+/// Largest thumbnail edge the rebuilt views draw (see `MAX_ZOOM`).
+pub const MAX_ICON_PX: f32 = 400.0;
+
+/// Icon sizes for zoom levels 0..=25. Levels 0..=16 are measured from
+/// ZoomLevelInfo; levels 17..=25 are the added continuation.
+pub const ZOOM_SIZES: [u16; 26] = [
+    16, 22, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 272, 288, 304,
+    320, 336, 352, 368, 384, 400,
 ];
 
 /// `ZoomLevelInfo::iconSizeForZoomLevel` @0x2a6540 in libdolphinprivate:
 /// levels 0..4 are a lookup table (0x2cd980 = 16, 22, 32, 48, 64) and level 5
-/// and up are `level << 4`.
+/// and up are `level << 4` — a formula that keeps working past the original's
+/// own 16-level ceiling.
 pub fn icon_size_for_zoom(zoom: u8) -> f32 {
-    ZOOM_SIZES[(zoom as usize).min(16)] as f32
+    ZOOM_SIZES[(zoom as usize).min(MAX_ZOOM as usize)] as f32
 }
 
 /// `ZoomLevelInfo::zoomLevelForIconSize` @0x2a6560: 16→0, 22→1, 32→2, 48→3,
-/// 64→4, otherwise `4 + (size - 64) / 16`, clamped to the 0..16 range
-/// (`ZoomLevelInfo::minimumLevel` 0x2a6520 / `maximumLevel` 0x2a6530).
+/// 64→4, otherwise `4 + (size - 64) / 16`. The original clamps to its
+/// 0..16 range (`minimumLevel` 0x2a6520 / `maximumLevel` 0x2a6530); the rebuild
+/// clamps to the extended 0..=25 range so 400 px is reachable.
 pub fn zoom_for_icon_size(size: f32) -> u8 {
     let px = size.round() as i32;
     let level = match px {
@@ -53,7 +67,7 @@ pub fn zoom_for_icon_size(size: f32) -> u8 {
         64 => 4,
         _ => 4 + (px - 64).div_euclid(16),
     };
-    level.clamp(0, 16) as u8
+    level.clamp(0, MAX_ZOOM as i32) as u8
 }
 
 /// Factory icon size per view mode, read out of the settings constructors:
@@ -98,6 +112,17 @@ pub fn icon_grid_cell_width(zoom: u8, icon: f32, average_char_width: f32) -> f32
     let floor = d * 4.0 + icon;
     text_part.max(floor).floor()
 }
+
+/// The original's icons view measured in `checks/orig-zoom/`: a view 592 px
+/// wide fits `floor(width / cell)` columns and then *spreads* them evenly, so
+/// 160 px cells give 3 columns with centres 197 px apart (592 / 3) and 64 px
+/// cells give 4 columns 148 px apart. `icon_grid_cell_width` gives the rebuild
+/// the same column count at those widths; the cells themselves are packed to
+/// their picture's own width (no empty bands), so its pitch is a little
+/// tighter. The selftest holds the rebuild to the original's columns.
+pub const ORIGINAL_ICON_PITCH_160: f32 = 197.0;
+pub const ORIGINAL_ICON_COLUMNS_160: usize = 3;
+pub const ORIGINAL_ICON_VIEW_WIDTH: f32 = 592.0;
 
 /// Width of one cell in the compact view, from the same function:
 /// `iconSize + 8 + 5 * fontHeight`.
@@ -946,6 +971,31 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: &str, tint: Color3
                 tint,
                 PathStroke::NONE,
             ));
+        }
+        // Open in: a box with an arrow leaving its top-right corner.
+        "openin" => {
+            let h = s * 0.95;
+            let box_ = [
+                Pos2::new(c.x - h, c.y - h * 0.2),
+                Pos2::new(c.x - h, c.y + h),
+                Pos2::new(c.x + h * 0.4, c.y + h),
+                Pos2::new(c.x + h * 0.4, c.y + h * 0.15),
+            ];
+            for i in 0..3 {
+                painter.line_segment([box_[i], box_[i + 1]], st);
+            }
+            painter.line_segment(
+                [Pos2::new(c.x - h * 0.1, c.y + h * 0.1), Pos2::new(c.x + h * 0.95, c.y - h * 0.95)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x + h * 0.3, c.y - h * 0.95), Pos2::new(c.x + h * 0.95, c.y - h * 0.95)],
+                st,
+            );
+            painter.line_segment(
+                [Pos2::new(c.x + h * 0.95, c.y - h * 0.95), Pos2::new(c.x + h * 0.95, c.y - h * 0.3)],
+                st,
+            );
         }
         "split" => {
             painter.rect_stroke(

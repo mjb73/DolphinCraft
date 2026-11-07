@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// The version written by this build; see `Config::settings_version`.
+pub const SETTINGS_VERSION: u32 = 1;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Bookmark {
     pub name: String,
@@ -23,6 +26,11 @@ pub struct ShortcutColor {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
+    /// Which set of factory defaults this file was written with. Files from
+    /// before the slideshow's default moved to 1.5 s have no version (0); they
+    /// are brought up to date once, in `migrate`.
+    #[serde(default)]
+    pub settings_version: u32,
     #[serde(default)]
     pub bookmarks: Vec<Bookmark>,
     #[serde(default)]
@@ -77,6 +85,36 @@ pub struct Config {
     pub slide_secs: f32,
     #[serde(default = "yes")]
     pub slide_fade: bool,
+    /// `GeneralSettings` key `ShowZoomSlider` (ctor @0x2b8630, `ItemBool(..., false)`,
+    /// `this+0xa8`): the original's status-bar zoom slider is **off** in a fresh
+    /// profile and is switched on from the status bar's own context menu
+    /// (`FUN_001ec540` @0x1ec540 writes that key and shows or hides the slider
+    /// widgets). This build ships it on, because the person asked for the
+    /// bottom-right zoom control; the switch below is the original's.
+    #[serde(default = "yes")]
+    pub show_zoom_slider: bool,
+    /// `ContentDisplaySettings` key `RecursiveDirectorySizeLimit` (ctor @0x2b2b70,
+    /// `ItemUInt(..., 10)`, `this+0x1c`): how deep "size of contents" walks. The
+    /// View → Display page's spin box allows 1..20 in steps of 1
+    /// (`FUN_001e5750` @0x1e5750, `setRange(1, 20)`, `setSingleStep(1)`).
+    #[serde(default = "size_limit")]
+    pub size_limit: u32,
+    /// Added feature: whether the prompt block (the recipe a picture was made
+    /// with) is open or folded away. The person asked for it to collapse because
+    /// it is not always needed; the choice is kept between runs so it stays as
+    /// they left it.
+    #[serde(default = "yes")]
+    pub prompt_open: bool,
+    /// `[PreviewSettings] MaximumSize` read by the previews page
+    /// (`FUN_00217c30` @0x217c30): a file bigger than this many MiB gets no
+    /// thumbnail. 0 is the spin box's "files of any size" special value, i.e. no
+    /// cap, which is also this build's factory default.
+    #[serde(default)]
+    pub preview_max_mib: u32,
+}
+
+fn size_limit() -> u32 {
+    crate::search::SIZE_LIMIT_DEFAULT
 }
 
 fn slide_secs() -> f32 {
@@ -108,6 +146,7 @@ fn default_zoom() -> [u8; 3] {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            settings_version: SETTINGS_VERSION,
             bookmarks: Vec::new(),
             last_dir: String::new(),
             split: false,
@@ -133,6 +172,12 @@ impl Default for Config {
             gallery_round: true,
             slide_secs: crate::gallery::SLIDE_DEFAULT,
             slide_fade: true,
+            // The original's factory value is false; this build keeps the slider
+            // visible because the person asked for the bottom-right zoom control.
+            show_zoom_slider: true,
+            size_limit: crate::search::SIZE_LIMIT_DEFAULT,
+            prompt_open: true,
+            preview_max_mib: 0,
         }
     }
 }
@@ -150,7 +195,23 @@ impl Config {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Self::default();
         };
-        serde_json::from_str(&text).unwrap_or_default()
+        let mut config: Self = serde_json::from_str(&text).unwrap_or_default();
+        config.migrate();
+        config
+    }
+
+    /// Bring a settings file written by an older build up to this build's
+    /// defaults. Only a value that was never a real choice is touched: before
+    /// the person asked for 1.5 s, a fresh show started at exactly 1.0 s, so a
+    /// file still holding 1.0 is assumed to be the old default rather than a
+    /// deliberate pick. Any other interval survives.
+    pub fn migrate(&mut self) {
+        if self.settings_version < SETTINGS_VERSION {
+            if self.settings_version == 0 && (self.slide_secs - 1.0).abs() < 0.001 {
+                self.slide_secs = crate::gallery::SLIDE_DEFAULT;
+            }
+            self.settings_version = SETTINGS_VERSION;
+        }
     }
 
     pub fn save(&self) {

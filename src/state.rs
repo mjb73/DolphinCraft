@@ -307,6 +307,10 @@ pub struct Pane {
     pub back: Vec<PathBuf>,
     pub forward: Vec<PathBuf>,
     pub entries: Vec<Entry>,
+    /// The folder's whole listing, sorted. `entries` is what is actually shown,
+    /// which is this list narrowed by the find bar's text. Keeping both means
+    /// the filter is reversible and a re-sort still sees every item.
+    pub all: Vec<Entry>,
     pub error: Option<String>,
     pub sel: BTreeSet<usize>,
     pub anchor: usize,
@@ -338,6 +342,11 @@ pub struct Pane {
     pub filter: String,
     pub filter_on: bool,
     pub filter_focus: bool,
+    /// Added: the find bar's scope. `false` = match names in this folder only
+    /// (a live filter); `true` = search everything below it as well. The
+    /// original spends a hidden keystroke (Enter) on that choice; here it is a
+    /// visible pair of chips, so the two behaviours are never confused.
+    pub find_deep: bool,
     pub location_edit: Option<String>,
     pub location_focus: bool,
     /// After a location was typed or pasted, the file inside the folder that
@@ -366,6 +375,7 @@ impl Pane {
             back: Vec::new(),
             forward: Vec::new(),
             entries: Vec::new(),
+            all: Vec::new(),
             error: None,
             sel: BTreeSet::new(),
             anchor: 0,
@@ -386,6 +396,7 @@ impl Pane {
             filter: String::new(),
             filter_on: false,
             filter_focus: false,
+            find_deep: false,
             location_edit: None,
             location_focus: false,
             pending_select: None,
@@ -454,17 +465,18 @@ impl Pane {
         self.selected_size = None;
         self.loading = false;
         if self.is_trash() {
-            self.entries = fsutil::list_trash();
+            self.all = fsutil::list_trash();
             self.error = None;
         } else {
             match fsutil::read_folder(&self.path, self.show_hidden) {
                 Ok(mut list) => {
                     list.retain(|e| self.show_hidden || !e.hidden);
-                    self.entries = list;
+                    self.all = list;
                     self.error = None;
                 }
                 Err(e) => {
                     self.entries.clear();
+                    self.all.clear();
                     self.error = Some(e);
                 }
             }
@@ -557,7 +569,7 @@ impl Pane {
         let name_sort = self.name_sort;
         let asc = self.asc;
         let folders_first = self.folders_first;
-        self.entries.sort_by(|a, b| {
+        self.all.sort_by(|a, b| {
             if folders_first && a.is_dir != b.is_dir {
                 return if a.is_dir {
                     std::cmp::Ordering::Less
@@ -586,6 +598,24 @@ impl Pane {
                 ord.reverse()
             }
         });
+        self.refilter();
+    }
+
+    /// Narrow the shown listing to the find bar's text. Called whenever the text,
+    /// the filter's on/off state or the folder changes, so what is drawn and what
+    /// the selection indices point at stay the same list.
+    pub fn refilter(&mut self) {
+        let needle = self.filter.trim().to_lowercase();
+        if !self.filter_on || needle.is_empty() {
+            self.entries = self.all.clone();
+            return;
+        }
+        self.entries = self
+            .all
+            .iter()
+            .filter(|e| e.name.to_lowercase().contains(&needle))
+            .cloned()
+            .collect();
     }
 
     pub fn visible(&self) -> Vec<usize> {
@@ -655,7 +685,9 @@ impl Pane {
     pub fn zoom_by(&mut self, delta: i32) {
         let i = self.view.index();
         let z = self.zoom[i] as i32 + delta;
-        self.zoom[i] = z.clamp(0, 16) as u8;
+        // Extended past the original's 16-level ceiling so the icons view can
+        // reach 400 px thumbnails (`theme::MAX_ZOOM`).
+        self.zoom[i] = z.clamp(0, theme::MAX_ZOOM as i32) as u8;
     }
 
     pub fn start_search(&mut self) {
@@ -672,6 +704,25 @@ impl Pane {
         ));
         self.sel.clear();
         self.cursor = 0;
+    }
+
+    /// Added: choose where the find bar looks, keeping the results in step with
+    /// the text already typed. "This folder" filters the listing live; "In
+    /// subfolders" starts the background search.
+    pub fn set_find_scope(&mut self, deep: bool) {
+        if self.find_deep == deep {
+            return;
+        }
+        self.find_deep = deep;
+        if deep {
+            if !self.filter.trim().is_empty() {
+                self.start_search();
+            }
+        } else {
+            self.search = None;
+            self.sel.clear();
+            self.cursor = 0;
+        }
     }
 
     /// Entries that are shown: search results when searching, else the folder.

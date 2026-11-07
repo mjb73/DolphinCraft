@@ -93,6 +93,9 @@ struct ThumbEntry {
     /// and must not be re-queued every frame.
     asked: u32,
     failed: bool,
+    /// Byte size of the file, read once. `[PreviewSettings] MaximumSize` decides
+    /// from it whether a preview may be made at all.
+    bytes: Option<u64>,
 }
 
 pub struct ThumbCache {
@@ -105,24 +108,56 @@ pub struct ThumbCache {
     queue: Arc<Mutex<VecDeque<ThumbJob>>>,
     rx: Receiver<ThumbResult>,
     requested: usize,
+    /// `[PreviewSettings] MaximumSize` in MiB; 0 means "files of any size".
+    max_mib: u32,
+}
+
+/// Walk a PNG's chunk list until the image header turns up, and read the width
+/// and height out of it. Stops at the pixel data: an IHDR that is not before
+/// IDAT is not a PNG a decoder would accept either.
+fn png_size(f: &mut std::fs::File) -> Option<(u32, u32)> {
+    use std::io::{Read, Seek, SeekFrom};
+    f.seek(SeekFrom::Start(8)).ok()?;
+    let mut hdr = [0u8; 8];
+    for _ in 0..64 {
+        f.read_exact(&mut hdr).ok()?;
+        let len = u32::from_be_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as u64;
+        let kind = &hdr[4..8];
+        if kind == b"IHDR" {
+            let mut data = [0u8; 8];
+            f.read_exact(&mut data).ok()?;
+            let w = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+            let h = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+            return if w > 0 && h > 0 { Some((w, h)) } else { None };
+        }
+        if kind == b"IDAT" || kind == b"IEND" {
+            return None;
+        }
+        // Skip the chunk's own bytes and its four-byte checksum.
+        f.seek(SeekFrom::Current(len as i64 + 4)).ok()?;
+    }
+    None
 }
 
 /// Pixel size of a picture read from its own header, without decoding pixels.
 /// Covers the formats the previews handle: JPEG, PNG, GIF, BMP and WebP.
 pub fn probe_image_size(path: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
+    use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     let mut head = [0u8; 32];
     let n = f.read(&mut head).ok()?;
     if n < 10 {
         return None;
     }
-    // PNG: 8-byte signature, 4-byte length, "IHDR", then width and height.
-    if head[..8] == [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a] && n >= 24 {
-        let w = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
-        let h = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
-        if w > 0 && h > 0 {
-            return Some((w, h));
+    // PNG: 8-byte signature, then a chunk list. IHDR is meant to come first,
+    // but a picture that carries a prompt can have its text chunk written
+    // before it (or any other ancillary chunk can), so the header is hunted
+    // for rather than assumed to sit at a fixed offset — reading the width out
+    // of whatever happened to be there gave the size line numbers in the
+    // billions.
+    if head[..8] == [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a] {
+        if let Some(wh) = png_size(&mut f) {
+            return Some(wh);
         }
     }
     // GIF: "GIF87a"/"GIF89a", then little-endian width and height.
@@ -291,7 +326,15 @@ impl ThumbCache {
             queue,
             rx,
             requested: 0,
+            max_mib: 0,
         }
+    }
+
+    /// Apply `[PreviewSettings] MaximumSize` in MiB from the settings. Lowering
+    /// the cap takes effect on the next frame: a file that is now too big is
+    /// simply never queued, and the view draws its type icon instead.
+    pub fn set_max_mib(&mut self, mib: u32) {
+        self.max_mib = mib;
     }
 
     /// Width divided by height of a picture, or `1.0` when the file is not a
@@ -329,6 +372,18 @@ impl ThumbCache {
         let entry = self.entries.entry(path.to_path_buf()).or_default();
         if entry.failed {
             return None;
+        }
+        // The original's "Show previews for files below N MiB": a file over
+        // `[PreviewSettings] MaximumSize` never reaches the thumbnail job, so the
+        // view draws its kind icon instead. 0 = no cap (the box's "files of any
+        // size"), and the file's length is read once per path.
+        if self.max_mib > 0 {
+            let bytes = *entry
+                .bytes
+                .get_or_insert_with(|| std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+            if !preview_allowed(bytes, self.max_mib) {
+                return entry.texture.clone();
+            }
         }
         let wants_bigger = entry.texture.is_none() || entry.tex_size < size;
         if wants_bigger && entry.pending.is_none() && entry.asked < size && self.requested < 4000 {
@@ -636,12 +691,36 @@ impl DupScan {
 // ---------------------------------------------------------------------------
 
 pub fn dir_size(path: &Path) -> u64 {
+    dir_size_limited(path, None)
+}
+
+/// Factory value of `ContentDisplaySettings::RecursiveDirectorySizeLimit`
+/// (ctor @0x2b2b70 in libdolphinprivate.so.6, `ItemUInt(..., 10)`).
+pub const SIZE_LIMIT_DEFAULT: u32 = 10;
+/// The View → Display page's spin box for that limit: `setRange(1, 20)` and
+/// `setSingleStep(1)` at 0x1e5c14 / 0x1e5c23 in `FUN_001e5750` @0x1e5750.
+pub const SIZE_LIMIT_MIN: u32 = 1;
+pub const SIZE_LIMIT_MAX: u32 = 20;
+
+/// Size of everything under `path`, walking at most `max_depth` folder levels
+/// below it.
+///
+/// `None` walks the whole tree, which is what the duplicate finder and the
+/// self-check want. `Some(n)` is the original's "Show size of contents, up to N
+/// folders" mode: `ContentDisplaySettings::RecursiveDirectorySizeLimit`
+/// (factory 10, allowed 1..20) is handed to the size job as a recursion limit.
+/// `walkdir` counts the folder itself as depth 0, so `max_depth(n)` visits n
+/// levels below it — the same count the spin box shows.
+pub fn dir_size_limited(path: &Path, max_depth: Option<u32>) -> u64 {
+    let mut walker = walkdir::WalkDir::new(path).follow_links(false);
+    if let Some(depth) = max_depth {
+        // `depth` counts subfolder levels below `path`, so one level means the
+        // files directly inside `path` plus those one folder down. walkdir counts
+        // the folder itself as depth 0, hence the extra step.
+        walker = walker.max_depth(depth as usize + 1);
+    }
     let mut total = 0u64;
-    for item in walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .flatten()
-    {
+    for item in walker.into_iter().flatten() {
         if item.file_type().is_file() {
             if let Ok(md) = item.metadata() {
                 total += md.len();
@@ -649,6 +728,17 @@ pub fn dir_size(path: &Path) -> u64 {
         }
     }
     total
+}
+
+/// Whether a file of `len` bytes may be turned into a thumbnail when the person
+/// allows previews for files below `max_mib` MiB.
+///
+/// This is the rule behind the original's "Show previews for files below N MiB"
+/// spin box (`FUN_00217c30` @0x217c30, stored as `[PreviewSettings] MaximumSize`):
+/// 0 is the special value the box shows as "files of any size" and means no cap
+/// at all; anything else hides the preview from files bigger than N MiB.
+pub fn preview_allowed(len: u64, max_mib: u32) -> bool {
+    max_mib == 0 || len <= max_mib as u64 * 1024 * 1024
 }
 
 pub fn count_items(path: &Path) -> (usize, usize) {

@@ -30,18 +30,42 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   Shortcuts can be given a colour, renamed, reordered by dragging, and removed.
 - **Tabs** with a path bar you can click through, and an address field (Ctrl+L).
 - **Three view modes**: icons, details and columns, each with its own zoom
-  level and sort order (0–16 zoom steps, 16–256 px icons).
-- **Picture wall**: a grid of picture cards from 50 to 400 px, with rounded
-  corners, an optional size line under each name (width × height, aspect ratio,
-  megapixels) and a switch to hide the file names. Enter it with the picture
-  button in the toolbar; folders sit in the same grid.
+  level and sort order. The measured ladder is 0–16 zoom steps (16–256 px);
+  the icons and compact views continue the same ladder to level 25 = 400 px.
+- **Picture controls in the file view**: above the icon grid of any folder that
+  holds pictures, a one-row strip carries the thumbnail size slider (50–400 px
+  in the picture wall, the same 16–400 px ladder here), plus switches for
+  **Names**, **Dimensions**, **Rounded** corners and **Previews**. The same
+  switches are in the app menu under *Pictures*.
+- **Picture wall**: a wall of picture cards from 50 to 400 px. Every thumbnail is
+  cut to its picture's own shape and every row is packed at exactly the size on
+  the slider — the last row too, so no row jumps out bigger than the rest — with
+  the same 12 px gap between pictures instead of each reserving a square with a
+  band of empty wall around it. Rounded corners, an optional size line under each
+  name (width × height, aspect ratio, megapixels), drawn in the file name's own
+  font, size and colour, and a switch to hide the file
+  names. Enter it with the picture button in the toolbar; folders sit in the same
+  wall.
 - **Picture viewer and slideshow**: open a picture and page through the folder,
   zoom, and read the generation prompt, negative prompt, steps, sampler, CFG
   scale, seed, size, model and denoising strength straight out of the file
-  (PNG text chunk or JPEG comment). The slideshow fills the screen, moves on
-  every N seconds (a number you can change while it plays) and cross-fades over
-  300 ms; the fade can be switched off.
+  (PNG text chunk or JPEG comment). The prompt can be selected with the mouse —
+  a drag that reaches the edge of its box keeps scrolling and keeps selecting,
+  so a long prompt can be copied whole; the wheel scrolls it without losing the
+  selection, Shift+click extends, Ctrl+A and Ctrl+C work, and the right-click
+  menu offers Select all and Copy selection. The whole block folds away behind
+  its own title row — one click, or **P** in the viewer — leaving a single line
+  instead of the full recipe, and it remembers which way you left it. The
+  details panel itself starts **closed**: the picture comes up clean, and the
+  info button in the bar, **I**, or **P** opens it when you want it. The
+  slideshow fills the screen,
+  moves on every 1.5 seconds to start (a number you can change while it plays)
+  and cross-fades over 300 ms; the fade can be switched off.
 - **Compare two pictures** side by side, split or overlaid, with synced zoom.
+  Each picture zooms where the mouse is pointing and can be dragged to its edges
+  but never out of its half; **Sync** locks the two together (Split and Overlay
+  are always locked), and the read-out shows one percentage, or two once they are
+  separate.
 - **Sorting** by name, size, type or date, with folders-first and reverse options.
 - **Split view** for two folders side by side, with the information panel
   showing size, type, date and a preview for the current selection.
@@ -88,9 +112,15 @@ Options:
 --thumbs <50-400>        start the wall at a given thumbnail size
 --dims                   start the wall with the size line showing
 --viewer <picture>       open a picture in the viewing window
+--details                open the viewer's details panel at once (it starts closed)
 --play                   start the viewer's slideshow
 --compare side|split|overlay   open the comparison beside the viewer
 --keep-settings           use the saved layout instead of factory settings
+--find <text>             open the find bar with these words already narrowing the list
+--deep                   with --find, look through every folder below as well
+--guide                   open the card that explains Find, Open in and Menu
+--menu                    open the app's own menu (used to photograph it)
+--size <WxH>              open the window at a given size
 --selftest                run the built-in checks and exit
 ```
 

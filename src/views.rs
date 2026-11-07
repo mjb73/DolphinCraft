@@ -36,19 +36,28 @@ fn tint_of(entry: &fsutil::Entry) -> Option<Color32> {
 /// centred and it fills as much of the square as it can, whether that scales it
 /// up or down (`KPixmapModifier::scale` @0x15e820, called from
 /// `KStandardItemListWidget::drawPixmap` @0x135bb0).
-fn draw_preview(painter: &egui::Painter, tex: &egui::TextureHandle, rect: Rect) {
+fn draw_preview(painter: &egui::Painter, tex: &egui::TextureHandle, rect: Rect) -> Option<Rect> {
     let src = tex.size();
     if src[0] == 0 || src[1] == 0 || rect.width() <= 0.0 {
-        return;
+        return None;
     }
     let scale = (rect.width() / src[0] as f32).min(rect.height() / src[1] as f32);
     let size = Vec2::new(src[0] as f32 * scale, src[1] as f32 * scale);
+    let target = Rect::from_center_size(rect.center(), size);
     painter.image(
         tex.id(),
-        Rect::from_center_size(rect.center(), size),
+        target,
         Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
         Color32::WHITE,
     );
+    Some(target)
+}
+
+/// Corner radius for a thumbnail drawn at `icon` px. The gallery's own frame
+/// uses 10 px at its 400 px ceiling (`PICTURE_CORNER`); this keeps the same
+/// look at smaller sizes instead of rounding a 32 px icon into a circle.
+fn picture_radius(icon: f32) -> f32 {
+    (icon * 0.035).clamp(3.0, crate::gallery::PICTURE_CORNER as f32)
 }
 
 impl Pane {
@@ -78,7 +87,7 @@ impl Pane {
                         });
                 });
         }
-        self.filter_bar(&mut child, vctx);
+        self.find_bar(&mut child, vctx);
 
         // Ctrl + wheel zooms the view, the same one-step-per-notch change the
         // +/- buttons in the status bar make.
@@ -346,31 +355,45 @@ impl Pane {
     }
 
     // -----------------------------------------------------------------------
-    // Filter / search bar
+    // Find bar
     // -----------------------------------------------------------------------
 
-    fn filter_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
+    /// The one place a name is looked for. Typing narrows the folder as you
+    /// type; the two chips say exactly how far the looking goes, so the person
+    /// never has to know that pressing Enter secretly turns a filter into a
+    /// search. The original keeps both on one bar too ("Filter" /
+    /// "Toggle Search Bar", `dolphin` .ui strings), but hides the choice
+    /// behind the keystroke.
+    fn find_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
         if !self.filter_on {
             return;
         }
         let mut stop = false;
         let mut close = false;
         let mut submit = false;
+        let mut scope: Option<bool> = None;
         egui::Frame::new()
             .fill(HEADER_BG)
-            .inner_margin(egui::Margin::symmetric(8, 4))
+            .inner_margin(egui::Margin::symmetric(8, 5))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let (icon_rect, _) =
                         ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
                     theme::draw_glyph(ui.painter(), icon_rect, "search", TEXT_DIM);
+                    ui.add_space(1.0);
                     let searching = self.search.is_some();
-                    let extra = if searching { 190.0 } else { 250.0 };
-                    let w = (ui.available_width() - extra).max(100.0);
+                    let deep = self.find_deep;
+                    // Room for the two chips, the found-count and the close
+                    // button is taken off the top; the field keeps the rest.
+                    let chips_w = FIND_CHIP_W * 2.0 + 4.0;
+                    let extra = chips_w + if searching { 96.0 } else { 30.0 } + 16.0;
+                    let w = (ui.available_width() - extra).max(80.0);
                     let hint = if searching {
-                        "Searching subfolders…"
+                        "Looking in this folder and below…"
+                    } else if deep {
+                        "Type to search this folder and everything below"
                     } else {
-                        "Filter, or press Enter to search in subfolders"
+                        "Type to show only matching names in this folder"
                     };
                     let resp = ui.add_sized(
                         Vec2::new(w, 22.0),
@@ -386,8 +409,13 @@ impl Pane {
                     if resp.changed() {
                         self.sel.clear();
                         self.cursor = 0;
-                        if self.search.is_some() {
-                            self.start_search();
+                        self.refilter();
+                        if self.find_deep {
+                            if self.filter.trim().is_empty() {
+                                self.search = None;
+                            } else {
+                                self.start_search();
+                            }
                         }
                     }
                     if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -396,7 +424,21 @@ impl Pane {
                     if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                         close = true;
                     }
+                    ui.add_space(6.0);
+                    if find_chip(ui, "This folder", !deep)
+                        .on_hover_text("Show only the items in this folder whose name matches")
+                        .clicked()
+                    {
+                        scope = Some(false);
+                    }
+                    if find_chip(ui, "In subfolders", deep)
+                        .on_hover_text("Look through every folder below this one as well")
+                        .clicked()
+                    {
+                        scope = Some(true);
+                    }
                     if searching {
+                        ui.add_space(4.0);
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} found",
@@ -408,29 +450,33 @@ impl Pane {
                         if ui.small_button("Stop").clicked() {
                             stop = true;
                         }
-                    } else if ui
-                        .add(egui::Button::new(
-                            egui::RichText::new("Search in subfolders").size(11.0),
-                        ))
-                        .clicked()
-                    {
-                        submit = true;
                     }
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("✕").size(11.0))
-                                .fill(Color32::TRANSPARENT)
-                                .min_size(Vec2::new(22.0, 20.0)),
-                        )
-                        .on_hover_text("Hide filter bar (Esc)")
-                        .clicked()
-                    {
-                        close = true;
-                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("✕").size(11.0))
+                                    .fill(Color32::TRANSPARENT)
+                                    .min_size(Vec2::new(22.0, 20.0)),
+                            )
+                            .on_hover_text("Close the find bar (Esc)")
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
                 });
             });
+        if let Some(deep) = scope {
+            self.set_find_scope(deep);
+            self.filter_focus = true;
+        }
         if submit {
-            self.start_search();
+            if !self.find_deep {
+                self.set_find_scope(true);
+            }
+            if !self.filter.trim().is_empty() {
+                self.start_search();
+            }
             self.filter_focus = true;
         }
         if stop {
@@ -542,7 +588,7 @@ impl Pane {
             Stroke::new(1.0, BORDER),
         );
 
-        let icon_sz = self.icon_size().clamp(16.0, 256.0);
+        let icon_sz = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let row_h = (icon_sz + 12.0).max(26.0);
         let count = self.display_entries().len();
         if count == 0 {
@@ -607,7 +653,7 @@ impl Pane {
         // The icon follows the zoom level, as it does in the original's details
         // view: Ctrl+Plus makes the rows grow instead of only changing the label
         // in the status bar.
-        let icon_sz = self.icon_size().clamp(16.0, 256.0);
+        let icon_sz = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let icon_rect = Rect::from_center_size(
             Pos2::new(name_c.left() + icon_sz * 0.5 + 2.0, rect.center().y),
             Vec2::splat(icon_sz),
@@ -616,7 +662,7 @@ impl Pane {
         if self.previews && entry.is_image() {
             let px = (icon_sz * ui.ctx().pixels_per_point()).round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {
-                draw_preview(ui.painter(), &tex, icon_rect);
+                let _ = draw_preview(ui.painter(), &tex, icon_rect);
                 drew_preview = true;
             }
         }
@@ -724,8 +770,33 @@ impl Pane {
             self.empty_message(ui, vctx);
             return;
         }
-        let icon = self.icon_size().clamp(16.0, 256.0);
-        let cell_h = icon_cell_height(icon);
+        // Added feature: a folder of pictures gets the picture options in
+        // reach without switching to the gallery — size up to 400 px, names,
+        // dimensions, rounded corners and previews.
+        if self.display_entries().iter().any(|e| e.is_image()) {
+            self.picture_options_bar(ui, vctx);
+        }
+        let icon = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
+        let dims_shown = self.gallery_dims && self.previews;
+        // The size line is drawn in the same font and size as the name now, so
+        // the cell keeps a whole caption line's room for it — measured from the
+        // font itself rather than from the old 15 px, which was sized for the
+        // smaller, dimmer line.
+        let dims_extra = if dims_shown {
+            let line = ui
+                .painter()
+                .layout_no_wrap(
+                    "1920×1080:AR 1.78:MP 2.07".to_owned(),
+                    crate::gallery::caption_font(),
+                    TEXT,
+                )
+                .size()
+                .y;
+            (line + 3.0).ceil()
+        } else {
+            0.0
+        };
+        let cell_h = icon_cell_height(icon) + dims_extra;
         // Cell width comes from `DolphinItemListView::updateGridSize` @0x26db80:
         // every cell at a given zoom is the same width, sized for the label
         // (exp(zoom/13) * 64 * averageCharWidth/9 + 48, at least exp(zoom/13)*4
@@ -798,6 +869,105 @@ impl Pane {
         }
     }
 
+    /// The picture options row: the same switches the gallery bar carries, so
+    /// they are in reach while browsing a folder of pictures in the icon view.
+    /// Size walks the original's zoom ladder, now continued to 400 px.
+    fn picture_options_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
+        let vi = self.view.index();
+        let mut zoom = self.zoom[vi] as f32;
+        let mut zoom_changed = false;
+        let mut changed = false;
+        let mut names = self.gallery_names;
+        let mut dims = self.gallery_dims;
+        let mut round = self.gallery_round;
+        let mut previews = self.previews;
+
+        egui::Frame::new()
+            .fill(HEADER_BG)
+            .inner_margin(egui::Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                let row = Vec2::new(ui.available_width(), 22.0);
+                ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.label(
+                        egui::RichText::new("Pictures:")
+                            .size(11.5)
+                            .color(TEXT_DIM),
+                    );
+                    let slider = ui.add_sized(
+                        Vec2::new(150.0, 16.0),
+                        egui::Slider::new(&mut zoom, 0.0..=theme::MAX_ZOOM as f32)
+                            .show_value(false)
+                            .step_by(1.0),
+                    );
+                    if slider.changed() {
+                        zoom_changed = true;
+                    }
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} px",
+                            theme::icon_size_for_zoom(zoom.round() as u8) as u32
+                        ))
+                        .size(11.0)
+                        .color(TEXT_FAINT),
+                    );
+                    if ui
+                        .add(egui::Checkbox::new(
+                            &mut names,
+                            egui::RichText::new("Names").size(11.5),
+                        ))
+                        .on_hover_text("Show the file name under each thumbnail")
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    if ui
+                        .add(egui::Checkbox::new(
+                            &mut dims,
+                            egui::RichText::new("Dimensions").size(11.5),
+                        ))
+                        .on_hover_text("Show width × height, aspect ratio and megapixels under each picture")
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    if ui
+                        .add(egui::Checkbox::new(
+                            &mut round,
+                            egui::RichText::new("Rounded").size(11.5),
+                        ))
+                        .on_hover_text("Round the corners of the picture thumbnails")
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    if ui
+                        .add(egui::Checkbox::new(
+                            &mut previews,
+                            egui::RichText::new("Previews").size(11.5),
+                        ))
+                        .on_hover_text("Draw the pictures themselves instead of a file-type icon")
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                });
+            });
+
+        if zoom_changed {
+            self.zoom[vi] = (zoom.round() as i32).clamp(0, theme::MAX_ZOOM as i32) as u8;
+            vctx.reqs.push(Request::ZoomChanged);
+        }
+        if changed {
+            self.gallery_names = names;
+            self.gallery_dims = dims;
+            self.gallery_round = round;
+            self.previews = previews;
+            vctx.reqs.push(Request::GalleryChanged);
+            vctx.reqs.push(Request::ZoomChanged);
+        }
+    }
+
     fn draw_icon_cell(
         &mut self,
         ui: &mut egui::Ui,
@@ -848,8 +1018,21 @@ impl Pane {
             // screen scale so zooming in always gives a sharper, bigger picture.
             let px = (icon * ui.ctx().pixels_per_point()).round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px) {
-                draw_preview(ui.painter(), &tex, icon_rect);
-                drew_thumb = true;
+                if let Some(drawn) = draw_preview(ui.painter(), &tex, icon_rect) {
+                    // Added feature: the rounded-corner switch, on by default.
+                    // The mask takes the colour actually behind the picture so a
+                    // selected or hovered cell keeps its own tint in the corners.
+                    if self.gallery_round {
+                        let mask = if bg == Color32::TRANSPARENT { VIEW_BG } else { bg };
+                        crate::gallery::round_picture(
+                            ui.painter(),
+                            drawn,
+                            picture_radius(icon),
+                            mask,
+                        );
+                    }
+                    drew_thumb = true;
+                }
             }
         }
         if !drew_thumb {
@@ -866,21 +1049,53 @@ impl Pane {
         // they stay on one line across the whole row whatever the shapes are.
         let label_y = icon_rect.top() + icon + 6.0;
         let max_w = (rect.width() - 6.0).max(24.0);
-        let font = FontId::proportional(12.0);
-        let mut lines = wrap_label(ui, &entry.name, max_w, font.clone(), if icon >= 32.0 { 2 } else { 1 });
-        // A second line holding one or two leftover letters ("…jpg" cut to "g")
-        // looks like a mistake; keep the single fuller line instead.
-        if lines.len() == 2 && lines[1].chars().count() < 3 {
-            lines.truncate(1);
-        }
-        for (i, line) in lines.iter().enumerate() {
-            ui.painter().text(
-                Pos2::new(rect.center().x, label_y + 11.0 + i as f32 * 13.0),
-                Align2::CENTER_CENTER,
-                line,
+        // One caption font for both lines: the name and, when switched on, the
+        // size line under it.
+        let font = crate::gallery::caption_font();
+        let mut caption_y = label_y;
+        // Added feature: the Names switch hides the label under each picture.
+        if self.gallery_names {
+            let mut lines = wrap_label(
+                ui,
+                &entry.name,
+                max_w,
                 font.clone(),
-                if selected { Color32::WHITE } else { TEXT },
+                if icon >= 32.0 { 2 } else { 1 },
             );
+            // A second line holding one or two leftover letters ("…jpg" cut to
+            // "g") looks like a mistake; keep the single fuller line instead.
+            if lines.len() == 2 && lines[1].chars().count() < 3 {
+                lines.truncate(1);
+            }
+            for (i, line) in lines.iter().enumerate() {
+                ui.painter().text(
+                    Pos2::new(rect.center().x, label_y + 11.0 + i as f32 * 13.0),
+                    Align2::CENTER_CENTER,
+                    line,
+                    font.clone(),
+                    if selected { Color32::WHITE } else { TEXT },
+                );
+            }
+            caption_y = label_y + 11.0 + (lines.len().saturating_sub(1)) as f32 * 13.0;
+        }
+        // Added feature: the Dimensions switch prints the picture's own size,
+        // aspect ratio and megapixels under its name — in the name's own font,
+        // size and colour, so the two lines read as one caption.
+        if self.gallery_dims && self.previews && !entry.is_dir && entry.is_image() {
+            let size = crate::search::probe_image_size(&entry.path);
+            let caption = crate::gallery::dims_caption(size);
+            if !caption.is_empty() {
+                // One caption step below the last name line, with a little air
+                // between the two so a descender never touches the digits.
+                let dy = if self.gallery_names { 14.0 } else { 11.0 };
+                ui.painter().text(
+                    Pos2::new(rect.center().x, caption_y + dy),
+                    Align2::CENTER_CENTER,
+                    theme::elide(ui, &caption, max_w, font.clone()),
+                    font.clone(),
+                    crate::gallery::caption_colour(selected),
+                );
+            }
         }
 
         self.handle_row_interaction(ui, rect, resp, idx, vctx);
@@ -896,7 +1111,7 @@ impl Pane {
             self.empty_message(ui, vctx);
             return;
         }
-        let icon = self.icon_size().clamp(16.0, 256.0);
+        let icon = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let row_h = (icon + 6.0).max(22.0);
         // Compact cell width from `DolphinItemListView::updateGridSize`
         // @0x26db80: iconSize + 8 + 5 * fontHeight.
@@ -960,7 +1175,7 @@ impl Pane {
         if bg != Color32::TRANSPARENT {
             ui.painter().rect_filled(rect.shrink2(Vec2::new(3.0, 1.0)), CornerRadius::same(3), bg);
         }
-        let icon = self.icon_size().clamp(16.0, 256.0);
+        let icon = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let icon_rect = Rect::from_center_size(
             Pos2::new(rect.left() + 9.0 + icon / 2.0, rect.center().y),
             Vec2::splat(icon),
@@ -969,8 +1184,18 @@ impl Pane {
         if self.previews && entry.is_image() {
             let px = (icon * ui.ctx().pixels_per_point()).round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {
-                draw_preview(ui.painter(), &tex, icon_rect);
-                drew_preview = true;
+                if let Some(drawn) = draw_preview(ui.painter(), &tex, icon_rect) {
+                    if self.gallery_round {
+                        let mask = if bg == Color32::TRANSPARENT { VIEW_BG } else { bg };
+                        crate::gallery::round_picture(
+                            ui.painter(),
+                            drawn,
+                            picture_radius(icon),
+                            mask,
+                        );
+                    }
+                    drew_preview = true;
+                }
             }
         }
         if !drew_preview {
@@ -1150,6 +1375,41 @@ impl Pane {
                     ui.ctx().copy_text(entry.path.display().to_string());
                     ui.close();
                 }
+                // Added feature: the prompt a picture was made with, straight
+                // from its own file — for every picture in the selection when
+                // several are picked, so a whole batch goes at once.
+                let pictures: Vec<std::path::PathBuf> = selected_paths
+                    .iter()
+                    .filter(|p| crate::imagemeta::is_picture_path(p))
+                    .cloned()
+                    .collect();
+                if !pictures.is_empty() {
+                    let label = if pictures.len() > 1 {
+                        "Copy Prompts"
+                    } else {
+                        "Copy Prompt"
+                    };
+                    if ui
+                        .button(label)
+                        .on_hover_text("Copy the generation prompt stored in the picture")
+                        .clicked()
+                    {
+                        let (text, n) = crate::imagemeta::prompts_of(&pictures);
+                        if n == 0 {
+                            vctx.reqs.push(Request::Toast(
+                                "No generation prompt is stored in these pictures.".into(),
+                            ));
+                        } else {
+                            ui.ctx().copy_text(text);
+                            vctx.reqs.push(Request::Toast(if n == 1 {
+                                "Prompt copied to the clipboard.".into()
+                            } else {
+                                format!("{n} prompts copied to the clipboard.")
+                            }));
+                        }
+                        ui.close();
+                    }
+                }
                 ui.separator();
                 if ui.button("Move to Trash").clicked() {
                     vctx.reqs.push(Request::Trash(selected_paths.clone()));
@@ -1248,7 +1508,7 @@ pub const ICON_CELL_GAP: f32 = 2.0;
 /// kept and the pixmap is centred in the square box. A picture that is taller
 /// than it is wide therefore only fills `aspect * icon` of the box's width.
 pub fn thumb_size(icon: f32, aspect: f32) -> Vec2 {
-    let icon = icon.clamp(16.0, 256.0);
+    let icon = icon.clamp(16.0, theme::MAX_ICON_PX);
     let aspect = if aspect.is_finite() && aspect > 0.0 {
         aspect
     } else {
@@ -1279,7 +1539,7 @@ pub fn icon_cell_width(icon: f32, aspect: f32) -> f32 {
 
 /// Height of one row in the icons view: the icon box plus the label underneath.
 pub fn icon_cell_height(icon: f32) -> f32 {
-    let icon = icon.clamp(16.0, 256.0);
+    let icon = icon.clamp(16.0, theme::MAX_ICON_PX);
     let label_lines = if icon >= 32.0 { 2.0 } else { 1.0 };
     icon + if label_lines == 2.0 { 46.0 } else { 32.0 }
 }
@@ -1402,4 +1662,35 @@ fn wrap_label(
         lines.push(current.trim_end().to_string());
     }
     lines
+}
+
+/// Width of one scope chip in the find bar.
+pub const FIND_CHIP_W: f32 = 78.0;
+
+/// One of the find bar's two scope chips ("This folder" / "In subfolders").
+/// Drawn rather than pulled from the style so the pair reads as a two-way
+/// switch: the chosen side is filled and accented, the other is an outline.
+fn find_chip(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(FIND_CHIP_W, 22.0), Sense::click());
+    let (fill, stroke, tint) = if on {
+        (
+            Color32::from_rgb(56, 63, 70),
+            Stroke::new(1.0, ACCENT),
+            ACCENT,
+        )
+    } else if resp.hovered() {
+        (ROW_HOVER, Stroke::new(1.0, BORDER), TEXT)
+    } else {
+        (Color32::TRANSPARENT, Stroke::new(1.0, BORDER), TEXT_DIM)
+    };
+    ui.painter()
+        .rect(rect, CornerRadius::same(3), fill, stroke, egui::StrokeKind::Inside);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(11.5),
+        tint,
+    );
+    resp
 }

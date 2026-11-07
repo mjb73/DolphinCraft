@@ -42,7 +42,8 @@ impl ImageMeta {
         self.prompt.is_none() && self.fields.is_empty() && self.raw.trim().is_empty()
     }
 
-    /// The text a "Copy prompt" button puts on the clipboard.
+    /// The text a "Copy prompt" button puts on the clipboard: the prompt and,
+    /// when the file has one, the negative prompt.
     pub fn copy_text(&self) -> String {
         let mut out = String::new();
         if let Some(p) = &self.prompt {
@@ -60,6 +61,131 @@ impl ImageMeta {
         }
         out
     }
+
+    /// The positive prompt on its own — the text a person pastes back into a
+    /// text-to-image tool. Falls back to whatever the file did carry.
+    pub fn prompt_only(&self) -> String {
+        match &self.prompt {
+            Some(p) if !p.trim().is_empty() => p.clone(),
+            _ => self.raw.trim().to_string(),
+        }
+    }
+
+    /// The whole recipe in one block: prompt, negative prompt, then the
+    /// settings line (`Steps: 28, Sampler: …, Model: …`) rebuilt from the
+    /// fields, so a copied recipe reads the way the tool wrote it.
+    pub fn recipe_text(&self) -> String {
+        let mut out = String::new();
+        if let Some(p) = &self.prompt {
+            out.push_str(p.trim());
+        }
+        if let Some(n) = &self.negative {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("Negative prompt: ");
+            out.push_str(n.trim());
+        }
+        if !self.fields.is_empty() {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            let pairs: Vec<String> = self
+                .fields
+                .iter()
+                .map(|(k, v)| format!("{k}: {v}"))
+                .collect();
+            out.push_str(&pairs.join(", "));
+        }
+        if out.trim().is_empty() {
+            out = self.raw.trim().to_string();
+        }
+        out
+    }
+
+    /// Write the recipe into `<picture>.prompt.txt` next to the picture, which
+    /// is where the prompt reader already looks for hand-saved prompts. An
+    /// existing file is never overwritten: the second save becomes
+    /// `<picture>.2.prompt.txt`, the third `.3.`, and so on.
+    pub fn save_beside(&self, picture: &Path) -> std::io::Result<PathBuf> {
+        let stem = picture
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "picture".to_string());
+        let mut target = picture.with_file_name(format!("{stem}.prompt.txt"));
+        let mut n = 2;
+        while target.exists() {
+            target = picture.with_file_name(format!("{stem}.{n}.prompt.txt"));
+            n += 1;
+            if n > 999 {
+                break;
+            }
+        }
+        let mut body = self.recipe_text();
+        body.push('\n');
+        std::fs::write(&target, body)?;
+        Ok(target)
+    }
+}
+
+/// Whether a path looks like a picture, by its extension — the same list the
+/// file listing uses to pick the picture icon. Used by the file view's
+/// "Copy Prompt" action, which only knows paths.
+pub fn is_picture_path(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    matches!(
+        ext.as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "bmp"
+            | "webp"
+            | "tif"
+            | "tiff"
+            | "svg"
+            | "ico"
+            | "heic"
+            | "avif"
+            | "xpm"
+            | "ppm"
+    )
+}
+
+/// The prompts of several pictures in one block of text, ready for the
+/// clipboard: the file name on its own line, then its prompt, then a blank
+/// line. Pictures with no prompt are left out, so the count is the number of
+/// prompts actually copied rather than the number of files picked.
+pub fn prompts_of(paths: &[PathBuf]) -> (String, usize) {
+    let mut out = String::new();
+    let mut n = 0usize;
+    for path in paths {
+        let Some(meta) = read(path) else { continue };
+        if meta.prompt.is_none() && meta.raw.trim().is_empty() {
+            continue;
+        }
+        let text = meta.prompt_only();
+        if text.trim().is_empty() {
+            continue;
+        }
+        if n > 0 {
+            out.push('\n');
+        }
+        out.push_str(
+            &path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default(),
+        );
+        out.push('\n');
+        out.push_str(text.trim());
+        out.push('\n');
+        n += 1;
+    }
+    (out, n)
 }
 
 /// Read the generation metadata of `path`, looking at the picture itself first

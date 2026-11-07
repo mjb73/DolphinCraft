@@ -748,8 +748,8 @@
     {
       "name": "sort control in the toolbar",
       "group": "controls",
-      "value": "label \"Sort: Name\" above about 660 px of window width, icon only below it, sorting also in the app menu",
-      "source": "app layout rule; the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
+      "value": "label \"Sort: Name\" in a wide window, icon only when narrower, hidden before the three words give way; sorting also in the app menu",
+      "source": "app layout rule, changed this round (toolbar_metrics ladder); the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
     },
     {
       "name": "long breadcrumb paths",
@@ -985,11 +985,11 @@
       "source": "the person's image browser (image-browser-styled), static/css/browser.css .images { gap: 12px }"
     },
     {
-      "name": "picture wall padding in a card",
+      "name": "picture wall padding inside a card",
       "group": "picture wall",
-      "value": 8,
+      "value": 0,
       "unit": "px",
-      "source": "the person's image browser (image-browser-styled), static/css/browser.css .image { padding: 8px }"
+      "source": "this build after the person asked for no wasted bands: the frame is the picture's own shape, so the image browser's 8 px card padding (static/css/browser.css .image { padding: 8px }) is dropped; the 12 px gap between pictures is kept"
     },
     {
       "name": "picture corner radius",
@@ -1006,6 +1006,27 @@
       "source": "the person's image browser (image-browser-styled), templates/browser.html line 203 (the show_dims block)"
     },
     {
+      "name": "caption text size under a picture",
+      "group": "picture wall",
+      "value": 12,
+      "unit": "px",
+      "source": "the person's request (2026-11-07): the size line is drawn the same as the file name; app/src/gallery.rs CAPTION_SIZE, the constant the name itself uses"
+    },
+    {
+      "name": "caption colour under a picture",
+      "group": "picture wall",
+      "value": "#EFF0F1 (white when marked)",
+      "unit": "text",
+      "source": "the person's request (2026-11-07): same colour as the file names; app/src/gallery.rs caption_colour -> theme::TEXT, lifted to white on a selected cell exactly as the name is"
+    },
+    {
+      "name": "caption line step under a picture",
+      "group": "picture wall",
+      "value": 17,
+      "unit": "px",
+      "source": "app/src/gallery.rs CAPTION_STEP: one line plus leading, used for the name and the size line alike, and the room the wall reserves per line (gallery::caption_height)"
+    },
+    {
       "name": "original's largest preview box",
       "group": "picture wall",
       "value": 256,
@@ -1015,9 +1036,9 @@
     {
       "name": "slideshow interval at first",
       "group": "slideshow",
-      "value": 1.0,
+      "value": 1.5,
       "unit": "s",
-      "source": "the person's image browser (image-browser-styled), templates/browser.html #slide-interval value=1"
+      "source": "the person's request (2026-11-07): a show starts at 1.5 s; the image browser's own templates/browser.html #slide-interval starts at 1 s"
     },
     {
       "name": "slideshow interval step",
@@ -1088,6 +1109,281 @@
       "value": "steps, sampler, cfg scale, seed, size, model, denoising strength, prompt, negative prompt",
       "unit": "text",
       "source": "PNG tEXt 'parameters' chunk and JPEG Exif UserComment, as written by Stable Diffusion / ComfyUI / A1111; parsed by the rebuild, no original-counterpart in Dolphin"
+    },
+    {
+      "name": "zoom ladder top level (added)",
+      "group": "icons view",
+      "value": 25,
+      "unit": "level",
+      "source": "continuation of ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540 (level*16) past ZoomLevelInfo::maximumLevel @0x1a6530, which returns 16"
+    },
+    {
+      "name": "icon size at zoom 25 (added)",
+      "group": "icons view",
+      "value": 400,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x1a6540 formula at level 25"
+    },
+    {
+      "name": "largest thumbnail in the file views (added)",
+      "group": "icons view",
+      "value": 400,
+      "unit": "px",
+      "source": "theme::MAX_ICON_PX; the original clamps DolphinItemListView::setZoomLevel @0x26e100 to 0..=16 (256 px)"
+    },
+    {
+      "name": "picture corner radius in the file views",
+      "group": "icons view",
+      "value": "clamp(icon size x 0.035, 3, 10)",
+      "unit": "px",
+      "source": "views::picture_radius; 10 px is the picture wall's PICTURE_CORNER (browser CSS .image img border-radius 10px)"
+    },
+    {
+      "name": "picture switches in the file view",
+      "group": "icons view",
+      "value": "Names, Dimensions, Rounded, Previews",
+      "source": "person's report 2026-11-07; the same pane fields the picture wall uses, drawn in a row above the icon grid and in the app menu's Pictures submenu"
+    },
+    {
+      "name": "picture wall row packing",
+      "group": "picture wall",
+      "value": "shelf — every picture is exactly the height on the slider; a row takes pictures until the next no longer fits, so rows keep one size and only the right edge is ragged",
+      "unit": "text",
+      "source": "this build, after the person reported that the last row alone looked 400 px tall while the rows above it did not: the old packer justified every row to the window width, so a full row came out at 380-390 px and a short last row stayed at the 400 px on the slider; gallery.rs wall_rows"
+    },
+    {
+      "name": "picture wall row height",
+      "group": "picture wall",
+      "value": "the slider's 50..400 px on every row, the last one included",
+      "unit": "px",
+      "source": "this build, asked for by the person; slider range unchanged from templates/browser.html #sizeSlider, applied as one height for all rows in gallery.rs wall_rows"
+    },
+    {
+      "name": "picture wall shape range",
+      "group": "picture wall",
+      "value": "1:5 .. 6:1",
+      "unit": "text",
+      "source": "this build: a damaged header or a stitched panorama cannot take a whole row; folders and unreadable headers are laid out square"
+    },
+    {
+      "name": "prompt box height",
+      "group": "prompt",
+      "value": 150,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs, cap passed by gallery.rs prompt_panel; the original has no prompt reader"
+    },
+    {
+      "name": "negative prompt box height",
+      "group": "prompt",
+      "value": 96,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs via gallery.rs prompt_panel"
+    },
+    {
+      "name": "prompt text font size",
+      "group": "prompt",
+      "value": 11.5,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs, proportional 11.5 px to match the information panel's body text"
+    },
+    {
+      "name": "prompt drag auto-scroll edge",
+      "group": "prompt",
+      "value": 12,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs EDGE — a drag this close to the top or bottom edge scrolls the box"
+    },
+    {
+      "name": "prompt drag auto-scroll speed",
+      "group": "prompt",
+      "value": 10,
+      "unit": "px per frame",
+      "source": "added feature (this rebuild): app/src/selectable.rs AUTO_SCROLL_STEP, about 600 px/s at 60 Hz"
+    },
+    {
+      "name": "prompt box height snaps to whole text rows",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): app/src/selectable.rs, height = padding + rows x line height, paint clipped above the bottom padding"
+    },
+    {
+      "name": "prompt selection survives the wheel",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): the selection lives in egui's temporary store keyed by the block id, so scrolling does not clear it"
+    },
+    {
+      "name": "prompt shift-click extends the selection",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): app/src/selectable.rs, a press with Shift held keeps the existing anchor"
+    },
+    {
+      "name": "prompt selection keys",
+      "group": "prompt",
+      "value": "Ctrl+A select all, Ctrl+C copy, Esc clear, double-click a word, right-click Select all / Copy selection",
+      "unit": "text",
+      "source": "added feature (this rebuild): app/src/selectable.rs, active only while the block has the focus"
+    },
+    {
+      "name": "prompt option row wraps in a narrow column",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): gallery.rs prompt_panel lays the four options out with horizontal_wrapped, so Select all / Copy prompt / Copy all / Save move to a second line instead of being clipped"
+    },
+    {
+      "name": "prompt area folds away",
+      "group": "prompt",
+      "value": true,
+      "source": "this build, asked for by the person (\"the prompt area should be collapsable as it is not always needed\"): one click on the block's title row folds it, the choice is kept in the settings"
+    },
+    {
+      "name": "prompt area title row height",
+      "group": "prompt",
+      "value": 22,
+      "unit": "px",
+      "source": "this build: the whole row is one hit target, with a fold arrow that points down while open and right while folded (gallery.rs PROMPT_HEADER_H)"
+    },
+    {
+      "name": "prompt area folded state shows",
+      "group": "prompt",
+      "value": "the title row and one elided line of the prompt",
+      "unit": "text",
+      "source": "this build: so a folded block still says what it holds without taking the panel over"
+    },
+    {
+      "name": "prompt area key in the viewer",
+      "group": "prompt",
+      "value": "P (only while the picture details are showing)",
+      "unit": "text",
+      "source": "this build: the same switch as the fold arrow, next to I for the details panel"
+    },
+    {
+      "name": "comparison sync rule",
+      "group": "comparison",
+      "value": "side mode follows its Sync switch; split and overlay are always locked together",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js isCompareSynced / applyCompareTransform"
+    },
+    {
+      "name": "comparison zoom read-out",
+      "group": "comparison",
+      "value": "one percentage when synced, \"A% / B%\" when side mode is not",
+      "unit": "text",
+      "source": "static/js/browser.js updateCompareZoomLabel"
+    },
+    {
+      "name": "comparison zoom anchor",
+      "group": "comparison",
+      "value": "the point under the pointer stays under it, measured from the middle of the pane the pointer is over",
+      "unit": "text",
+      "source": "this build; the browser's stepCompareZoom has no anchor, which is why its own zoom drifted — the person reported the drift"
+    },
+    {
+      "name": "comparison wheel events per notch",
+      "group": "comparison",
+      "value": 2,
+      "unit": "events",
+      "source": "measured in the running window: one xdotool wheel notch reaches the app as a line event for the press and one for the release, 7 ms apart (app/shots/cmp debug log)"
+    },
+    {
+      "name": "comparison duplicate-notch window",
+      "group": "comparison",
+      "value": 0.02,
+      "unit": "s",
+      "source": "this build, estimated: a second line event of the same sign inside 20 ms is the other half of the same notch"
+    },
+    {
+      "name": "comparison pan limit",
+      "group": "comparison",
+      "value": "the picture stops when its own edge meets the pane edge; it does not move at all while it still fits",
+      "estimated": true,
+      "source": "this build; the browser translates freely and can lose a picture off its pane"
+    },
+    {
+      "name": "comparison paint clipping",
+      "group": "comparison",
+      "value": "each picture is clipped to its own pane",
+      "unit": "text",
+      "source": "this build; without it a zoomed right-hand picture covered the whole window (app/shots/cmp/before/01-wheel-right.png)"
+    },
+    {
+      "name": "three toolbar buttons",
+      "group": "toolbar",
+      "value": "Find narrows the list, Open in chooses where the picked item opens, Menu holds the app's own settings and tools",
+      "source": "this build, the person's question; each word on the button, plus the card on F1"
+    },
+    {
+      "name": "menu button opens on",
+      "group": "toolbar",
+      "value": "an ordinary left click",
+      "source": "this build: egui Popup::menu; the previous right-click-only popup (Response::context_menu) left the button dead to a click"
+    },
+    {
+      "name": "find narrows the listing",
+      "group": "toolbar",
+      "value": true,
+      "source": "this build: Pane::refilter from the find bar's change event and at startup; --selftest types ap into a 4-item folder and gets 3, then 4 again after closing"
+    },
+    {
+      "name": "find bar scopes",
+      "group": "toolbar",
+      "value": "This folder: narrow as you type; In subfolders: look through every folder below",
+      "source": "the original's Toggle Search Bar tooltip (string 0x12d7de, action at 0x67fc8) and its separate FilterBar setting"
+    },
+    {
+      "name": "original keeps a filter bar apart from its search bar",
+      "group": "toolbar",
+      "value": true,
+      "source": "GeneralSettings::GeneralSettings: FilterBar bool at this+0x82, default false, string FilterBar @0x002c0a90 referenced at 0x2b8853 and 0x2b8886; Remove Filter @0x12e119 used at 0xbcaef"
+    },
+    {
+      "name": "open in destinations",
+      "group": "toolbar",
+      "value": "a new tab, a new window, the other pane, a terminal",
+      "source": "the original's Open in New Tab / New Window / Split View strings at 0x12da05, 0x12da26, 0x12da39 (actions at 0x6bf86, 0x6c286, 0x6c40a); the other pane and the terminal are this build's additions"
+    },
+    {
+      "name": "toolbar words give way",
+      "group": "toolbar",
+      "value": "after the sort key's name and the sort button, at about 500 px of window width",
+      "source": "this build: toolbar_metrics ladder, held for every width from 360 to 1600 px by --selftest"
+    },
+    {
+      "name": "three-button card",
+      "group": "toolbar",
+      "value": "F1, or Menu > What the Three Buttons Do...",
+      "source": "this build: panels.rs guide_dialog, opened by --guide"
+    },
+    {
+      "name": "details panel open when a picture opens",
+      "group": "picture viewer",
+      "value": false,
+      "source": "the person's request (2026-11-07): \"the picture details panel should be closed by default\"; app/src/gallery.rs Viewer::new / sync_meta. This viewer is this build's own addition, so there is no original counterpart to read"
+    },
+    {
+      "name": "ways to open the details panel",
+      "group": "picture viewer",
+      "value": "info button in the viewer bar, I, P",
+      "source": "app/src/gallery.rs: bar_button(\"info\"), Key::I, Key::P (P opens the panel, then folds the prompt inside it)"
+    },
+    {
+      "name": "details panel state when paging",
+      "group": "picture viewer",
+      "value": "kept as the person left it",
+      "source": "app/src/gallery.rs (nothing in Viewer::step or sync_meta touches show_info)"
+    },
+    {
+      "name": "PNG pixel size read",
+      "group": "picture viewer",
+      "value": "chunk list walked to IHDR, up to 64 chunks",
+      "source": "app/src/search.rs png_size, written from the PNG chunk layout; the old fixed offset printed 1885434465 x 1835365477 on testdata/long-prompt.png (app/shots/details-closed.png)"
+    },
+    {
+      "name": "message for a picture the decoder refuses",
+      "group": "picture viewer",
+      "value": "This file could not be opened as a picture",
+      "source": "app/src/gallery.rs BigCache::has_failed; before, such a file said Loading picture... for ever (app/shots/details-closed4.png)"
     }
   ]
 }

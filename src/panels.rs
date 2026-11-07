@@ -15,6 +15,13 @@ use crate::theme;
 use crate::theme::*;
 use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewFolder, Props, Quick, ShortcutEdit};
 
+/// A quiet heading inside the app menu, so its rows read as groups ("New",
+/// "Tools", "View", "Help") instead of one long list.
+fn menu_group(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(text).size(10.5).color(TEXT_FAINT));
+}
+
 fn window_style<'a>(title: &'a str) -> egui::Window<'a> {
     egui::Window::new(title)
         .collapsible(false)
@@ -34,6 +41,7 @@ impl App {
     pub fn app_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(250.0);
         let dir = self.pane().current_dir();
+        menu_group(ui, "New");
         if crate::menu_row(ui, "New Window", "Ctrl+N").clicked() {
             crate::spawn_folder_window(&dir);
             ui.close();
@@ -59,6 +67,7 @@ impl App {
             ui.close();
         }
         ui.separator();
+        menu_group(ui, "Tools");
         if crate::menu_row(ui, "Find Duplicates…", "Ctrl+Shift+D").clicked() {
             self.dups = Some(Dups {
                 scan: crate::search::DupScan::start(dir.clone()),
@@ -92,6 +101,7 @@ impl App {
             ui.close();
         }
         ui.separator();
+        menu_group(ui, "View");
         let mut show_hidden = self.pane().show_hidden;
         if ui.checkbox(&mut show_hidden, "Show Hidden Files").changed() {
             self.pane_mut().show_hidden = show_hidden;
@@ -101,6 +111,71 @@ impl App {
         if ui.checkbox(&mut previews, "Show Preview").changed() {
             self.pane_mut().previews = previews;
         }
+        // Three settings the original keeps on two of its own pages, together
+        // here. Each is the original's own key and range:
+        // `GeneralSettings` `ShowZoomSlider` (the status-bar slider, off by
+        // default there), `[PreviewSettings] MaximumSize` (previews only for
+        // files below N MiB, 0 = any size) and
+        // `ContentDisplaySettings` `RecursiveDirectorySizeLimit` (how deep
+        // "size of contents" walks, 1..20).
+        ui.menu_button("Previews and sizes", |ui| {
+            ui.set_min_width(250.0);
+            let mut zoom_slider = self.config.show_zoom_slider;
+            if ui
+                .checkbox(&mut zoom_slider, "Show zoom slider")
+                .on_hover_text(
+                    "The original has this off in a fresh profile and switches it \
+                     on from the status bar's own menu",
+                )
+                .changed()
+            {
+                self.config.show_zoom_slider = zoom_slider;
+                self.config_dirty = true;
+            }
+            ui.separator();
+            let mut mib = self.config.preview_max_mib;
+            ui.horizontal(|ui| {
+                ui.label("Previews for files below");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut mib)
+                            .range(0..=999)
+                            .suffix(" MiB"),
+                    )
+                    .changed()
+                {
+                    self.config.preview_max_mib = mib;
+                    self.thumbs.set_max_mib(mib);
+                    self.config_dirty = true;
+                }
+            });
+            ui.label(
+                egui::RichText::new(if mib == 0 {
+                    "0 = files of any size"
+                } else {
+                    "bigger files show their type icon"
+                })
+                .size(10.5)
+                .color(TEXT_FAINT),
+            );
+            let mut depth = self.config.size_limit;
+            ui.horizontal(|ui| {
+                ui.label("Size of contents, up to");
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut depth)
+                            .range(
+                                crate::search::SIZE_LIMIT_MIN..=crate::search::SIZE_LIMIT_MAX,
+                            )
+                            .suffix(" folders"),
+                    )
+                    .changed()
+                {
+                    self.config.size_limit = depth;
+                    self.config_dirty = true;
+                }
+            });
+        });
         // Added feature: the picture gallery, and its viewer for whichever
         // picture is selected.
         let mut pictures = self.pane().pictures;
@@ -197,6 +272,11 @@ impl App {
             }
         });
         ui.separator();
+        menu_group(ui, "Help");
+        if crate::menu_row(ui, "What the Three Buttons Do…", "F1").clicked() {
+            self.guide_open = true;
+            ui.close();
+        }
         if crate::menu_row(ui, "About", "").clicked() {
             self.toast(&format!("{} — file manager with extra tools", crate::APP_NAME));
             ui.close();
@@ -231,6 +311,9 @@ impl App {
             None
         };
         let path_for_size = entry.as_ref().map(|e| e.path.clone());
+        // A prompt button in this panel reports back here and is shown in the
+        // status line once the panel has finished drawing.
+        let mut prompt_message: Option<String> = None;
 
         egui::SidePanel::right("information")
             .resizable(true)
@@ -275,181 +358,193 @@ impl App {
                 });
                 ui.add_space(4.0);
 
-                let Some(entry) = entry.clone() else {
-                    // `FUN_001f76f0` @0x1f76f0: when more than one item is
-                    // selected the panel swaps the per-file rows for the
-                    // `dialog-information` icon and the label `%1 item selected`
-                    // / `%1 items selected` (string 0x22ed75), and that label
-                    // carries no total size — the size of a selection is the
-                    // status bar's job (`DolphinView::emitStatusBarText`).
-                    ui.add_space(24.0);
-                    ui.vertical_centered(|ui| {
-                        let side = 44.0;
-                        let (rect, _) =
-                            ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
-                        let c = rect.center();
-                        ui.painter().circle_stroke(
-                            c,
-                            side * 0.5 - 2.0,
-                            Stroke::new(1.6, TEXT_DIM),
-                        );
-                        ui.painter().text(
-                            c,
-                            Align2::CENTER_CENTER,
-                            "i",
-                            FontId::proportional(22.0),
-                            TEXT_DIM,
-                        );
-                        ui.add_space(8.0);
-                        let msg = if selected.is_empty() {
-                            "No item selected".to_string()
-                        } else {
-                            format!("{} items selected", selected.len())
-                        };
-                        ui.label(egui::RichText::new(msg).size(13.0).color(TEXT_DIM));
-                    });
-                    return;
-                };
-
-                let preview_h = 150.0;
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(ui.available_width(), preview_h), Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(33, 37, 40));
-                let mut drew = false;
-                if entry.is_image() {
-                    if let Some(tex) = self.thumbs.get(ui.ctx(), &entry.path, preview_h as u32 * 2) {
-                        let scale = (rect.width() / tex.size()[0] as f32)
-                            .min(rect.height() / tex.size()[1] as f32)
-                            .min(1.0);
-                        let size = Vec2::new(
-                            tex.size()[0] as f32 * scale,
-                            tex.size()[1] as f32 * scale,
-                        );
-                        ui.painter().image(
-                            tex.id(),
-                            Rect::from_center_size(rect.center(), size),
-                            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
-                        drew = true;
-                    }
-                }
-                if !drew {
-                    let icon_rect =
-                        Rect::from_center_size(rect.center(), Vec2::splat(80.0));
-                    theme::draw_kind_icon_tinted(
-                        ui.painter(),
-                        icon_rect,
-                        entry.kind,
-                        entry.broken,
-                        entry
-                            .tint
-                            .filter(|_| entry.is_dir)
-                            .map(|c| Color32::from_rgb(c[0], c[1], c[2])),
-                    );
-                }
-
-                ui.add_space(6.0);
-                ui.vertical_centered(|ui| {
-                    let label = if entry.name.chars().count() > 40 {
-                        format!("{}…", entry.name.chars().take(40).collect::<String>())
-                    } else {
-                        entry.name.clone()
+                // The panel's rows run past the bottom of a laptop window once a
+                // picture carries a prompt, so the whole body scrolls; the title
+                // and its close button stay put above it.
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                    let Some(entry) = entry.clone() else {
+                        // `FUN_001f76f0` @0x1f76f0: when more than one item is
+                        // selected the panel swaps the per-file rows for the
+                        // `dialog-information` icon and the label `%1 item selected`
+                        // / `%1 items selected` (string 0x22ed75), and that label
+                        // carries no total size — the size of a selection is the
+                        // status bar's job (`DolphinView::emitStatusBarText`).
+                        ui.add_space(24.0);
+                        ui.vertical_centered(|ui| {
+                            let side = 44.0;
+                            let (rect, _) =
+                                ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+                            let c = rect.center();
+                            ui.painter().circle_stroke(
+                                c,
+                                side * 0.5 - 2.0,
+                                Stroke::new(1.6, TEXT_DIM),
+                            );
+                            ui.painter().text(
+                                c,
+                                Align2::CENTER_CENTER,
+                                "i",
+                                FontId::proportional(22.0),
+                                TEXT_DIM,
+                            );
+                            ui.add_space(8.0);
+                            let msg = if selected.is_empty() {
+                                "No item selected".to_string()
+                            } else {
+                                format!("{} items selected", selected.len())
+                            };
+                            ui.label(egui::RichText::new(msg).size(13.0).color(TEXT_DIM));
+                        });
+                        return;
                     };
-                    ui.label(
-                        egui::RichText::new(label)
-                            .size(14.0)
-                            .strong()
-                            .color(TEXT),
-                    );
-                });
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
 
-                let size_text = if entry.is_dir {
-                    if let Some(size) = self.folder_sizes.get(&entry.path) {
-                        fsutil::format_size(*size)
-                    } else {
-                        let (dirs, files) = crate::search::count_items(&entry.path);
-                        format!(
-                            "{} item{} ({} folder{}, {} file{})",
-                            dirs + files,
-                            if dirs + files == 1 { "" } else { "s" },
-                            dirs,
-                            if dirs == 1 { "" } else { "s" },
-                            files,
-                            if files == 1 { "" } else { "s" }
-                        )
+                    let preview_h = 150.0;
+                    let (rect, _) =
+                        ui.allocate_exact_size(Vec2::new(ui.available_width(), preview_h), Sense::hover());
+                    ui.painter()
+                        .rect_filled(rect, CornerRadius::same(4), Color32::from_rgb(33, 37, 40));
+                    let mut drew = false;
+                    if entry.is_image() {
+                        if let Some(tex) = self.thumbs.get(ui.ctx(), &entry.path, preview_h as u32 * 2) {
+                            let scale = (rect.width() / tex.size()[0] as f32)
+                                .min(rect.height() / tex.size()[1] as f32)
+                                .min(1.0);
+                            let size = Vec2::new(
+                                tex.size()[0] as f32 * scale,
+                                tex.size()[1] as f32 * scale,
+                            );
+                            ui.painter().image(
+                                tex.id(),
+                                Rect::from_center_size(rect.center(), size),
+                                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                            drew = true;
+                        }
                     }
-                } else {
-                    fsutil::format_size(entry.size)
-                };
-                info_row(ui, "Type", &entry.type_label());
-                // Added feature, adopted from the image browser's dimension
-                // caption: the pixel size, the ratio and the megapixels of a
-                // picture, read from its header rather than by decoding it.
-                if !entry.is_dir && entry.is_image() {
-                    if let Some((w, h)) = crate::search::probe_image_size(&entry.path) {
-                        info_row(ui, "Dimensions", &format!("{} × {} px", w, h));
-                        info_row(
-                            ui,
-                            "Aspect ratio",
-                            &format!(
-                                "{} ({:.2}:1)",
-                                crate::gallery::ratio_label(w, h),
-                                w as f32 / h.max(1) as f32
-                            ),
+                    if !drew {
+                        let icon_rect =
+                            Rect::from_center_size(rect.center(), Vec2::splat(80.0));
+                        theme::draw_kind_icon_tinted(
+                            ui.painter(),
+                            icon_rect,
+                            entry.kind,
+                            entry.broken,
+                            entry
+                                .tint
+                                .filter(|_| entry.is_dir)
+                                .map(|c| Color32::from_rgb(c[0], c[1], c[2])),
                         );
-                        info_row(ui, "Pixels", &crate::gallery::megapixels(w, h));
                     }
-                }
-                info_row(ui, "Size", &size_text);
-                info_row(ui, "Modified", &fsutil::human_date(entry.modified));
-                info_row(ui, "Accessed", &fsutil::human_date(entry.accessed));
-                info_row(ui, "Created", &fsutil::human_date(entry.created));
-                info_row(ui, "Tags", "No tags");
-                rating_row(ui);
-                comment_row(ui);
-                info_row(
-                    ui,
-                    "Permissions",
-                    &fsutil::symbolic_permissions(entry.mode, entry.is_dir),
-                );
-                if let Some(orig) = &entry.original {
-                    info_row(ui, "Originally", &orig.display().to_string());
-                }
-                // Added feature: what the picture itself says — its pixel size
-                // and, for a picture made by a text-to-image tool, the prompt
-                // stored in its metadata.
-                if entry.is_image() {
-                    ui.add_space(4.0);
-                    if let Some((w, h)) = crate::search::probe_image_size(&entry.path) {
-                        info_row(ui, "Dimensions", &format!("{w} × {h}"));
-                        info_row(ui, "Aspect", &crate::gallery::ratio_label(w, h));
-                        info_row(ui, "Pixels", &crate::gallery::megapixels(w, h));
-                    }
+
                     ui.add_space(6.0);
-                    let path = entry.path.clone();
-                    if !self.image_meta.contains_key(&path) {
-                        let meta = crate::imagemeta::read(&path);
-                        self.image_meta.insert(path.clone(), meta);
-                    }
-                    let meta = self.image_meta.get(&path).and_then(|m| m.as_ref());
-                    crate::gallery::prompt_panel(ui, meta);
+                    ui.vertical_centered(|ui| {
+                        let label = if entry.name.chars().count() > 40 {
+                            format!("{}…", entry.name.chars().take(40).collect::<String>())
+                        } else {
+                            entry.name.clone()
+                        };
+                        ui.label(
+                            egui::RichText::new(label)
+                                .size(14.0)
+                                .strong()
+                                .color(TEXT),
+                        );
+                    });
                     ui.add_space(4.0);
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Quick Look").clicked() {
-                        open_quick = true;
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    let size_text = if entry.is_dir {
+                        if let Some(size) = self.folder_sizes.get(&entry.path) {
+                            fsutil::format_size(*size)
+                        } else {
+                            let (dirs, files) = crate::search::count_items(&entry.path);
+                            format!(
+                                "{} item{} ({} folder{}, {} file{})",
+                                dirs + files,
+                                if dirs + files == 1 { "" } else { "s" },
+                                dirs,
+                                if dirs == 1 { "" } else { "s" },
+                                files,
+                                if files == 1 { "" } else { "s" }
+                            )
+                        }
+                    } else {
+                        fsutil::format_size(entry.size)
+                    };
+                    info_row(ui, "Type", &entry.type_label());
+                    // Added feature, adopted from the image browser's dimension
+                    // caption: the pixel size, the ratio and the megapixels of a
+                    // picture, read from its header rather than by decoding it.
+                    if !entry.is_dir && entry.is_image() {
+                        if let Some((w, h)) = crate::search::probe_image_size(&entry.path) {
+                            info_row(ui, "Dimensions", &format!("{} × {} px", w, h));
+                            info_row(
+                                ui,
+                                "Aspect ratio",
+                                &format!(
+                                    "{} ({:.2}:1)",
+                                    crate::gallery::ratio_label(w, h),
+                                    w as f32 / h.max(1) as f32
+                                ),
+                            );
+                            info_row(ui, "Pixels", &crate::gallery::megapixels(w, h));
+                        }
                     }
-                    if ui.button("Properties").clicked() {
-                        open_props = true;
+                    info_row(ui, "Size", &size_text);
+                    info_row(ui, "Modified", &fsutil::human_date(entry.modified));
+                    info_row(ui, "Accessed", &fsutil::human_date(entry.accessed));
+                    info_row(ui, "Created", &fsutil::human_date(entry.created));
+                    info_row(ui, "Tags", "No tags");
+                    rating_row(ui);
+                    comment_row(ui);
+                    info_row(
+                        ui,
+                        "Permissions",
+                        &fsutil::symbolic_permissions(entry.mode, entry.is_dir),
+                    );
+                    if let Some(orig) = &entry.original {
+                        info_row(ui, "Originally", &orig.display().to_string());
                     }
-                });
-                let _ = &path_for_size;
+                    // Added feature: the prompt a picture was made with, read from
+                    // the picture's own metadata. The pixel-size rows above already
+                    // told the person how big it is, so this block is just the
+                    // recipe.
+                    if entry.is_image() {
+                        ui.add_space(4.0);
+                        let path = entry.path.clone();
+                        if !self.image_meta.contains_key(&path) {
+                            let meta = crate::imagemeta::read(&path);
+                            self.image_meta.insert(path.clone(), meta);
+                        }
+                        let meta = self.image_meta.get(&path).and_then(|m| m.as_ref());
+                        // Added feature: the prompt block folds away behind its
+                        // title row; the choice is the person's and is kept.
+                        let mut prompt_open = self.config.prompt_open;
+                        let shown = crate::gallery::prompt_panel(ui, meta, Some(&path), &mut prompt_open);
+                        if prompt_open != self.config.prompt_open {
+                            self.config.prompt_open = prompt_open;
+                            self.config_dirty = true;
+                        }
+                        if let Some(msg) = shown.message {
+                            prompt_message = Some(msg);
+                        }
+                        ui.add_space(4.0);
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Quick Look").clicked() {
+                            open_quick = true;
+                        }
+                        if ui.button("Properties").clicked() {
+                            open_props = true;
+                        }
+                    });
+                    let _ = &path_for_size;
+                    });
             });
 
         if close {
@@ -477,6 +572,9 @@ impl App {
             if let Some(e) = entry {
                 self.reqs.push(Request::QuickLook(e.path));
             }
+        }
+        if let Some(msg) = prompt_message {
+            self.toast(&msg);
         }
     }
 
@@ -532,6 +630,98 @@ impl App {
         self.quick_dialog(ctx);
         self.new_folder_dialog(ctx);
         self.shortcut_dialog(ctx);
+        self.guide_dialog(ctx);
+    }
+
+    /// Added: the plain-language answer to "what do these three buttons do?".
+    /// One row per button, each naming the one thing it owns — a place, a find,
+    /// a setting — because that is the confusion a row of unlabeled glyphs
+    /// creates.
+    fn guide_dialog(&mut self, ctx: &egui::Context) {
+        if !self.guide_open {
+            return;
+        }
+        let mut open = true;
+        let mut close = false;
+        let rows: [(&str, &str, &str); 3] = [
+            (
+                "search",
+                "Find",
+                "Narrows what you see to the names that match. “This folder” \
+                 looks at the list in front of you while you type; “In subfolders” \
+                 also looks inside every folder below.",
+            ),
+            (
+                "openin",
+                "Open in",
+                "Chooses where the thing you picked appears: a new tab, a new \
+                 window, the other pane, or a terminal. The button itself just \
+                 opens it here; the little arrow beside it lists the other places.",
+            ),
+            (
+                "menu",
+                "Menu",
+                "The app's own switches and extras — sorting, previews, hidden \
+                 files, duplicates, bulk rename. Nothing in this list changes your \
+                 files on its own.",
+            ),
+        ];
+        window_style("What the Three Buttons Do")
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_min_width(440.0);
+                ui.label(
+                    egui::RichText::new(
+                        "They sit together at the right end of the toolbar. Each one owns a \
+                         different question.",
+                    )
+                    .size(11.5)
+                    .color(TEXT_DIM),
+                );
+                ui.add_space(10.0);
+                for (glyph, name, text) in rows {
+                    ui.horizontal_top(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(4),
+                            Color32::from_rgb(52, 58, 64),
+                        );
+                        theme::draw_glyph(ui.painter(), rect, glyph, TEXT);
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            ui.set_max_width(360.0);
+                            ui.label(egui::RichText::new(name).size(13.0).color(TEXT));
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(text).size(11.5).color(TEXT_DIM),
+                                )
+                                .wrap(),
+                            );
+                        });
+                    });
+                    ui.add_space(10.0);
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("The arrow on a split button only lists more places.")
+                            .size(10.5)
+                            .color(TEXT_FAINT),
+                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(egui::Button::new("Close").min_size(Vec2::new(84.0, 24.0)))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+            });
+        if !open || close {
+            self.guide_open = false;
+        }
     }
 
     fn confirm_dialog(&mut self, ctx: &egui::Context) {
@@ -800,8 +990,14 @@ impl App {
             if let Some(path) = path_for_size {
                 let tx = self.size_tx.clone();
                 let p = path.clone();
+                // Same recursion limit the original's size job gets
+                // (`ContentDisplaySettings::RecursiveDirectorySizeLimit`).
+                let depth = self
+                    .config
+                    .size_limit
+                    .clamp(crate::search::SIZE_LIMIT_MIN, crate::search::SIZE_LIMIT_MAX);
                 std::thread::spawn(move || {
-                    let size = crate::search::dir_size(&p);
+                    let size = crate::search::dir_size_limited(&p, Some(depth));
                     let _ = tx.send((p, size));
                 });
             }

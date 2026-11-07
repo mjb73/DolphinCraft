@@ -679,6 +679,68 @@ below itself. A justified gallery layout (rows stretched to fill the width)
 would use that space too, but it would break the even label baseline this view
 keeps with the details and compact views.
 
+## The picture wall: rows that fill the width (asked for by the person)
+
+The person liked the new *Pictures — thumbnails of this folder* button but said
+the thumbnails sit on a square footprint, which leaves wasted space between
+them. That square is the one the wall inherited from the image browser it was
+rebuilt from: a card is `width: var(--thumb-size)`, and the picture is fitted
+inside it. At 200 px a 16:9 shot is therefore drawn 200×112 — the card is 88 px
+taller than the picture — and a 9:16 shot is drawn 112×200, so the card is 88 px
+wider than the picture. Two portrait pictures consequently stood 44 + 12 + 44 =
+**100 px** of empty wall apart, and two wide ones had the same 100 px between
+their rows; the square card, not the picture, decided the spacing. Even two
+square pictures were 11 + 12 + 11 = **34 px** apart, because each card carried
+8 px of padding and a 3 px mat around a 194 px picture. The wall now leaves
+exactly the 12 px gap between any two pictures, square or not.
+
+Seen in the previous build's own window picture (`app/shots/gallery1.png`,
+200 px cards): five cards in a row, five square wells, each holding a picture
+with a band of empty wall above and below it or left and right of it.
+
+**What the wall does now** (`app/src/gallery.rs`):
+
+* every picture is laid out at its own aspect ratio; the frame around a
+  thumbnail is the picture and nothing else, so the browser's 8 px card padding
+  is gone (the 12 px gap between pictures is kept, `wall_rows`);
+* a row takes pictures until the next one would no longer fit beside them at the
+  slider's height, so every picture on the wall is exactly that tall (**changed
+  in the pass described under "The picture wall keeps one size for every row"
+  below — the earlier version stretched each row to the window width instead,
+  which is what made the last row look bigger than the rest**);
+* the slider now means *height of the pictures in a row* rather than the side of
+  a square, still 50–400 px;
+* the last row is packed like every other one, so it carries the same height as
+  the rows above it; `ROW_STRETCH_MAX` (1.6 × the slider height), which used to
+  cap a lone leftover photo, is gone with the stretching;
+* the aspect ratio is held inside 1:5 … 6:1 (`ASPECT_MIN` / `ASPECT_MAX`) so a
+  damaged header or a stitched panorama cannot take a whole row; folders and
+  pictures whose header cannot be read are laid out square, as before;
+* the packing is virtualised by the scroll area's clip rectangle: rows above or
+  below the visible band are skipped, so a folder of a thousand pictures still
+  only draws the dozen on screen.
+
+At 200 px in a 1180 px pane the demo folder of 13 entries laid out **5 + 5 + 3**
+across three rows, with no empty band inside any row (`app/shots/wall/mixed200.png`);
+at 400 px the same folder gives rows of 3 (`mixed400.png`), at 50 px all 13 fit
+in one row (`mixed50.png`). A folder of three pictures (`pair.png`) puts them
+side by side at 1.6 × the asked height, flush left, instead of three square
+wells with a picture in the middle of each.
+
+`--selftest` guards the rule with "every picture is as wide as its own shape, so
+no bands sit between them": it packs a wide, a tall, a square, a 4:3 and a 3:2
+picture into a 1000 px wall, then checks that every row marked full adds up to
+1000 px and that the wide picture is at least twice as wide as the tall one.
+`mechanics.json` carries the numbers under the `picture wall` group.
+
+**Left alone on purpose.** Only the added picture wall packs whole rows. The
+icons view keeps its own shelf layout from the earlier change — a cell as wide
+as its picture needs, with one height for the row — so a very wide picture there
+still leaves a little wall above and below itself; the compact and details views
+stay exactly as the original draws them. Stretching those rows too would break
+the label baseline the icons view shares with the details view, which is the
+trade-off noted above.
+
 ## Read out of the code with the decompiler: the status bar, the selection, the disk-space button
 
 Everything in this section comes from `native_function_pseudocode` (Ghidra
@@ -831,8 +893,9 @@ that gives way when the window narrows. That is the rule the rebuild now keeps.
 | gap between bar and cluster | 8 px | rebuild spacing, **estimated** |
 | narrowest location bar worth drawing | 110 px | rebuild rule, **estimated** |
 | sort control, wide window | label `Sort: Name` | rebuild |
-| sort control, narrow window | icon only, below about 660 px of window width | rebuild |
+| sort control, narrow window | icon only | rebuild |
 | sort control, narrowest | hidden; sorting stays in the app menu's *Sort by* | rebuild |
+| the three words (`Find`, `Open in`, `Menu`) | kept to the last; they go only when even a worded row with no sort button will not fit (about 500 px of window) | rebuild rule, changed this round: a row of bare glyphs is what the person could not read |
 | long paths | segments drop from the left behind `…`; the current folder stays | rebuild, **estimated** (the original's elision lives in the KIO breadcrumb code) |
 
 `toolbar_metrics(avail, label_w, show_bar)` in `app/src/main.rs` now owns that
@@ -849,6 +912,56 @@ and 620 px (`app/shots/toolbar-*.png`) show the label clear of the bar, then the
 icon-only sort at 620 px, and the menu opening below the button, entirely under
 the toolbar. Split view (F3) keeps its per-pane location bars and the sort
 control in the toolbar with no bar to collide with.
+
+### The three buttons at the right end: what each one owns
+
+The person sent a 163 x 60 crop of three unlabeled glyphs — a small triangle, a
+magnifier and three lines — and asked what each one uniquely should do. The
+original's own strings and its settings constructor say what the trio is there:
+
+| glyph | the original's string | what it does there | evidence |
+| --- | --- | --- | --- |
+| magnifier | `Toggle Search Bar` | opens a **search bar**: the tooltip promises to "find files and folders", and Enter looks below the folder | string at file offset `0x12d7de`, action built at `0x67fc8` |
+| small triangle | `Open in New Tab` / `Open in New Window` / `Open in Split View` | a split button's destination list — where the picked item opens | strings at `0x12da05`, `0x12da26`, `0x12da39`, built at `0x6bf86`, `0x6c286`, `0x6c40a` |
+| three lines | the application menu | the app's own switches, tools and settings | the toolbar's control button |
+
+The confusion is the original's, and it is earned: the same window also carries
+a **filter** bar, a different control with different wording — `FilterBar` is a
+`GeneralSettings` bool at `this+0x82`, default false, added to kconfig in
+`GeneralSettings::GeneralSettings` (string `FilterBar` @`0x002c0a90`, referenced
+at `0x2b8853` and `0x2b8886`), with `Remove Filter` (string `0x12e119`, used at
+`0xbcaef`) and `Keep Filter When Changing Folders` (`0x1350c8`). So "narrow
+what I am looking at" and "search below this folder" are two controls in the
+original, and the magnifier is the second one.
+
+The rebuild gives each button **one job and the word for it**:
+
+| button | word | the one job | what it must not do |
+| --- | --- | --- | --- |
+| Find | `Find` | narrows the list in place as you type; two chips, *This folder* / *In subfolders*, say how far the looking goes | never opens anything, never changes a setting |
+| Open in | `Open in` + arrow | the button opens the picked item; **only the arrow** lists places — new tab, new window, the other pane, a terminal | the arrow never narrows the list |
+| Menu | `Menu` | the app's own settings and tools, grouped New / Tools / View / Help | never touches the person's files |
+
+Three faults were fixed to make that true:
+
+1. **The Menu button was dead to an ordinary click.** It was wired to a
+   right-click popup (`Response::context_menu`), so a left click closed a menu
+   that had never opened. It is now `Popup::menu`, which toggles on a plain
+   click; `--menu` opens it on the first frame so a picture can be taken.
+2. **The find bar changed the words and not the list.** The startup path (and
+   any path that set the words without a keystroke) never narrowed the listing;
+   `Pane::refilter` is now called there too, and `--selftest` types "ap" into a
+   four-item folder and asserts the three matching names, the selection count,
+   and that closing the bar restores all four.
+3. **The words gave way before the sort button.** The toolbar ladder now drops
+   the sort key's name first, then the sort button (sorting stays in the
+   menu), and only then the words — measured against the location bar's own
+   110 px floor at every width from 360 to 1600 px.
+
+The card that spells the three jobs out was unreachable for the same class of
+reason: `guide_open` was never set by `--guide`, so the dialog existed and never
+drew. It now opens from the menu, from F1, and from `--guide`
+(`app/shots/now/guide2.png`).
 
 ## The deep pass: the main program read function by function
 
@@ -1089,7 +1202,7 @@ guessed, and the sources are the ones the browser uses at runtime.
 | padding inside a card | 8 px | `static/css/browser.css` `.image { padding: 8px }` |
 | picture corner radius ("rounded") | 10 px | `static/css/browser.css` `.image img { border-radius: 10px }` |
 | dimension line | `W×H:AR a.bc:MP d.dd` | `templates/browser.html` line 203, the `show_dims` block: `{{ width }}×{{ height }}:AR {{ aspect_ratio }}:MP {{ megapixels }}` |
-| slideshow interval | 1 s first, 0.5 s steps | `templates/browser.html` `#slide-interval` `min="0.5" value="1" step="0.5"` |
+| slideshow interval | 1.5 s first (person's request; the browser starts at 1 s), 0.5 s steps | the person asked for a 1.5 s default on 2026-11-07; the browser's `#slide-interval` is `min="0.5" value="1" step="0.5"` |
 | slideshow fade | 300 ms | `static/js/browser.js` `startSlideshow`, the second `setTimeout(..., 300)` around the picture swap |
 | comparison modes | side, split, overlay | `#compare-modal` toolbar |
 | comparison overlay opacity | 50 % first | `#compareOpacitySlider` `min="0" max="100" value="50"` |
@@ -1120,3 +1233,419 @@ Verified in the running window (pictures in `app/shots/final/`): `wall400.png`
 (400 px cards), `wall-dims.png` (the dimension line under each name),
 `viewer.png` (the Prompt panel with the 9 fields read from a hand-built PNG),
 `compare3.png` (two pictures side by side with the Side/Split/Overlay bar).
+
+## This pass: the 400 px ceiling and the picture switches in the file view
+
+The person reported that thumbnails stopped at 256 px and that the rounded
+corners and the other switches were missing. Both were real gaps in the last
+build, and both are now closed where the person browses pictures.
+
+**Where the 256 px came from.** It is the original's own ceiling, measured
+again from the installed library:
+
+| function | address | result |
+| --- | --- | --- |
+| `ZoomLevelInfo::minimumLevel()` | 0x1a6520 | 0 |
+| `ZoomLevelInfo::maximumLevel()` | 0x1a6530 | **16** |
+| `ZoomLevelInfo::iconSizeForZoomLevel(int)` | 0x1a6540 | levels 0..4 from the table at 0x1cd980 (16, 22, 32, 48, 64), level 5 and up `level * 16` |
+| `DolphinItemListView::setZoomLevel(int)` | 0x26e100 | clamps the incoming level to the pair of bounds at 0x1c3350, i.e. 0..=16 |
+
+Level 16 is therefore 256 px, and that is the largest preview the original can
+draw. The previous build copied that clamp into the file views (`clamp(16, 256)`
+in the icon, compact and details drawing code) *and* stopped the zoom ladder at
+level 16, so the added 400 px ceiling only existed inside the picture wall.
+
+**What changed.** The ladder in `theme.rs` now continues the original's own
+formula instead of stopping early: levels 17..=25 are 272, 288, 304, 320, 336,
+352, 368, 384, 400 px. Nothing at or below level 16 moves, so every measured
+size the original offers is unchanged; the four `clamp(16, 256)` calls became
+`clamp(16, 400)`, and `Pane::zoom_by` clamps to the new top. `zoomLevelForIconSize`
+(the inverse, 0x1a6560) still maps 400 px back to level 25, so a saved size
+round-trips. `--selftest` covers both directions.
+
+**The switches.** `Names`, `Dimensions`, `Rounded` and `Previews` were only
+reachable inside the picture wall. They are now also drawn in a one-row strip
+above the icon grid whenever the folder holds at least one picture, and they
+are repeated under the app menu's *Pictures* submenu, so they can be found
+without knowing the wall exists. The flags themselves are the same pane fields
+the wall uses (`gallery_names`, `gallery_dims`, `gallery_round`, `previews`),
+which are saved in the settings file, so a choice holds across folders and
+restarts.
+
+* Corner radius in the file views is `clamp(icon * 0.035, 3, 10)` px: the wall's
+  own 10 px (`PICTURE_CORNER`, from the browser's `.image img { border-radius:
+  10px }`) at the 400 px top, scaled down so a 32 px icon is not rounded into a
+  circle. The mask is painted in the colour actually behind the picture, so a
+  selected or hovered cell keeps its tint in the corners.
+* The dimension line is the wall's own caption format
+  (`W×H:AR a.bc:MP d.dd`), drawn under the name in the name's own font, size
+  and colour (see "The size line is written like the name" below), and the
+  icon cell grows by a measured caption line when it is on so rows never
+  overlap.
+* Names off hides the label but keeps the cell, so pictures do not jump around
+  when the switch is flipped.
+
+Values are repeated as data in `mechanics.json` (`icons view` and `picture wall`
+groups) with the addresses above as their source; the extended ladder's top is
+marked as an addition, not as something the original does.
+
+## The size line is written like the name (asked for by the person)
+
+The person's words: *"the dimensions displayed should have the same colour, size
+and font as the filenames"*.
+
+Until this pass the two lines under a picture were drawn as two different
+things. The name was 12 px in the ordinary text colour; the size line was
+10.5 px in the faint colour, one size smaller and a shade dimmer, and in the
+picture wall it also sat on a shorter line step (15 px against the name's 17).
+The words are the same kind of caption, so they now share one definition:
+
+| what | value | where |
+| --- | --- | --- |
+| caption font | proportional | `gallery::caption_font()` |
+| caption size | **12 px** (the file name's own size) | `gallery::CAPTION_SIZE` |
+| caption colour | `TEXT` (`#EFF0F1`), lifted to white on a marked cell | `gallery::caption_colour()` |
+| caption line step | **17 px**, name and size alike | `gallery::CAPTION_STEP` |
+| icon-grid size-line offset | 14 px below the last name line | `views::draw_icon_cell` |
+
+* The names already used this font and size, so the *name* is unchanged; only
+  the size line grew and brightened. The 10.5 px faint style is gone from both
+  places a picture's size is printed under it — the icon grid (`views`) and the
+  picture wall (`gallery::draw_gallery_card`).
+* A marked cell still turns its whole caption white, name and size together, so
+  one line never reads differently from the other.
+* Room: the wall's caption block is now 17 px per line (`caption_height`), and
+  the icon grid measures a caption line from the font itself and grows the cell
+  by that much (`dims_extra`) instead of the old fixed 15 px that was sized for
+  the smaller text. Nothing is clipped at 192 px or at 400 px.
+* The information panel's `Dimensions:` row is a panel row, not a caption under
+  a picture, and keeps the panel's own label/value styling.
+
+`--selftest` checks the shared font, size, colour and line step, and
+`mechanics.json` repeats them under the `picture wall` group with the person's
+request as their source.
+
+## The slideshow starts at 1.5 s (asked for by the person)
+
+The person asked that the slideshow's default interval be 1.5 seconds. The
+slideshow is an addition — neither `/usr/bin/dolphin` nor
+`libdolphinprivate.so.6` contains the word or a timer that advances pictures, as
+the string search recorded in the section above shows — so this number comes
+from the person's request, not from the original's code. The image browser the
+feature was modelled on starts its own `#slide-interval` at 1 s with 0.5 s steps;
+only the starting value changes here.
+
+* `SLIDE_DEFAULT` is 1.5 s (`app/src/gallery.rs`). It is the value a fresh
+  settings file gets, and the value an older settings file gets when it has no
+  interval key, because `config.rs` seeds that field from the same constant.
+* A settings file written before this change still holds the old 1 s default.
+  `Config::migrate` lifts exactly 1.0 s to 1.5 s once (`settings_version` goes
+  from 0 to 1) and leaves any other saved interval alone, so a person who chose
+  a different timing keeps it and a person who never touched the slider sees
+  the new default.
+* The slider runs 0.5 … 10 s in 0.5 s steps, so 1.5 s is one of its stops and the
+  label above it reads `1.5s`; the clamp still accepts 0.5 … 30 s for a value
+  restored from settings.
+* The fade is unchanged at 300 ms and still starts on.
+* Starting a show with Space or the player button now uses the interval and fade
+  the person last set (`Slide::remembered`) instead of silently resetting them to
+  the factory value; the 1.5 s default is therefore a first-run value, not a
+  reset on every play.
+* `--selftest` checks that the fresh interval is exactly 1.5 s, that a picture
+  has not moved at 1.4 s but has at 1.6 s, and that a restarted show keeps a
+  chosen 4 s interval with the fade off.
+
+`mechanics.json` repeats the value under the `slideshow` group with the
+person's request as its source.
+
+
+## The prompt text block: selecting past the edge (asked for by the person)
+
+The person's words: *"the prompt selection options should allow text to be
+selected taking scrolling into account"*. Until this pass the prompt was a
+read-only `TextEdit` inside a `ScrollArea`: the field clipped its own text, so
+a drag could only ever reach the rows that happened to be on screen, and the
+wheel scrolled the whole information panel out from under the pointer. Nothing
+in `/usr/bin/dolphin` answers this, because the original has no prompt reader at
+all — the whole block is an addition built for this remake — so the rules below
+are this build's own, written down here so the checks and the sheet agree.
+
+What the block does now (`app/src/selectable.rs`):
+
+* The **whole** text is laid out once at the panel's width (proportional 11.5 px,
+  wrap width = available − 2 × 6 px padding − 12 px scroll gutter) and the block
+  owns its scroll offset. Selecting therefore works on every character, on
+  screen or not.
+* Dragging to within **12 px** of the top or bottom edge scrolls the block
+  **10 px per frame** (≈600 px/s at 60 Hz) in that direction and keeps extending
+  the selection, so a prompt longer than its box can be selected from the first
+  word to the last in one gesture. The same drag can reverse direction and take
+  the selection back.
+* The wheel scrolls the text and **keeps the selection**: a click at the top, a
+  wheel scroll and a Shift+click at the bottom join into one range. Shift+click
+  moves the far end instead of restarting; a plain click restarts.
+* Double-click selects the word under the pointer (letters, digits, `_`, `-`,
+  `'`, `/` count as one word); Ctrl+A selects everything, Ctrl+C copies the
+  selection, Esc drops it, and the right-click menu offers *Select all* and
+  *Copy selection* so the keys do not have to be remembered.
+* The box is capped at **150 px** for the prompt and **96 px** for the negative
+  prompt, and its height is snapped to whole text rows, with the paint clipped
+  one padding step above the bottom edge, so no row is ever left half-drawn.
+* A hairline thumb down the right edge shows which part of the text is in view;
+  it is drawn by the block itself because the box hides the scroll area's own
+  bar to keep the text width predictable.
+* The keys only act while the block has the focus, so Ctrl+A still selects the
+  files in the list when the prompt is not focused.
+* The row of options above the text (*Select all*, *Copy prompt*, *Copy all*,
+  *Save*) wraps onto a second line when the column is too narrow to hold all
+  four, so no option is ever clipped in a small window or a narrow Information
+  panel.
+
+`--selftest` drives the real widget headlessly for both halves of this: a drag
+held on the bottom edge scrolls the box and copies from the first character to
+the last (1 492 of 1 492 characters), and a click + wheel + Shift+click copies
+from the first click to the last row after 174 px of scrolling.
+
+`mechanics.json` repeats the numbers under the `prompt` group.
+
+## The picture wall keeps one size for every row (asked for by the person)
+
+The person's words: *"I noticed with the 'pictures - thumbnails of this folder'
+view set to 400 px, the last row seems to be displayed in 400px but the rest is
+not."* Measured on this build's own window picture before the change
+(`app/shots/wall400-now.png`, five pictures, the slider at 400 px, a 1440 × 900
+window whose wall is 1202 px wide):
+
+| row | pictures in it | picture height drawn |
+| --- | --- | --- |
+| 1 | landscape 16:9, portrait 3:4, portrait 9:16 | **381 px** |
+| 2 | scan-tall 1:2, square 1:1 (the leftover row) | **400 px** |
+
+The cause was the packer, not the slider. `wall_rows` used to justify every
+row: the height that makes the row exactly fill the window width was computed
+from the sum of the aspects, and the row took whichever of "one more picture" or
+"one fewer" came closer to the ask. A row of three pictures therefore landed
+where the width said, not where the slider said — 1202 / (1.78 + 0.75 + 0.5625)
+= 381 px — while the last row, which nothing had to justify, kept the full 400.
+The same rule could also blow a short last row up to 1.6 × the slider height
+(`ROW_STRETCH_MAX`), so the one row everybody notices at the end of a folder was
+the one row that never matched the number on the slider.
+
+**What the wall does now** (`app/src/gallery.rs`, `wall_rows`):
+
+* every row is packed at **exactly** the slider's height, the last row included;
+  a row takes pictures while `aspect × height + gap` still fits the wall width,
+  and ends at the first picture that does not. The wall is a size, not an
+  average;
+* a picture is still as wide as its own shape, so the 12 px gap is still the only
+  space between two pictures and the frames still follow a wide or a tall shot;
+* the right-hand edge of a row may now stop short of the window edge — the price
+  of one honest size for every row, and what any fixed-size thumbnail grid does;
+* the one exception is a picture wider than the whole wall at that size (a
+  stitched panorama, up to 6:1 = 2400 px at 400 px): alone in its row it is drawn
+  as wide as the wall, so it comes out shorter than the rest. `ASPECT_MIN` /
+  `ASPECT_MAX` (1:5 … 6:1) still hold the shapes;
+* the 50–400 px range, 200 px at first, the 12 px gap, the round corners and the
+  captions are unchanged (see the values in `mechanics.json`).
+
+`--selftest` drives both halves: *"every row of the picture wall is the size the
+person set, the last one too"* packs twelve mixed pictures into a 1400 px wall at
+400 px and refuses to pass unless every row measures 400 px and no row is wider
+than the wall; *"every picture is as wide as its own shape"* keeps the old
+guard that no row overflows.
+
+Measured after the change (`app/shots/wall400-fixed.png`, same folder and
+window): row 1 = 398–400 px tall, row 2 = 400 px tall.
+
+## The prompt area folds away (asked for by the person)
+
+The person's words: *"the prompt area should be collapsable as it is not always
+needed."* The block that shows the recipe a picture was made with (fields,
+prompt, negative prompt) used to take the whole right-hand column of the viewer
+and a fair slice of the Information panel, whether or not the person was
+interested in it that day.
+
+**What it does now** (`app/src/gallery.rs`, `prompt_panel` / `prompt_header`):
+
+* the block's title row is one hit target, **22 px** tall: a fold arrow, the word
+  *Prompt* and, on the right, the tool that wrote the recipe (`parameters`,
+  `Stable Diffusion` …). The arrow points down while the block is open and right
+  while it is folded;
+* a click folds it to the title row plus **one elided line** of the prompt, so a
+  folded block still says what it holds; the fields, the *Copy prompt* / *Copy
+  all* / *Save* buttons, the selectable text box and the negative prompt go away
+  with it;
+* the same switch sits in the picture viewer on the **P** key, next to **I** for
+  the whole details panel, and both write the same setting; the status line says
+  *Prompt folded away* / *Prompt shown*;
+* the choice is kept between runs (`prompt_open` in the settings file, on by
+  default), so a person who never wants the recipe sees a one-line block from
+  then on;
+* `--selftest` clicks the real title row headlessly and checks the text box
+  disappears on the first click and comes back on the second.
+
+`mechanics.json` repeats these numbers under the `prompt` group.
+
+## The picture details panel starts closed (asked for by the person)
+
+The person's words: *"the picture details panel should be closed by default."*
+Until this change the viewer opened the details panel by itself the first time a
+picture carrying a generation recipe came up, so the recipe covered the
+right-hand third of the picture whether or not it was wanted.
+
+**What it does now** (`app/src/gallery.rs`, `Viewer::sync_meta`):
+
+* the panel is shut every time a picture viewer opens, including from the
+  command line and for slideshows and for a picture that carries a prompt;
+* the recipe is still read behind the panel — `sync_meta` fills `Viewer::meta`
+  once per picture, so opening the panel shows the prompt with no wait;
+* the three ways in are the info button at the right of the viewer's top bar,
+  the **I** key, and **P**. **P** now opens the panel first and folds the prompt
+  inside it on the next press, because with the panel shut by default the old
+  rule (fold only when the panel is open) made P do nothing on a fresh picture;
+* paging from one picture to the next leaves the panel the way the person left
+  it — shut if shut, open if open;
+* the main window's Information panel was already off unless switched on (its
+  `info_panel` default is false and nothing opens it on its own), so this change
+  is the viewer's own panel only.
+
+`--selftest` opens the viewer on a picture that carries a prompt, lets it read
+the recipe exactly as the window does, pages to a second picture, and refuses to
+pass if the panel comes up open at either point: *"the picture details panel is
+closed when a picture opens, and stays closed when paging"*.
+
+Measured after the change (`app/shots/details-closed2.png`, a 1200 × 760 window
+on `testdata/mixed/prompt-sample.png`): picture fills the canvas, no panel, the
+status line reads *832 × 1216 · 0.68:1 · 1.01 MP · 117.1 KiB*.
+
+Two faults found while photographing it, both fixed in the same pass:
+
+* **the size line could read nonsense.** The pixel size was read from a fixed
+  offset, assuming the PNG image header was the first chunk. A picture whose text
+  chunk came first gave *1885434465 × 1835365477 · 1:03:1 · 3460461326206.96 MP*
+  (`app/shots/details-closed.png`, before). `search.rs` `png_size` now walks the
+  chunk list to the `IHDR`, up to 64 chunks, stopping at the pixel data;
+* **a picture the decoder refuses looked like one that was still arriving.** The
+  viewer said *Loading picture…* for ever. `BigCache::has_failed` now lets it say
+  *This file could not be opened as a picture*
+  (`app/shots/details-closed4.png`).
+
+`mechanics.json` repeats these under the `picture viewer` group.
+
+## The side-by-side comparison: zoom and pan (reported by the person)
+
+The person's words: *"in the side by side comparison view, the zoom and pan
+behaviour is not working properly."* Four separate faults were behind that, and
+all four were in this build's own compare view, not in the original program. The
+comparison is an addition modelled on the person's image browser
+(`~/personal-files/python-projects/image-browser-styled`), so its rules are that
+browser's, read from its own functions:
+
+| rule | value | where it comes from |
+| --- | --- | --- |
+| wheel zoom | ×1.1 in, ×0.9 out | `static/js/browser.js` `initCompareZoomWheel` → `stepCompareZoom(1.1 / 0.9, …)` |
+| button zoom | ×1.25 / ÷1.25 | `compareZoomIn` / `compareZoomOut` |
+| zoom range | 0.1 … 20 | `stepCompareZoom` clamp |
+| which picture the wheel acts on | the pane under the pointer | `initCompareZoomWheel`, `e.target.closest('.compare-pane-a, .compare-pane-b')` |
+| which picture a drag acts on | the pane the drag started in | `initComparePan`, same closest() test |
+| Sync | side mode follows the switch; split and overlay are **always** synced | `isCompareSynced` returns true for `split-mode` and `overlay-mode` whatever the checkbox says |
+| synced drag | the drag writes picture A and the copy is pushed to B | `initComparePan`, `if (isCompareSynced()) { … _compareZoomB.offsetX = _compareZoomA.offsetX … }` |
+| read-out | one value when synced, `A% / B%` when not | `updateCompareZoomLabel` |
+
+**Fault 1 — one wheel notch ran the zoom to its ceiling.**
+`app/shots/cmp/before/01-wheel-right.png`: two notches took the read-out from
+100 % to **2000 %**, the top of the 0.1 … 20 range. The handler read
+`i.smooth_scroll_delta.y + i.raw_scroll_delta.y`; egui spreads one notch over a
+dozen frames, and every frame that still had a delta bought a full step. Fixed
+by reading the wheel as **events** (`gallery::wheel_units_in_frame`) and turning
+them into steps through the same 120-units-per-notch arithmetic the file view
+already used (`state::wheel_units`, `state::wheel_zoom_steps`). Measured in the
+running window: one notch now gives 100 % → 110 %, two give 121 %.
+
+**Fault 2 — one notch was counted twice.**
+Even with events, two notches gave 146 % (four steps). The debug log shows one
+physical notch arriving as **two line events 7 ms apart** — the press and the
+release of X11 wheel button 4 — so `gallery::Wheel::steps` counts a notch once and
+ignores a second line event of the same sign inside **20 ms**
+(`WHEEL_DUPLICATE_S`). A touchpad's pixel-based events are still summed, so a
+40 px glide is one step, exactly as in the file view.
+
+**Fault 3 — the pictures were not clipped to their panes, so one hid the other.**
+`draw_fit` painted the picture's rectangle with no clip rect: at 2000 % the
+right-hand picture covered the whole window, and `app/shots/cmp/before/02-drag-right.png`
+is a flat blue wash with the names still printed underneath. Every pane is now
+painted through `Painter::with_clip_rect`.
+
+**Fault 4 — the zoom drifted, the drag ignored the pointer, and a picture could
+be lost.** In Side mode both pictures were drawn from one wheel/one drag over the
+whole canvas; the second picture's pan was never written at all, so with Sync off
+it could be zoomed but not moved, and with Sync on it stayed still while the first
+one moved. The zoom was anchored on the middle of the **window**, so a notch over
+the right-hand picture pushed the picture sideways. And nothing stopped a drag,
+so the picture could be thrown out of the window entirely.
+
+The rules the rebuild now keeps (`app/src/gallery.rs`):
+
+* **one drag area per pane** (`cmp_pane_a`, `cmp_pane_b`, and for Split the two
+  halves of the frame plus the divider's own strip), so a drag moves the picture
+  it was started on;
+* **the zoom is anchored on the pointer** (`gallery::zoom_about(zoom, pan,
+  anchor, factor)`): a point `q` of the picture sits at `pan + q·zoom` from the
+  pane's middle, so the new pan is `anchor − (anchor − pan) · (z′ / z)`. The point
+  under the pointer does not move;
+* **the pan stops at the picture's edges** (`gallery::clamp_pan`, limit
+  `(|size| − |pane|) / 2`, never negative): a picture that still fits cannot be
+  dragged, and one that is bigger can be pushed exactly until an edge meets the
+  pane edge;
+* **Sync means Sync**: `gallery::compare_synced(mode, sync)` is false only for
+  Side with the switch off; Split and Overlay always move both pictures, as
+  `isCompareSynced` does. While synced, the partner's zoom and pan are kept equal
+  to the first picture's, so turning Sync off starts from the same framing;
+* **the read-out names both pictures** while they are separate: `100% / 121%`;
+* **the divider in Split is its own handle** (a 20 px strip with a grip dot), and
+  the two drag areas stop 10 px short of it, so grabbing the divider never pans a
+  picture and panning never moves the divider. The two names sit on dark tabs
+  beside it;
+* **a new comparison starts framed**: opening Compare, swapping the pair and
+  choosing another mode all go back to 100 % in the middle, which is what
+  `swapCompareImages` and `setCompareMode` do (`resetCompareZoomInternal(true)`);
+* **paging keeps the pair together**: ← and → now move both pictures and their
+  names, instead of leaving the old pair behind (the names under the pictures had
+  been stale);
+* the zoom buttons, the `+` / `−` keys and `0` (Fit) act on the first picture and
+  carry the partner with them while synced, as the browser's buttons do.
+
+**Checked by driving the real window** (virtual display, virtual mouse; pictures
+in `app/shots/cmp/`):
+
+* `cmp/after5/01-wheel-right.png` — two notches = **121 %**, both pictures still in
+  their own halves;
+* `cmp/side/01-right-zoomed.png` — Sync off, wheel over the right picture: read-out
+  `100% / 121%`, the right picture grew, the left one did not;
+* `cmp/side/02-right-dragged.png` — a drag on the right picture moved only the
+  right picture; `03-left-zoomed.png` — `121% / 121%`, each panned on its own;
+* `cmp/side/04-right-clamped.png` — a 700 px drag leaves the picture filling its
+  pane, edge to edge, with no gap;
+* `cmp/split2/01-zoomed.png` — Split: one frame across the divider, a grip dot and
+  two readable name tabs; `cmp/split/03-divider.png` — the divider follows the
+  pointer while both pictures keep their shared framing;
+* `cmp/overlay2/01-zoomed.png` — Overlay: both pictures at the same zoom and pan,
+  the caption on a dark tab;
+* `cmp/one/01-two-notches.png` — the single-picture viewer takes the same event
+  path, 121 % after two notches, and `02-drag-far.png` shows its clamp.
+
+`--selftest` covers the arithmetic without a window:
+
+* *"a wheel notch over a picture is exactly one zoom step"* — the two halves of one
+  notch give 1 then 0 steps, a later notch gives 1, and two notches come to 121 %;
+* *"zooming keeps the point under the pointer in place"* — the anchored point moves
+  less than 0.01 px;
+* *"a drag cannot throw a picture out of its pane"* — a 500 px drag on a picture
+  that fits is refused, and at 200 % the pan stops at the edge;
+* *"only the side-by-side pair has a Sync switch"* — Split and Overlay ignore it.
+
+Estimated, and marked so in `mechanics.json`: the **20 ms** duplicate-notch window
+(the press/release gap measured here was 7 ms; a real fast wheel could in
+principle repeat inside 20 ms and lose one step) and the **pan clamp** itself —
+the browser translates freely and can lose a picture, so the stop at the picture's
+edges is this build's own rule, chosen to answer the person's report.

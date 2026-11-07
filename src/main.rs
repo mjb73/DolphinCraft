@@ -13,6 +13,7 @@ mod gallery;
 mod imagemeta;
 mod panels;
 mod search;
+mod selectable;
 mod selftest;
 mod state;
 mod theme;
@@ -58,10 +59,19 @@ pub const TOOLBAR_CLUSTER_GAP: f32 = 8.0;
 pub const TOOLBAR_BAR_USABLE: f32 = 70.0;
 /// Widest the bar may become before the cluster would start squeezing.
 pub const TOOLBAR_BAR_MIN: f32 = 110.0;
-/// Seven icon buttons, the two 4 px separators (each also costs one item gap)
-/// and the nine item gaps between the ten things in the cluster.
+/// Seven icon buttons, the split button's chevron, the two 4 px separators
+/// (each also costs one item gap) and the ten item gaps between the eleven
+/// things in the cluster.
 pub const TOOLBAR_CLUSTER_FIXED: f32 =
-    8.0 * TOOLBAR_ICON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP) + 10.0 * TOOLBAR_ITEM_GAP;
+    8.0 * TOOLBAR_ICON_W + TOOLBAR_CHEVRON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP)
+        + 10.0 * TOOLBAR_ITEM_GAP;
+
+/// Width of the chevron on the right-hand side of a split toolbar button.
+pub const TOOLBAR_CHEVRON_W: f32 = 16.0;
+/// Padding between a toolbar button's icon and the word beside it.
+pub const TOOLBAR_LABEL_PAD: f32 = 6.0;
+/// What the three words cost on top of the icons they sit beside.
+pub const TOOLBAR_LABEL_EXTRA: f32 = 3.0 * TOOLBAR_LABEL_PAD + TOOLBAR_CHEVRON_W;
 
 /// How much of the sort control is shown. It gives way, label first, so the
 /// location bar keeps a workable width in a narrow window.
@@ -75,32 +85,50 @@ pub enum SortControl {
 #[derive(Clone, Copy, Debug)]
 pub struct ToolbarMetrics {
     pub sort: SortControl,
+    /// Whether the three verbs ("Find", "Open in", "Menu") are spelled out.
+    pub labeled: bool,
     pub cluster_w: f32,
     pub bar_w: f32,
 }
 
-/// Split `avail` pixels between the location bar and the cluster. `label_w` is
-/// the measured width of the sort label's text. The invariant this function
-/// keeps is `bar_w + TOOLBAR_CLUSTER_GAP + cluster_w <= avail`, so the two can
-/// never be drawn over each other.
-pub fn toolbar_metrics(avail: f32, label_w: f32, show_bar: bool) -> ToolbarMetrics {
-    // The sort button carries the label plus the style's 7 px side padding.
-    let with_label = TOOLBAR_CLUSTER_FIXED + label_w + 2.0 * 7.0;
-    let with_icon = TOOLBAR_CLUSTER_FIXED + TOOLBAR_ICON_W;
-    let without = with_icon - TOOLBAR_ICON_W - TOOLBAR_ITEM_GAP;
+/// Split `avail` pixels between the location bar and the buttons. `label_w` is
+/// the measured width of the sort key's text; `words_w` the measured width of
+/// the three toolbar words. The invariant this function keeps is
+/// `bar_w + TOOLBAR_CLUSTER_GAP + cluster_w <= avail`, so the two can never be
+/// drawn over each other, and it gives things up in a fixed order: the sort
+/// key's name, then the sort button, and only then the three words — because a
+/// row of bare glyphs is the thing the person could not read, so it is the last
+/// thing to go.
+pub fn toolbar_metrics(avail: f32, label_w: f32, show_bar: bool, words_w: f32) -> ToolbarMetrics {
+    let icons = TOOLBAR_CLUSTER_FIXED;
+    let words = icons + words_w + TOOLBAR_LABEL_EXTRA;
+    // The sort button carries its key's name plus the style's 7 px side padding.
+    let sort_label = label_w + 2.0 * 7.0;
+    let floor = if show_bar { TOOLBAR_BAR_MIN } else { 0.0 };
+    let fits = |c: f32| avail - c - TOOLBAR_CLUSTER_GAP >= floor;
+    let width = |labeled: bool, sort: SortControl| {
+        let base = if labeled { words } else { icons };
+        match sort {
+            SortControl::Label => base + sort_label,
+            SortControl::Icon => base,
+            SortControl::Hidden => base - TOOLBAR_ICON_W - TOOLBAR_ITEM_GAP,
+        }
+    };
 
-    let mut sort = SortControl::Label;
-    let mut cluster_w = with_label;
-    if show_bar {
-        if avail - with_label - TOOLBAR_CLUSTER_GAP < TOOLBAR_BAR_MIN {
-            sort = SortControl::Icon;
-            cluster_w = with_icon;
-        }
-        if avail - with_icon - TOOLBAR_CLUSTER_GAP < TOOLBAR_BAR_MIN {
-            sort = SortControl::Hidden;
-            cluster_w = without;
-        }
-    }
+    let ladder = [
+        (true, SortControl::Label),
+        (true, SortControl::Icon),
+        (true, SortControl::Hidden),
+        (false, SortControl::Label),
+        (false, SortControl::Icon),
+        (false, SortControl::Hidden),
+    ];
+    let (labeled, sort) = ladder
+        .iter()
+        .copied()
+        .find(|&(l, s)| fits(width(l, s)))
+        .unwrap_or((false, SortControl::Hidden));
+    let cluster_w = width(labeled, sort);
     let bar_w = if show_bar {
         (avail - cluster_w - TOOLBAR_CLUSTER_GAP).max(0.0)
     } else {
@@ -108,6 +136,7 @@ pub fn toolbar_metrics(avail: f32, label_w: f32, show_bar: bool) -> ToolbarMetri
     };
     ToolbarMetrics {
         sort,
+        labeled,
         cluster_w,
         bar_w,
     }
@@ -174,6 +203,12 @@ pub struct Shot {
 pub struct App {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
+    /// Added: the little card that explains what Find, Open in and Menu each do,
+    /// so the three icons stop being a guessing game.
+    pub guide_open: bool,
+    /// `--menu`: open the app menu on the first frame so a picture of it can be
+    /// taken. A click on the button opens it in normal use.
+    pub open_menu_once: bool,
     pub split: bool,
     pub places_visible: bool,
     pub info_panel: bool,
@@ -206,10 +241,13 @@ pub struct App {
     /// Open the viewer's comparison as soon as that picture is up.
     pub pending_compare: Option<gallery::CompareMode>,
     pub frames: u64,
+    /// `--details`: open the viewer's details panel on the first picture, so the
+    /// panel can be photographed without a mouse. Off unless asked for: the
+    /// panel starts closed.
+    pub open_details_at_start: bool,
     pub config_dirty: bool,
     pub next_pane_id: usize,
     pub split_frac: f32,
-    pub search_focus: bool,
     pub filter_focus: bool,
     /// Which of the person's own shortcut rows is being dragged, if any.
     /// The value is the index into `config.bookmarks`.
@@ -229,6 +267,11 @@ impl App {
         start_thumbs: Option<f32>,
         start_compare: Option<gallery::CompareMode>,
         start_dims: bool,
+        start_find: Option<String>,
+        start_deep: bool,
+        start_guide: bool,
+        start_menu: bool,
+        open_details_at_start: bool,
     ) -> Self {
         theme::install(&cc.egui_ctx);
         if shot.is_some() {
@@ -273,7 +316,7 @@ impl App {
         }
         if let Some(z) = start_zoom {
             let slot = pane.view.index();
-            pane.zoom[slot] = z.min(16);
+            pane.zoom[slot] = z.min(theme::MAX_ZOOM);
         }
         pane.show_hidden = cfg.show_hidden;
         pane.previews = cfg.previews;
@@ -282,6 +325,17 @@ impl App {
         // Added feature: the gallery's own last state, restored like the rest of
         // the window's furniture.
         pane.pictures = cfg.pictures || start_pictures;
+        if let Some(text) = start_find.clone() {
+            pane.filter_on = true;
+            pane.filter = text;
+            pane.find_deep = start_deep;
+            // The listing is narrowed here and not only on the next keystroke,
+            // so a find handed over on the command line shows the matches.
+            pane.refilter();
+            if start_deep && !pane.filter.trim().is_empty() {
+                pane.start_search();
+            }
+        }
         pane.thumb_px = gallery::clamp_thumb(start_thumbs.unwrap_or(cfg.thumb_px));
         pane.gallery_names = cfg.gallery_names;
         pane.gallery_dims = cfg.gallery_dims;
@@ -296,17 +350,24 @@ impl App {
 
         let shot_mode = shot.is_some();
         let (size_tx, size_rx) = channel();
+        let mut thumbs = ThumbCache::new();
+        // `[PreviewSettings] MaximumSize`, in MiB; 0 = files of any size.
+        thumbs.set_max_mib(cfg.preview_max_mib);
         let mut app = App {
             tabs: vec![Tab {
                 panes: vec![pane],
                 active: 0,
             }],
             active_tab: 0,
+            // `--guide` opens the card on the first frame, which is how the
+            // screenshot of it gets taken (F1 and the menu entry set this too).
+            guide_open: start_guide,
+            open_menu_once: start_menu,
             split: cfg.split,
             places_visible: cfg.places_visible,
             info_panel: cfg.info_panel,
             clipboard: Clipboard::new(),
-            thumbs: ThumbCache::new(),
+            thumbs,
             config: cfg,
             reqs: Vec::new(),
             confirm: None,
@@ -330,10 +391,10 @@ impl App {
             image_meta: HashMap::new(),
             pending_compare: start_compare,
             frames: 0,
+            open_details_at_start,
             config_dirty: false,
             next_pane_id: next_id,
             split_frac: 0.5,
-            search_focus: false,
             filter_focus: false,
             shortcut_drag: None,
         };
@@ -481,7 +542,24 @@ impl App {
                             .size()
                             .x
                     });
-                    let metrics = toolbar_metrics(avail, label_w, show_bar);
+                    // The three words the row spells out when it has room. They
+                    // are measured here so the bar and the buttons still never
+                    // share pixels.
+                    let words_w = ui.fonts_mut(|f| {
+                        ["Find", "Open in", "Menu"]
+                            .iter()
+                            .map(|t| {
+                                f.layout_no_wrap(
+                                    t.to_string(),
+                                    FontId::proportional(12.0),
+                                    TEXT,
+                                )
+                                .size()
+                                .x
+                            })
+                            .sum::<f32>()
+                    });
+                    let metrics = toolbar_metrics(avail, label_w, show_bar, words_w);
                     let bar_w = metrics.bar_w;
                     if show_bar && bar_w >= TOOLBAR_BAR_USABLE {
                         let tab = &mut self.tabs[self.active_tab];
@@ -517,43 +595,75 @@ impl App {
                     }
 
                     let mut sort_rect: Option<Rect> = None;
+                    let labeled = metrics.labeled;
+                    // Three verbs sit at the far right and say what they do:
+                    // Find (narrow what you see), Open in (choose where it
+                    // opens), Menu (change the app). Everything left of them is
+                    // layout — sorting and the three views — which is why they
+                    // are grouped and only these three carry a word.
                     let cluster_inner = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        let menu = toolbar_button(ui, "menu", true);
-                        menu.context_menu(|ui| self.app_menu(ui));
-
-                        if toolbar_button(ui, "search", true)
-                            .on_hover_text("Search for files and folders (Ctrl+F)")
-                            .clicked()
-                        {
-                            let pane = self.pane_mut();
-                            pane.filter_on = true;
-                            self.search_focus = true;
+                        let menu = toolbar_word_button(ui, "menu", labeled.then_some("Menu"), false, true);
+                        menu.clone().on_hover_text(
+                            "Menu — the app's own settings and tools. It never touches your files.",
+                        );
+                        // A menu button opens on an ordinary click. The
+                        // right-click-only popup it used to carry made the
+                        // button look dead, which is half of why the three
+                        // glyphs were unreadable.
+                        let mut popup = egui::Popup::menu(&menu);
+                        if self.open_menu_once {
+                            self.open_menu_once = false;
+                            egui::Popup::open_id(
+                                ui.ctx(),
+                                egui::Popup::default_response_id(&menu),
+                            );
                         }
-                        let filter_on = self.pane().filter_on;
-                        if toolbar_button_active(ui, "filter", filter_on)
-                            .on_hover_text("Show Filter Bar (Ctrl+I)")
+                        popup.show(|ui| self.app_menu(ui));
+
+                        let targets = self.open_targets();
+                        let (open_main, open_chev) = toolbar_split_button(
+                            ui,
+                            "openin",
+                            labeled.then_some("Open in"),
+                            true,
+                        );
+                        if open_main
+                            .clone()
+                            .on_hover_text("Open what is selected — a folder opens, a file starts its program")
                             .clicked()
                         {
+                            let idx = self.pane().cursor;
+                            let mut reqs = Vec::new();
+                            self.pane_mut().open_entry(idx, &mut reqs);
+                            for r in reqs {
+                                self.reqs.push(r);
+                            }
+                        }
+                        let chev = open_chev.on_hover_text(
+                            "Where to open it: a new tab, a new window, the other pane, or a terminal",
+                        );
+                        egui::Popup::menu(&chev)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+                            .show(|ui| self.open_in_menu(ui, &targets));
+
+                        let find_on = self.pane().filter_on;
+                        if toolbar_word_button(ui, "search", labeled.then_some("Find"), find_on, true)
+                            .on_hover_text(
+                                "Find — show only items whose name matches: this folder as you type, every subfolder when you choose it (Ctrl+F)",
+                            )
+                            .clicked()
+                        {
+                            let on = !self.pane().filter_on;
                             let pane = self.pane_mut();
-                            pane.filter_on = !pane.filter_on;
-                            if !pane.filter_on {
+                            pane.filter_on = on;
+                            if !on {
                                 pane.filter.clear();
                                 pane.search = None;
-                            } else {
-                                self.filter_focus = true;
+                                pane.find_deep = false;
+                                pane.refilter();
                             }
-                        }
-                        if toolbar_button_active(ui, "split", self.split)
-                            .on_hover_text("Split view (F3)")
-                            .clicked()
-                        {
-                            if self.split {
-                                self.unsplit();
-                            } else {
-                                self.ensure_split();
-                            }
-                            self.config_dirty = true;
+                            self.filter_focus = on;
                         }
                         ui.add_space(4.0);
                         // Added feature: the picture gallery, one button beside
@@ -655,6 +765,80 @@ impl App {
         resp
     }
 
+    /// The folders the "Open in" destinations act on: the folders that are
+    /// selected, or the folder being looked at when the selection holds no
+    /// folder at all. A file selection therefore still behaves predictably —
+    /// the destinations mean "the place I am looking at".
+    fn open_targets(&self) -> Vec<PathBuf> {
+        let picked: Vec<PathBuf> = self
+            .pane()
+            .selected_paths()
+            .into_iter()
+            .filter(|p| p.is_dir())
+            .collect();
+        if picked.is_empty() {
+            vec![self.pane().current_dir()]
+        } else {
+            picked.into_iter().take(8).collect()
+        }
+    }
+
+    /// The chevron's list. It is deliberately about *places*, not about the app
+    /// and not about finding things: that is what makes it different from the
+    /// two buttons beside it.
+    fn open_in_menu(&mut self, ui: &mut egui::Ui, targets: &[PathBuf]) {
+        ui.set_min_width(250.0);
+        let what = targets
+            .first()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "this folder".to_string());
+        ui.label(
+            egui::RichText::new(if targets.len() > 1 {
+                format!("Where to open these {} folders", targets.len())
+            } else {
+                format!("Where to open “{what}”")
+            })
+            .size(11.0)
+            .color(TEXT_DIM),
+        );
+        ui.add_space(3.0);
+        if menu_row(ui, "In a new tab", "Ctrl+Enter").clicked() {
+            for t in targets {
+                self.new_tab_public(t.clone());
+            }
+            ui.close();
+        }
+        if menu_row(ui, "In a new window", "").clicked() {
+            for t in targets {
+                spawn_folder_window(t);
+            }
+            ui.close();
+        }
+        if menu_row(ui, "In the other pane", "").clicked() {
+            self.ensure_split();
+            let tab = &mut self.tabs[self.active_tab];
+            let other = 1 - tab.active;
+            if let Some(t) = targets.first() {
+                tab.panes[other].navigate(t.clone());
+            }
+            tab.active = other;
+            self.config_dirty = true;
+            ui.close();
+        }
+        if menu_row(ui, "In a terminal here", "").clicked() {
+            if let Some(t) = targets.first() {
+                fsutil::open_terminal(t);
+            }
+            ui.close();
+        }
+        ui.separator();
+        ui.label(
+            egui::RichText::new("The button itself just opens the folder where you are.")
+                .size(10.5)
+                .color(TEXT_FAINT),
+        );
+    }
+
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(190.0);
         {
@@ -723,6 +907,42 @@ impl App {
             pane.reload();
         }
         if ui.checkbox(&mut pane.previews, "Show preview").changed() {}
+        ui.separator();
+        ui.menu_button("Pictures", |ui| {
+            let pane = &mut *pane;
+            let mut changed = false;
+            if ui
+                .checkbox(&mut pane.gallery_names, "File names under pictures")
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .checkbox(&mut pane.gallery_dims, "Size under pictures")
+                .changed()
+            {
+                changed = true;
+            }
+            if ui
+                .checkbox(&mut pane.gallery_round, "Rounded corners")
+                .changed()
+            {
+                changed = true;
+            }
+            if ui.checkbox(&mut pane.previews, "Show previews").changed() {
+                changed = true;
+            }
+            ui.separator();
+            if ui
+                .selectable_label(pane.pictures, "Picture wall (F4)")
+                .clicked()
+            {
+                pane.pictures = !pane.pictures;
+                changed = true;
+                ui.close();
+            }
+            if changed {}
+        });
     }
 
     fn tab_strip(&mut self, ctx: &egui::Context) {
@@ -1166,6 +1386,24 @@ impl App {
                     .inner_margin(Margin::symmetric(10, 3)),
             )
             .show(ctx, |ui| {
+                // The bar's own right-click menu. The original has exactly one
+                // entry there: `Show zoom slider` (`FUN_001ec540` @0x1ec540 reads
+                // the `GeneralSettings` key `ShowZoomSlider`, writes it back and
+                // calls the two setters that show or hide the slider widgets).
+                let strip = ui.max_rect();
+                let bar = ui.interact(
+                    strip,
+                    egui::Id::new("status_bar_menu"),
+                    egui::Sense::click(),
+                );
+                bar.context_menu(|ui| {
+                    ui.set_min_width(196.0);
+                    let mut on = self.config.show_zoom_slider;
+                    if ui.checkbox(&mut on, "Show zoom slider").changed() {
+                        self.config.show_zoom_slider = on;
+                        self.config_dirty = true;
+                    }
+                });
                 ui.horizontal_centered(|ui| {
                     let pane = self.pane();
                     let sel_count = pane.sel.len();
@@ -1275,25 +1513,32 @@ impl App {
                             }
                             return;
                         }
-                        if small_button(ui, "+").on_hover_text("Zoom in").clicked() {
-                            self.pane_mut().zoom_by(1);
-                            zoom_changed = true;
-                        }
-                        let slider = ui.add_sized(
-                            Vec2::new(110.0, 14.0),
-                            egui::Slider::new(&mut zoom_value, 0.0..=16.0)
-                                .show_value(false)
-                                .step_by(1.0),
-                        );
-                        if slider.changed() {
-                            let z = zoom_value.round() as u8;
-                            let vi = self.pane().view.index();
-                            self.pane_mut().zoom[vi] = z;
-                            zoom_changed = true;
-                        }
-                        if small_button(ui, "−").on_hover_text("Zoom out").clicked() {
-                            self.pane_mut().zoom_by(-1);
-                            zoom_changed = true;
+                        // `GeneralSettings` `ShowZoomSlider`: the original's
+                        // status-bar slider is optional (`FUN_001ec540` @0x1ec540
+                        // shows or hides it from the bar's own context menu). When
+                        // it is off, only the size readout stays — the same `NN px`
+                        // label the slider's tip carries.
+                        if self.config.show_zoom_slider {
+                            if small_button(ui, "+").on_hover_text("Zoom in").clicked() {
+                                self.pane_mut().zoom_by(1);
+                                zoom_changed = true;
+                            }
+                            let slider = ui.add_sized(
+                                Vec2::new(110.0, 14.0),
+                                egui::Slider::new(&mut zoom_value, 0.0..=theme::MAX_ZOOM as f32)
+                                    .show_value(false)
+                                    .step_by(1.0),
+                            );
+                            if slider.changed() {
+                                let z = zoom_value.round() as u8;
+                                let vi = self.pane().view.index();
+                                self.pane_mut().zoom[vi] = z;
+                                zoom_changed = true;
+                            }
+                            if small_button(ui, "−").on_hover_text("Zoom out").clicked() {
+                                self.pane_mut().zoom_by(-1);
+                                zoom_changed = true;
+                            }
                         }
                         ui.label(
                             egui::RichText::new(format!("{} px", icon))
@@ -1658,10 +1903,16 @@ impl App {
                     self.pane_mut().reload();
                 }
                 Request::FolderSize(paths) => {
+                    // `ContentDisplaySettings::RecursiveDirectorySizeLimit`:
+                    // "Show size of contents, up to N folders", factory 10.
+                    let depth = self.config.size_limit.clamp(
+                        search::SIZE_LIMIT_MIN,
+                        search::SIZE_LIMIT_MAX,
+                    );
                     for p in paths {
                         let tx = self.size_tx.clone();
                         std::thread::spawn(move || {
-                            let size = search::dir_size(&p);
+                            let size = search::dir_size_limited(&p, Some(depth));
                             let _ = tx.send((p, size));
                         });
                     }
@@ -1808,6 +2059,7 @@ impl App {
                     self.config.gallery_names = self.pane().gallery_names;
                     self.config.gallery_dims = self.pane().gallery_dims;
                     self.config.gallery_round = self.pane().gallery_round;
+                    self.config.previews = self.pane().previews;
                     self.config_dirty = true;
                 }
                 Request::Toast(msg) => {
@@ -2055,7 +2307,9 @@ impl App {
         let typing = ctx.wants_keyboard_input();
         let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if esc {
-            if self.quick.is_some() {
+            if self.guide_open {
+                self.guide_open = false;
+            } else if self.quick.is_some() {
                 self.quick = None;
             } else if self.confirm.is_some() {
                 self.confirm = None;
@@ -2108,6 +2362,9 @@ impl App {
             }
             if i.consume_key(ctrl, Key::F) {
                 reqs.push(Request::Toast("__search__".into()));
+            }
+            if i.consume_key(Modifiers::NONE, Key::F1) {
+                reqs.push(Request::Toast("__guide__".into()));
             }
             if i.consume_key(ctrl, Key::I) {
                 reqs.push(Request::Toast("__filter__".into()));
@@ -2269,8 +2526,13 @@ impl App {
                 self.pane_mut().reload();
             }
             "__search__" => {
-                self.pane_mut().filter_on = true;
-                self.search_focus = true;
+                let pane = self.pane_mut();
+                pane.filter_on = true;
+                pane.find_deep = false;
+                self.filter_focus = true;
+            }
+            "__guide__" => {
+                self.guide_open = true;
             }
             "__filter__" => {
                 let on = !self.pane().filter_on;
@@ -2279,6 +2541,7 @@ impl App {
                 if !on {
                     pane.filter.clear();
                     pane.search = None;
+                    pane.refilter();
                 }
                 self.filter_focus = on;
             }
@@ -2499,6 +2762,11 @@ impl eframe::App for App {
         if let Some((path, play)) = self.pending_viewer.take() {
             if path.is_file() {
                 self.open_viewer(&path, play);
+                if self.open_details_at_start {
+                    if let Some(v) = self.viewer.as_mut() {
+                        v.show_info = true;
+                    }
+                }
             }
         }
         // A comparison asked for on the command line is asked for before the
@@ -2636,6 +2904,95 @@ pub(crate) fn status_selection(folders: usize, files: usize, bytes: u64) -> Stri
         return format!("{file_word} ({})", fsutil::format_size(bytes));
     }
     format!("{folder_word}, {file_word} ({})", fsutil::format_size(bytes))
+}
+
+/// The pressed/hover plate under a toolbar control, shared by all three kinds
+/// so an icon button, a button with a word and a split button look the same.
+fn toolbar_plate(ui: &egui::Ui, rect: Rect, resp: &egui::Response, active: bool, enabled: bool) {
+    if active {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(63, 70, 77));
+    } else if resp.hovered() && enabled {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(3), ROW_HOVER);
+    } else if resp.is_pointer_button_down_on() && enabled {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(38, 43, 47));
+    }
+}
+
+/// A toolbar button that can spell out its own verb: the icon stays in a
+/// 30 px column and the word follows it. `label` is `None` in a narrow window,
+/// where the row falls back to the original's icon-only look.
+fn toolbar_word_button(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    label: Option<&str>,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let text_w = label
+        .map(|t| {
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap(t.to_string(), FontId::proportional(12.0), TEXT)
+                    .size()
+                    .x
+            })
+        })
+        .unwrap_or(0.0);
+    let width = if label.is_some() {
+        TOOLBAR_ICON_W + text_w + TOOLBAR_LABEL_PAD
+    } else {
+        TOOLBAR_ICON_W
+    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, TOOLBAR_ICON_W), Sense::click());
+    toolbar_plate(ui, rect, &resp, active, enabled);
+    let tint = if !enabled {
+        TEXT_FAINT
+    } else if active {
+        ACCENT
+    } else {
+        TEXT
+    };
+    let icon_rect = Rect::from_center_size(
+        Pos2::new(rect.left() + TOOLBAR_ICON_W * 0.5, rect.center().y),
+        Vec2::splat(16.0),
+    );
+    theme::draw_glyph(ui.painter(), icon_rect, glyph, tint);
+    if let Some(text) = label {
+        ui.painter().text(
+            Pos2::new(rect.left() + TOOLBAR_ICON_W, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            FontId::proportional(12.0),
+            tint,
+        );
+    }
+    resp
+}
+
+/// A split button: the main part does the thing, the chevron beside it opens
+/// the list of other places the same thing can go. Two responses, because they
+/// are two different jobs — that is the whole point of the pair.
+fn toolbar_split_button(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    label: Option<&str>,
+    enabled: bool,
+) -> (egui::Response, egui::Response) {
+    // In the right-to-left row the chevron is laid out first so it lands on the
+    // right of the pair, the way a dropdown arrow reads.
+    let (chev_rect, chev) =
+        ui.allocate_exact_size(Vec2::new(TOOLBAR_CHEVRON_W, TOOLBAR_ICON_W), Sense::click());
+    toolbar_plate(ui, chev_rect, &chev, false, enabled);
+    theme::draw_glyph(
+        ui.painter(),
+        chev_rect,
+        "dropdown",
+        if enabled { TEXT } else { TEXT_FAINT },
+    );
+    let main = toolbar_word_button(ui, glyph, label, false, enabled);
+    (main, chev)
 }
 
 fn toolbar_button(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui::Response {
@@ -3026,11 +3383,21 @@ fn main() -> eframe::Result<()> {
     // Added feature: start in the picture gallery, or straight in the viewer on
     // a named picture (with `--play` running its slideshow).
     let mut start_pictures = false;
+    let mut start_find: Option<String> = None;
+    let mut start_deep = false;
+    let mut start_guide = false;
+    let mut start_menu = false;
+    // Window size, so a narrow layout can be looked at (and checked) without a
+    // mouse: `--size 980x700`.
+    let mut window_size: Option<[f32; 2]> = None;
     let mut start_viewer: Option<(PathBuf, bool)> = None;
     let mut play = false;
     let mut start_compare: Option<gallery::CompareMode> = None;
     let mut start_thumbs: Option<f32> = None;
     let mut start_dims = false;
+    // Opens the viewer's details panel on the first picture; the panel is shut
+    // unless this asks for it.
+    let mut start_details = false;
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--selftest") {
         std::process::exit(selftest::run());
@@ -3068,11 +3435,31 @@ fn main() -> eframe::Result<()> {
                     i += 1;
                 }
             }
+            "--size" => {
+                if i + 1 < args.len() {
+                    if let Some((w, h)) = args[i + 1].split_once('x') {
+                        if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+                            window_size = Some([w, h]);
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            "--find" => {
+                if i + 1 < args.len() {
+                    start_find = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--deep" => start_deep = true,
+            "--guide" => start_guide = true,
+            "--menu" => start_menu = true,
             "--keep-settings" => {
                 keep_settings = true;
             }
             "--pictures" | "--gallery" => start_pictures = true,
             "--dims" => start_dims = true,
+            "--details" => start_details = true,
             "--play" | "--slideshow" => play = true,
             "--compare" => {
                 start_compare = Some(match args.get(i + 1).map(|s| s.as_str()) {
@@ -3114,7 +3501,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1440.0, 900.0])
+            .with_inner_size(window_size.unwrap_or([1440.0, 900.0]))
             .with_min_inner_size([880.0, 540.0])
             // The window title is the name the person sees on the title bar and
             // in the task switcher. Renamed from the original program's name to
@@ -3141,6 +3528,11 @@ fn main() -> eframe::Result<()> {
                 start_thumbs,
                 start_compare,
                 start_dims,
+                start_find,
+                start_deep,
+                start_guide,
+                start_menu,
+                start_details,
             )))
         }),
     )
