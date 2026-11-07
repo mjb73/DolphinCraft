@@ -586,6 +586,60 @@ pub fn move_to_trash(paths: &[PathBuf]) -> Result<usize, String> {
     }
 }
 
+/// Move paths to the Trash and hand back both what left and the records the
+/// move created. The record paths are what an Undo needs: they name exactly the
+/// items this action put in the Trash, so a later move cannot be undone by
+/// mistake.
+pub fn trash_with_records(paths: &[PathBuf]) -> (usize, Vec<PathBuf>, Option<String>) {
+    let before: Vec<PathBuf> = list_trash().into_iter().map(|e| e.path).collect();
+    let problem = move_to_trash(paths).err();
+    let fresh: Vec<PathBuf> = list_trash()
+        .into_iter()
+        .map(|e| e.path)
+        .filter(|p| !before.contains(p))
+        .collect();
+    (fresh.len(), fresh, problem)
+}
+
+/// Put trashed items back where they came from. Returns how many came back.
+pub fn restore_trashed(trash_paths: &[PathBuf]) -> usize {
+    let mut back = 0;
+    for entry in list_trash() {
+        if trash_paths.contains(&entry.path) && restore_trash_entry(&entry).is_ok() {
+            back += 1;
+        }
+    }
+    back
+}
+
+/// Remove paths for good, folders and their contents included. Returns how many
+/// went and the problems in words.
+pub fn delete_permanently(paths: &[PathBuf]) -> (usize, Vec<String>) {
+    let mut gone = 0;
+    let mut problems = Vec::new();
+    for path in paths {
+        // A link to a folder is a file: removing it must not touch the folder it
+        // points at.
+        let linked = fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        let outcome = if path.is_dir() && !linked {
+            fs::remove_dir_all(path)
+        } else {
+            fs::remove_file(path)
+        };
+        match outcome {
+            Ok(()) => gone += 1,
+            Err(e) => problems.push(format!(
+                "{}: {}",
+                path.file_name().unwrap_or_default().to_string_lossy(),
+                e
+            )),
+        }
+    }
+    (gone, problems)
+}
+
 pub fn list_trash() -> Vec<Entry> {
     let files = trash_root().join("files");
     let info = trash_root().join("info");

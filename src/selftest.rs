@@ -222,6 +222,115 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // ---- the person's rule: a mark and a press of Delete is the whole action
+    r.check(
+        "a marked picture goes to the Trash at once, and Undo puts it back",
+        (|| {
+            let mut shots = Vec::new();
+            for n in 1..=3 {
+                let p = base.join(format!("shot-{n}.png"));
+                write(&p, b"picture")?;
+                shots.push(p);
+            }
+            let (moved, records, problem) = fsutil::trash_with_records(&shots);
+            if problem.is_some() {
+                return Err(format!("the move complained: {:?}", problem));
+            }
+            if moved != 3 || records.len() != 3 {
+                return Err(format!("{moved} moved, {} records", records.len()));
+            }
+            if shots.iter().any(|p| p.exists()) {
+                return Err("a picture is still in the folder".into());
+            }
+            // Undo has to reach exactly the three records this move made, and
+            // nothing else that was already in the Trash.
+            let back = fsutil::restore_trashed(&records);
+            if back != 3 || shots.iter().any(|p| !p.exists()) {
+                return Err(format!("{back} of 3 came back"));
+            }
+            Ok("3 moved, 3 put back".into())
+        })(),
+    );
+    r.check(
+        "a delete with no question takes the folder and everything in it",
+        (|| {
+            let folder = base.join("throw-away");
+            write(&folder.join("inner/notes.txt"), b"bye")?;
+            write(&folder.join("top.txt"), b"bye")?;
+            let (gone, problems) = fsutil::delete_permanently(&[folder.clone()]);
+            if !problems.is_empty() {
+                return Err(problems.join(", "));
+            }
+            if gone != 1 || folder.exists() {
+                return Err(format!("{gone} went, the folder is still there"));
+            }
+            let (none, missing) = fsutil::delete_permanently(&[folder.join("ghost.txt")]);
+            if none != 0 || missing.is_empty() {
+                return Err("deleting something that is not there said nothing".into());
+            }
+            Ok("folder and contents gone; a missing item is reported".into())
+        })(),
+    );
+    r.check(
+        "a fresh profile asks no question before a delete, but does before emptying the Trash",
+        (|| {
+            let config = crate::config::Config::default();
+            if config.confirm_trash || config.confirm_delete {
+                return Err("a fresh profile still asks before a delete".into());
+            }
+            if !config.confirm_empty_trash {
+                return Err("emptying the Trash no longer asks, though it cannot be undone".into());
+            }
+            Ok("trash off, delete off, empty trash on".into())
+        })(),
+    );
+
+    r.check(
+        "neither delete row promises a question this build no longer asks",
+        (|| {
+            for label in [crate::DELETE_PERMANENT_LABEL, crate::EMPTY_TRASH_LABEL] {
+                if label.contains('…') || label.ends_with("...") {
+                    return Err(format!("\"{label}\" ends in an ellipsis"));
+                }
+            }
+            if crate::DELETE_PERMANENT_LABEL != "Delete Permanently"
+                || crate::EMPTY_TRASH_LABEL != "Empty Trash"
+            {
+                return Err("a row was renamed away from the original's wording".into());
+            }
+            Ok("\"Delete Permanently\" and \"Empty Trash\", nothing pending".into())
+        })(),
+    );
+    r.check(
+        "emptying the Trash leaves both of its folders empty",
+        (|| {
+            for n in 1..=2 {
+                let p = base.join(format!("empty-{n}.txt"));
+                write(&p, b"gone")?;
+                fsutil::move_to_trash(&[p]).map_err(|e| e)?;
+            }
+            if fsutil::list_trash().is_empty() {
+                return Err("nothing went into the Trash to clear".into());
+            }
+            fsutil::empty_trash()?;
+            if !fsutil::list_trash().is_empty() {
+                return Err("the Trash still lists items".into());
+            }
+            let root = fsutil::trash_root();
+            for sub in ["files", "info"] {
+                let left = fs::read_dir(root.join(sub))
+                    .map(|rd| rd.flatten().count())
+                    .unwrap_or(0);
+                if left != 0 {
+                    return Err(format!("{left} entries left in {sub}"));
+                }
+            }
+            // Clearing an empty Trash is not an error: the row stays harmless.
+            fsutil::empty_trash()?;
+            Ok("cleared, and clearing again is quiet".into())
+        })(),
+    );
+
     // ---- search ----------------------------------------------------------
     r.check(
         "search finds a file below the current folder",
@@ -681,6 +790,88 @@ pub fn run() -> i32 {
                 return Err(format!("natural size ties read {natural:?}"));
             }
             Ok("B.txt/a.txt by size follows the name mode".to_string())
+        })(),
+    );
+
+    r.check(
+        "a new sort key starts the way the original starts it",
+        (|| {
+            // `DolphinView::defaultSortOrderForRole` @0x273910: the roles in the
+            // table at 0x2f3960 (the three time roles, size, width, height, rating,
+            // duration …) start descending; every other role starts ascending. So
+            // Size and Modified show the biggest and the newest first, Name and
+            // Type start at A and at the first type.
+            use crate::state::{Pane, SortKey};
+            let want = [
+                (SortKey::Name, true),
+                (SortKey::Size, false),
+                (SortKey::Type, true),
+                (SortKey::Modified, false),
+            ];
+            for (key, ascending) in want {
+                let mut pane = Pane::new(1, std::path::PathBuf::from("/tmp"));
+                pane.choose_sort(key);
+                if pane.asc != ascending {
+                    return Err(format!(
+                        "{} started {}",
+                        key.label(),
+                        if pane.asc { "ascending" } else { "descending" }
+                    ));
+                }
+            }
+            Ok("Name and Type ascending, Size and Modified descending".to_string())
+        })(),
+    );
+
+    r.check(
+        "choosing the key that is already chosen keeps the order",
+        (|| {
+            // `slotSortTriggered` @0x291f30 sets the ticked action and the role; it
+            // has no branch that reverses the order. Direction is the separate
+            // Ascending / Descending pair, so a second click on the same key must
+            // not flip the listing.
+            use crate::state::{Pane, SortKey};
+            let mut pane = Pane::new(1, std::path::PathBuf::from("/tmp"));
+            pane.choose_sort(SortKey::Size);
+            if pane.asc {
+                return Err("Size did not start descending".into());
+            }
+            let resorted = pane.choose_sort(SortKey::Size);
+            if resorted {
+                return Err("a second click on Size re-sorted the folder".into());
+            }
+            if pane.asc {
+                return Err("a second click on Size flipped the order".into());
+            }
+            Ok("Size stays descending when it is picked again".to_string())
+        })(),
+    );
+
+    r.check(
+        "the direction chosen for a key stays with that key",
+        (|| {
+            // `DolphinView::setPreferredSortOrder` (@0x292640 calls it, hash at
+            // DolphinView+0x130) remembers the order per role; `preferredSortOrder`
+            // @0x2859a0 reads it back before falling back to the default.
+            use crate::state::{Pane, SortKey};
+            let mut pane = Pane::new(1, std::path::PathBuf::from("/tmp"));
+            pane.choose_sort(SortKey::Name);
+            pane.set_sort_dir(true); // Name, newest-name-first style, chosen by hand
+            pane.choose_sort(SortKey::Size);
+            if pane.asc {
+                return Err("Size did not start descending".into());
+            }
+            pane.choose_sort(SortKey::Name);
+            if pane.asc {
+                return Err("Name forgot the descending direction chosen for it".into());
+            }
+            pane.choose_sort(SortKey::Modified);
+            pane.set_sort_dir(false);
+            pane.choose_sort(SortKey::Modified);
+            if !pane.asc {
+                return Err("Modified forgot the ascending direction chosen for it".into());
+            }
+            Ok("Name descending and Modified ascending are both remembered".to_string())
         })(),
     );
 
@@ -1179,6 +1370,75 @@ pub fn run() -> i32 {
                 "{} rows, every picture {THUMB_MAX:.0} px tall including the {} in the last row",
                 rows.len(),
                 last.end - last.start
+            ))
+        })(),
+    );
+    r.check(
+        "the picture wall shows pictures and nothing else",
+        (|| {
+            // A folder of photographs also holds the usual documents and a
+            // folder of the next batch. The person asked that the wall show
+            // pictures only, so the wall must not draw a folder tile or a
+            // letter tile, and a mark made in another view must not survive
+            // into the wall where the marked file cannot be seen.
+            let wall = base.join("wall-only");
+            write(&wall.join("photo.png"), &png_with_prompt("a picture"))?;
+            write(&wall.join("second.jpg"), b"not really a jpeg")?;
+            write(&wall.join("notes.txt"), b"words\n")?;
+            write(&wall.join("clip.mp4"), b"video")?;
+            write(&wall.join("inner/another.png"), &png_with_prompt("nested"))?;
+            let mut pane = crate::state::Pane::new(1, wall.clone());
+            pane.set_pictures(true);
+            let shown: Vec<String> = pane
+                .shown_indices()
+                .iter()
+                .map(|i| pane.display_entries()[*i].name.clone())
+                .collect();
+            let expected = vec!["photo.png".to_string(), "second.jpg".to_string()];
+            if shown != expected {
+                return Err(format!("the wall shows {shown:?}"));
+            }
+            // Ctrl+A on the wall marks the two pictures and nothing else.
+            pane.select_all();
+            if pane.sel.len() != 2 {
+                return Err(format!("{} items were marked on the wall", pane.sel.len()));
+            }
+            // A Shift+click from a mark made in the grid cannot scoop up the
+            // documents that sit between the two pictures.
+            let doc = pane
+                .display_entries()
+                .iter()
+                .position(|e| e.name == "notes.txt")
+                .ok_or("notes.txt is not listed")?;
+            let photo = pane
+                .display_entries()
+                .iter()
+                .position(|e| e.name == "second.jpg")
+                .ok_or("second.jpg is not listed")?;
+            pane.anchor = doc;
+            pane.select_range(photo);
+            if pane.sel.len() != 1 || !pane.sel.contains(&photo) {
+                return Err(format!(
+                    "a Shift+click on the wall marked {} items",
+                    pane.sel.len()
+                ));
+            }
+            // A folder marked in the grid is unmarked when the wall comes on.
+            pane.set_pictures(false);
+            let folder = pane
+                .display_entries()
+                .iter()
+                .position(|e| e.is_dir)
+                .ok_or("the sub-folder is not listed")?;
+            pane.select_single(folder);
+            pane.set_pictures(true);
+            if !pane.sel.is_empty() {
+                return Err("a folder stayed marked on the wall".into());
+            }
+            Ok(format!(
+                "{} of {} listed items on the wall, both pictures",
+                shown.len(),
+                pane.display_entries().len()
             ))
         })(),
     );
@@ -2313,6 +2573,109 @@ pub fn run() -> i32 {
                 return Err("a click did not open the menu".into());
             }
             Ok(format!("closed, then {bodies} frame(s) of menu after one click"))
+        })(),
+    );
+
+    // ---- settings that survive the next start ---------------------------
+    // The person asked for exactly this: a sort or a tab chosen now should be
+    // the one the app opens with next time.
+    let persist = base.join("persist");
+    let _ = write(&persist.join("small.txt"), b"abc");
+    let _ = write(&persist.join("big.txt"), &[b'x'; 400]);
+    r.check(
+        "a sort chosen now is the sort the next start opens with",
+        (|| {
+            let mut cfg = crate::config::Config::default();
+            cfg.sort_key = crate::state::SortKey::Size.index();
+            cfg.sort_desc = true;
+            // Through the settings file itself, so a missing serde attribute or a
+            // renamed key fails here rather than in the person's session.
+            let text = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            let back: crate::config::Config =
+                serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            if back.sort_key != 1 || !back.sort_desc {
+                return Err("the sort was lost on the way through the file".into());
+            }
+            let pane = crate::pane_from_config(1, persist.clone(), &back);
+            if pane.sort != crate::state::SortKey::Size || pane.asc {
+                return Err("the restored pane did not take the saved sort".into());
+            }
+            let first = pane
+                .entries
+                .first()
+                .map(|e| e.name.clone())
+                .ok_or("the folder listed nothing")?;
+            if first != "big.txt" {
+                return Err(format!(
+                    "size descending put {first} first instead of big.txt"
+                ));
+            }
+            Ok("Size / descending from the file, big.txt first".into())
+        })(),
+    );
+    r.check(
+        "the tabs of the last run come back, and folders that have gone are skipped",
+        (|| {
+            let one = base.join("listing");
+            let two = base.join("persist");
+            let gone = base.join("this-folder-was-deleted");
+            let mut cfg = crate::config::Config::default();
+            cfg.session = vec![
+                crate::config::SavedTab {
+                    path: one.clone(),
+                    sort_key: Some(3),
+                    sort_desc: Some(true),
+                },
+                crate::config::SavedTab {
+                    path: gone,
+                    sort_key: None,
+                    sort_desc: None,
+                },
+                crate::config::SavedTab {
+                    path: two.clone(),
+                    sort_key: Some(1),
+                    sort_desc: Some(true),
+                },
+            ];
+            cfg.session_tab = 2;
+            let text = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            let back: crate::config::Config =
+                serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            let tabs = back.remembered_tabs();
+            let paths: Vec<PathBuf> = tabs.iter().map(|t| t.path.clone()).collect();
+            if paths != vec![one, two] {
+                return Err(format!("remembered tabs came back as {paths:?}"));
+            }
+            if tabs[0].sort_key != Some(3) || tabs[1].sort_desc != Some(true) {
+                return Err("a tab's own sort was lost".into());
+            }
+            if back.session_tab != 2 {
+                return Err("the tab that was in front was not remembered".into());
+            }
+            Ok("2 live folders in order, each with its sort".into())
+        })(),
+    );
+    r.check(
+        "a settings file written before these choices existed still opens",
+        (|| {
+            // What an older build wrote: bookmarks and a few switches, no sort key,
+            // no tabs, no window size.
+            let old = r#"{"last_dir":"/tmp","view":1,"folders_first":true}"#;
+            let cfg: crate::config::Config =
+                serde_json::from_str(old).map_err(|e| e.to_string())?;
+            if cfg.sort_key != 0 || cfg.sort_desc {
+                return Err("an old file did not land on Name / ascending".into());
+            }
+            if !cfg.restore_session {
+                return Err("reopening the tabs should be on by default".into());
+            }
+            if (cfg.split_frac - 0.5).abs() > 0.001 || cfg.session_tab != 0 {
+                return Err(format!(
+                    "old file got split {:.2} and tab {}",
+                    cfg.split_frac, cfg.session_tab
+                ));
+            }
+            Ok("Name / ascending, tabs on, split 0.50".into())
         })(),
     );
 

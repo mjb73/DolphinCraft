@@ -188,6 +188,67 @@ impl SortKey {
             SortKey::Modified => "Modified",
         }
     }
+
+    /// The role name the original files this key under. Every sortable column in
+    /// `KFileItemModel` is a `QByteArray` role, and the Sort By menu stores that
+    /// role in the action's data (`QAction::setData`, `createFileItemRolesActionGroup`
+    /// @0x28d3f0 in libdolphinprivate.so.6); `Name` is the role `name`, the size
+    /// column is `size`, the type column is `type`, and the date column is
+    /// `modificationtime` — the first entry of the "sort descending" role table
+    /// at 0x2f3960.
+    pub fn role(self) -> &'static str {
+        match self {
+            SortKey::Name => "name",
+            SortKey::Size => "size",
+            SortKey::Type => "type",
+            SortKey::Modified => "modificationtime",
+        }
+    }
+
+    /// Position in the menu, which is also the index into the per-key direction
+    /// memory (`Pane::preferred_desc`).
+    pub fn index(self) -> usize {
+        match self {
+            SortKey::Name => 0,
+            SortKey::Size => 1,
+            SortKey::Type => 2,
+            SortKey::Modified => 3,
+        }
+    }
+
+    /// The inverse of `index`, used when the settings file is read back.
+    pub fn from_index(i: usize) -> SortKey {
+        match i {
+            1 => SortKey::Size,
+            2 => SortKey::Type,
+            3 => SortKey::Modified,
+            _ => SortKey::Name,
+        }
+    }
+
+    /// Which way a key sorts the first time it is picked.
+    ///
+    /// `DolphinView::defaultSortOrderForRole` @0x273910 builds one static set of
+    /// role names and answers "is this role in it". The set is built from the
+    /// pointer table at 0x2f3960 (16 pointers, up to `PTR_FUN_002f39e0`) and holds
+    /// exactly:
+    ///
+    /// modificationtime, creationtime, accesstime, deletiontime, imageDateTime,
+    /// releaseYear, size, width, height, pageCount, wordCount, lineCount,
+    /// rating, duration, bitrate
+    ///
+    /// (the sixteenth pointer lands inside the string "Color Space" and reads
+    /// "ace", so it never matches a role). A member of that set starts
+    /// **Descending**; every other role — `name`, `type`, `permissions`, `path`,
+    /// `tags` … — starts **Ascending**. That is why picking Size or Modified in
+    /// the original shows the biggest file or the newest date first, while Name
+    /// and Type start at A and at the first type.
+    pub fn descends_first(self) -> bool {
+        match self {
+            SortKey::Size | SortKey::Modified => true,
+            SortKey::Name | SortKey::Type => false,
+        }
+    }
 }
 
 /// How two names are compared when sorting by name.
@@ -273,6 +334,8 @@ pub enum Request {
     Trash(Vec<PathBuf>),
     Restore(Vec<PathBuf>),
     DeletePermanent(Vec<PathBuf>),
+    /// Added: empty the Trash, the action the original's `Empty Trash` row runs.
+    EmptyTrash,
     BulkRename(Vec<PathBuf>),
     QuickLook(PathBuf),
     NewFolder(PathBuf),
@@ -322,6 +385,13 @@ pub struct Pane {
     pub name_sort: NameSort,
     pub asc: bool,
     pub folders_first: bool,
+    /// The direction the person last chose for each sort key, in menu order.
+    /// `DolphinView` keeps the same thing per view (`preferredSortOrder`
+    /// @0x2859a0 looks the role up in a hash at this+0x130); picking a key that
+    /// has never been used asks `defaultSortOrderForRole` instead. It is not
+    /// written to the settings file — the original keeps it for the session and
+    /// saves only the folder's own sort role and order in its view properties.
+    pub preferred_desc: [Option<bool>; 4],
     pub view: ViewMode,
     pub zoom: [u8; 3],
     /// Added feature: the picture gallery presentation, adopted from the
@@ -384,6 +454,7 @@ impl Pane {
             name_sort: NameSort::Natural,
             asc: true,
             folders_first: true,
+            preferred_desc: [None; 4],
             view: ViewMode::Icons,
             zoom: theme::default_zoom(true),
             pictures: false,
@@ -564,6 +635,52 @@ impl Pane {
         }
     }
 
+    /// Pick a sort key from the Sort By menu.
+    ///
+    /// `DolphinViewActionHandler::slotSortTriggered` @0x291f30 only records which
+    /// action is ticked and calls `DolphinView::setSortRole`; it never reverses the
+    /// order, so choosing the key that is already chosen does nothing. The
+    /// direction is its own pair of menu items (`ascending` / `descending`, see
+    /// `set_sort_dir`). `DolphinView::setSortRole` @0x2716d0 then asks
+    /// `preferredSortOrder` @0x2859a0 for the order to use with the new role: the
+    /// order last chosen for that role, or `defaultSortOrderForRole` @0x273910
+    /// when it has never been chosen.
+    ///
+    /// Returns true when the listing had to be re-sorted.
+    pub fn choose_sort(&mut self, key: SortKey) -> bool {
+        if self.sort == key {
+            return false;
+        }
+        self.sort = key;
+        let desc = self
+            .preferred_desc
+            .get(key.index())
+            .copied()
+            .flatten()
+            .unwrap_or_else(|| key.descends_first());
+        self.asc = !desc;
+        self.sort_entries();
+        true
+    }
+
+    /// Choose Ascending or Descending from the pair under the key list.
+    ///
+    /// `DolphinViewActionHandler::slotSortOrderChanged` @0x292640 ticks the two
+    /// actions and calls `DolphinView::setPreferredSortOrder(role, order)`, which
+    /// remembers the order for the *current role only* — so a direction chosen for
+    /// Size stays with Size and does not follow the person to Name.
+    pub fn set_sort_dir(&mut self, descending: bool) -> bool {
+        if let Some(slot) = self.preferred_desc.get_mut(self.sort.index()) {
+            *slot = Some(descending);
+        }
+        if self.asc == descending {
+            self.asc = !descending;
+            self.sort_entries();
+            return true;
+        }
+        false
+    }
+
     pub fn sort_entries(&mut self) {
         let sort = self.sort;
         let name_sort = self.name_sort;
@@ -661,21 +778,64 @@ impl Pane {
         self.cursor = idx;
     }
 
+    /// The indices the person can see and pick right now. In the list and grid
+    /// views that is the whole filtered listing; on the picture wall it is the
+    /// pictures alone, because the wall shows nothing else. Ctrl+A, Shift+click
+    /// and the arrow keys all step through this list, so a document or a folder
+    /// that the wall does not draw can never be marked — and therefore never
+    /// deleted — from a view the person cannot see it in.
+    pub fn shown_indices(&self) -> Vec<usize> {
+        let mut shown = self.visible();
+        if self.pictures {
+            shown.retain(|i| {
+                self.entries
+                    .get(*i)
+                    .map(|e| !e.is_dir && e.is_image())
+                    .unwrap_or(false)
+            });
+        }
+        shown
+    }
+
+    /// Turn the picture wall on or off. Anything marked that the wall does not
+    /// show is unmarked at the same moment, so switching to the wall and pressing
+    /// Delete cannot remove a file that was never on screen.
+    pub fn set_pictures(&mut self, on: bool) {
+        self.pictures = on;
+        if !on {
+            return;
+        }
+        let shown = self.shown_indices();
+        self.sel.retain(|i| shown.contains(i));
+        if !shown.contains(&self.cursor) {
+            if let Some(&first) = shown.first() {
+                self.cursor = first;
+            }
+        }
+    }
+
     pub fn select_range(&mut self, idx: usize) {
-        let (a, b) = if self.anchor <= idx {
-            (self.anchor, idx)
-        } else {
-            (idx, self.anchor)
+        let shown = self.shown_indices();
+        let Some(b) = shown.iter().position(|i| *i == idx) else {
+            // Only reachable if the wall changed under the pointer; marking the
+            // one item keeps the click honest.
+            self.select_single(idx);
+            return;
         };
+        let a = shown
+            .iter()
+            .position(|i| *i == self.anchor)
+            .unwrap_or(b);
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
         self.sel.clear();
-        for i in a..=b {
-            self.sel.insert(i);
+        for i in &shown[lo..=hi] {
+            self.sel.insert(*i);
         }
         self.cursor = idx;
     }
 
     pub fn select_all(&mut self) {
-        self.sel = self.visible().into_iter().collect();
+        self.sel = self.shown_indices().into_iter().collect();
     }
 
     pub fn icon_size(&self) -> f32 {

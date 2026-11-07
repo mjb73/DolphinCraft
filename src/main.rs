@@ -29,7 +29,7 @@ use eframe::egui::{
     Sense, Stroke, Vec2, ViewportCommand,
 };
 
-use config::Config;
+use config::{Config, SavedTab};
 use search::{DupScan, ThumbCache};
 use state::{Clipboard, Pane, Request, ViewMode, TRASH_URI};
 use theme::*;
@@ -155,6 +155,20 @@ pub struct Confirm {
     pub action: ConfirmAction,
 }
 
+/// What the last Move to Trash put away, so the little toast can offer to put it
+/// back. The person asked for no question before a delete; a way back afterwards
+/// is what replaces it. The original has an Undo for trashing too (`This undoes
+/// the last change you made to files or folders`), so this stays in its spirit.
+pub struct UndoTrash {
+    /// The Trash records this action created, in `~/.local/share/Trash/files`.
+    pub records: Vec<PathBuf>,
+    pub at: Instant,
+}
+
+/// How long the Undo offer stays up. The toast itself lives 4 s; an offer that
+/// short would be gone before the eye finds it.
+pub const UNDO_SECS: f32 = 8.0;
+
 pub struct Props {
     pub paths: Vec<PathBuf>,
     pub checksum: Option<String>,
@@ -209,6 +223,9 @@ pub struct App {
     /// `--menu`: open the app menu on the first frame so a picture of it can be
     /// taken. A click on the button opens it in normal use.
     pub open_menu_once: bool,
+    /// `--sort-menu`: open the Sort By popup on the first frame so a picture of it
+    /// can be taken. A click on the sort control opens it in normal use.
+    pub open_sort_once: bool,
     pub split: bool,
     pub places_visible: bool,
     pub info_panel: bool,
@@ -224,6 +241,8 @@ pub struct App {
     pub new_folder: Option<NewFolder>,
     pub shortcut_edit: Option<ShortcutEdit>,
     pub toast: Option<(String, Instant)>,
+    /// The Undo offer that follows the last Move to Trash.
+    pub undo_trash: Option<UndoTrash>,
     pub folder_sizes: HashMap<PathBuf, u64>,
     pub size_rx: Receiver<(PathBuf, u64)>,
     pub size_tx: Sender<(PathBuf, u64)>,
@@ -234,6 +253,10 @@ pub struct App {
     pub big: gallery::BigCache,
     /// A picture asked for on the command line, opened on the first frame.
     pub pending_viewer: Option<(PathBuf, bool)>,
+    /// `--trash-demo <folder>`: move that folder's contents to the Trash once, so
+    /// a captured window shows the toast and its Undo button. Nothing is deleted
+    /// for good, and nothing happens unless the flag is given.
+    pub pending_trash_demo: Option<PathBuf>,
     /// What each picture's own file says about how it was generated. Read once
     /// per file and kept, so the information panel does not parse a PNG every
     /// frame.
@@ -252,6 +275,40 @@ pub struct App {
     /// Which of the person's own shortcut rows is being dragged, if any.
     /// The value is the index into `config.bookmarks`.
     pub shortcut_drag: Option<usize>,
+    /// What the remembered session looked like on the last frame that was
+    /// written to disk. Compared about once a second, so opening a tab,
+    /// closing one or walking into another folder reaches the settings file
+    /// even though none of those is a "setting" the menus own. Empty until the
+    /// first frame.
+    pub session_sig: String,
+}
+
+/// A pane set up from the saved settings, so a tab brought back by the session
+/// starts with the view, zoom and sort the window was left with. The original
+/// reads the same set out of each folder's view properties and the mode settings
+/// (`DolphinView::updateDefaultZoomLevel` @0x27df20, `ViewProperties` @0x29fdd0).
+pub fn pane_from_config(id: usize, path: std::path::PathBuf, cfg: &Config) -> Pane {
+    let mut pane = Pane::new(id, path);
+    pane.view = ViewMode::from_index(cfg.view.min(2));
+    pane.zoom = cfg.zoom;
+    pane.show_hidden = cfg.show_hidden;
+    pane.previews = cfg.previews;
+    pane.folders_first = cfg.folders_first;
+    pane.name_sort = state::NameSort::from_index(cfg.name_sort);
+    pane.pictures = cfg.pictures;
+    pane.thumb_px = gallery::clamp_thumb(cfg.thumb_px);
+    pane.gallery_names = cfg.gallery_names;
+    pane.gallery_dims = cfg.gallery_dims;
+    pane.gallery_round = cfg.gallery_round;
+    pane.sort = state::SortKey::from_index(cfg.sort_key);
+    pane.asc = !cfg.sort_desc;
+    if cfg.show_hidden {
+        // `Pane::new` listed the folder without the hidden entries; list it
+        // again with them, then put the saved sort back on the new listing.
+        pane.reload();
+    }
+    pane.sort_entries();
+    pane
 }
 
 impl App {
@@ -292,6 +349,10 @@ impl App {
             Config::load()
         };
         let mut next_id = 1usize;
+        // Whether the folder came from the command line: a folder named there
+        // wins over the saved session, so `dolphincraft ~/Pictures` opens just
+        // that folder rather than every tab of the last run.
+        let from_cli = start_dir.is_some();
         let dir = start_dir
             .or_else(|| {
                 // A captured picture should show the same thing every time, so
@@ -307,10 +368,8 @@ impl App {
                 }
             })
             .unwrap_or_else(fsutil::home_dir);
-        let mut pane = Pane::new(next_id, dir);
+        let mut pane = pane_from_config(next_id, dir, &cfg);
         next_id += 1;
-        pane.view = ViewMode::from_index(cfg.view);
-        pane.zoom = cfg.zoom;
         if let Some(v) = start_view {
             pane.view = ViewMode::from_index(v.min(2));
         }
@@ -318,10 +377,6 @@ impl App {
             let slot = pane.view.index();
             pane.zoom[slot] = z.min(theme::MAX_ZOOM);
         }
-        pane.show_hidden = cfg.show_hidden;
-        pane.previews = cfg.previews;
-        pane.folders_first = cfg.folders_first;
-        pane.name_sort = state::NameSort::from_index(cfg.name_sort);
         // Added feature: the gallery's own last state, restored like the rest of
         // the window's furniture.
         pane.pictures = cfg.pictures || start_pictures;
@@ -337,32 +392,63 @@ impl App {
             }
         }
         pane.thumb_px = gallery::clamp_thumb(start_thumbs.unwrap_or(cfg.thumb_px));
-        pane.gallery_names = cfg.gallery_names;
-        pane.gallery_dims = cfg.gallery_dims;
         if start_dims {
             // `--dims` starts the wall with the size line already showing.
             pane.gallery_dims = true;
         }
-        pane.gallery_round = cfg.gallery_round;
-        if cfg.show_hidden {
-            pane.reload();
-        }
+        pane.sort_entries();
 
         let shot_mode = shot.is_some();
         let (size_tx, size_rx) = channel();
         let mut thumbs = ThumbCache::new();
         // `[PreviewSettings] MaximumSize`, in MiB; 0 = files of any size.
         thumbs.set_max_mib(cfg.preview_max_mib);
+        // Added feature asked for by the person: the tabs of the last run come
+        // back, with the tab that was in front in front again. A folder handed
+        // over on the command line, a find or the viewer takes precedence, and a
+        // captured picture always starts from one folder so it stays the same
+        // picture. The original's Startup page offers the same choice —
+        // "Folders, tabs, and window state from last time" (0x137dc8).
+        let mut tabs = vec![Tab {
+            panes: vec![pane],
+            active: 0,
+        }];
+        let mut active_tab = 0usize;
+        if !shot_mode && !from_cli && cfg.restore_session && start_find.is_none() && start_viewer.is_none() {
+            let remembered = cfg.remembered_tabs();
+            if !remembered.is_empty() {
+                tabs = remembered
+                    .into_iter()
+                    .map(|tab| {
+                        let id = next_id;
+                        next_id += 1;
+                        let mut pane = pane_from_config(id, tab.path, &cfg);
+                        // Each tab keeps the sort it was showing. A session file
+                        // from before tabs carried their own sort falls back to the
+                        // window's sort.
+                        if let Some(key) = tab.sort_key {
+                            pane.sort = state::SortKey::from_index(key);
+                            pane.asc = !tab.sort_desc.unwrap_or(false);
+                            pane.sort_entries();
+                        }
+                        Tab {
+                            panes: vec![pane],
+                            active: 0,
+                        }
+                    })
+                    .collect();
+                active_tab = cfg.session_tab.min(tabs.len() - 1);
+            }
+        }
+        let saved_split_frac = cfg.split_frac.clamp(0.15, 0.85);
         let mut app = App {
-            tabs: vec![Tab {
-                panes: vec![pane],
-                active: 0,
-            }],
-            active_tab: 0,
+            tabs,
+            active_tab,
             // `--guide` opens the card on the first frame, which is how the
             // screenshot of it gets taken (F1 and the menu entry set this too).
             guide_open: start_guide,
             open_menu_once: start_menu,
+            open_sort_once: false,
             split: cfg.split,
             places_visible: cfg.places_visible,
             info_panel: cfg.info_panel,
@@ -378,6 +464,7 @@ impl App {
             new_folder: None,
             shortcut_edit: None,
             toast: None,
+            undo_trash: None,
             folder_sizes: HashMap::new(),
             size_rx,
             size_tx,
@@ -388,13 +475,15 @@ impl App {
             viewer: None,
             big: gallery::BigCache::new(),
             pending_viewer: start_viewer,
+            pending_trash_demo: None,
             image_meta: HashMap::new(),
             pending_compare: start_compare,
             frames: 0,
             open_details_at_start,
             config_dirty: false,
             next_pane_id: next_id,
-            split_frac: 0.5,
+            split_frac: saved_split_frac,
+            session_sig: String::new(),
             filter_focus: false,
             shortcut_drag: None,
         };
@@ -467,6 +556,13 @@ impl App {
         pane.show_hidden = self.config.show_hidden;
         pane.previews = self.config.previews;
         pane.name_sort = state::NameSort::from_index(self.config.name_sort);
+        pane.folders_first = self.config.folders_first;
+        // A new tab opens sorted the way the window last was, rather than dropping
+        // back to Name / ascending and overwriting the remembered sort when the
+        // session is saved.
+        pane.sort = state::SortKey::from_index(self.config.sort_key);
+        pane.asc = !self.config.sort_desc;
+        pane.sort_entries();
         self.tabs.push(Tab {
             panes: vec![pane],
             active: 0,
@@ -674,7 +770,8 @@ impl App {
                             .clicked()
                         {
                             let pane = self.pane_mut();
-                            pane.pictures = !pane.pictures;
+                            let on = !pane.pictures;
+                            pane.set_pictures(on);
                             self.config.pictures = pane.pictures;
                             self.config_dirty = true;
                         }
@@ -759,6 +856,10 @@ impl App {
             None => theme::draw_glyph(ui.painter(), rect, "sort", TEXT),
         }
         let resp = resp.on_hover_text(tip);
+        if self.open_sort_once {
+            self.open_sort_once = false;
+            egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&resp));
+        }
         egui::Popup::menu(&resp)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| self.sort_menu(ui));
@@ -841,8 +942,17 @@ impl App {
 
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(190.0);
+        // The original's Sort By menu, read out of `createActions` @0x28e380 in
+        // libdolphinprivate.so.6: a radio group of sort keys (one `KToggleAction`
+        // per role, built by `createFileItemRolesActionGroup` @0x28d3f0 with the
+        // role as the action's data), a separator, a second exclusive pair
+        // Ascending / Descending, then the Folders First switch. Choosing a key
+        // never reverses the order — `slotSortTriggered` @0x291f30 only records the
+        // choice — so the key that is already ticked does nothing, and the
+        // direction is always this pair.
         {
             let pane = self.pane_mut();
+            let mut changed = false;
             for key in [
                 state::SortKey::Name,
                 state::SortKey::Size,
@@ -851,15 +961,36 @@ impl App {
             ] {
                 let checked = pane.sort == key;
                 if ui.selectable_label(checked, key.label()).clicked() {
-                    if pane.sort == key {
-                        pane.asc = !pane.asc;
-                    } else {
-                        pane.sort = key;
-                        pane.asc = true;
-                    }
-                    pane.sort_entries();
+                    changed |= pane.choose_sort(key);
                     ui.close();
                 }
+            }
+            ui.separator();
+            if ui.selectable_label(pane.asc, "Ascending").clicked() {
+                changed |= pane.set_sort_dir(false);
+                ui.close();
+            }
+            if ui.selectable_label(!pane.asc, "Descending").clicked() {
+                changed |= pane.set_sort_dir(true);
+                ui.close();
+            }
+            ui.separator();
+            // The original's own words: "Folders First", context
+            // `@action:inmenu Sort`. The switch is a property of the folder
+            // (`DolphinView::updateSortFoldersFirst` @0x27d7c0 writes it into the
+            // folder's view properties), and a folder that has never been given one
+            // starts with folders first (`ViewProperties` ctor @0x29fdd0 stores
+            // 0,1,0 at +8,+9,+10: order ascending, folders first, hidden last off).
+            if ui
+                .checkbox(&mut pane.folders_first, "Folders First")
+                .changed()
+            {
+                pane.sort_entries();
+                changed = true;
+            }
+            if changed {
+                // A sort chosen now is the sort the next start opens with.
+                self.config_dirty = true;
             }
         }
         ui.separator();
@@ -894,19 +1025,16 @@ impl App {
         });
         ui.separator();
         let pane = self.pane_mut();
-        if ui
-            .checkbox(&mut pane.folders_first, "Show folders first")
-            .changed()
-        {
-            pane.sort_entries();
-        }
+        // The original keeps "Show hidden files" in the View menu (Ctrl+H) and puts
+        // "Hidden Files Last" in this one; this build has no hidden-last ordering, so
+        // the plain switch stays here rather than being lost. "Show previews" is the
+        // same switch as the one in the Pictures submenu below.
         if ui
             .checkbox(&mut pane.show_hidden, "Show hidden files")
             .changed()
         {
             pane.reload();
         }
-        if ui.checkbox(&mut pane.previews, "Show preview").changed() {}
         ui.separator();
         ui.menu_button("Pictures", |ui| {
             let pane = &mut *pane;
@@ -937,7 +1065,8 @@ impl App {
                 .selectable_label(pane.pictures, "Picture wall (F4)")
                 .clicked()
             {
-                pane.pictures = !pane.pictures;
+                let on = !pane.pictures;
+                pane.set_pictures(on);
                 changed = true;
                 ui.close();
             }
@@ -1773,19 +1902,8 @@ impl App {
                         folder_size,
                     });
                 }
-                Request::Trash(paths) => {
-                    if !paths.is_empty() {
-                        self.confirm = Some(Confirm {
-                            title: "Move to Trash".to_string(),
-                            body: format!(
-                                "Move {} item{} to the Trash?",
-                                paths.len(),
-                                if paths.len() == 1 { "" } else { "s" }
-                            ),
-                            action: ConfirmAction::Trash(paths),
-                        });
-                    }
-                }
+                Request::Trash(paths) => self.ask_or_trash(paths),
+                Request::EmptyTrash => self.ask_or_empty_trash(),
                 Request::Restore(paths) => {
                     let mut ok = 0;
                     let mut errors = Vec::new();
@@ -1814,19 +1932,7 @@ impl App {
                     }
                     self.pane_mut().reload();
                 }
-                Request::DeletePermanent(paths) => {
-                    if !paths.is_empty() {
-                        self.confirm = Some(Confirm {
-                            title: "Delete Permanently".to_string(),
-                            body: format!(
-                                "Delete {} item{} permanently? This cannot be undone.",
-                                paths.len(),
-                                if paths.len() == 1 { "" } else { "s" }
-                            ),
-                            action: ConfirmAction::Delete(paths),
-                        });
-                    }
-                }
+                Request::DeletePermanent(paths) => self.ask_or_delete(paths),
                 Request::BulkRename(paths) => {
                     self.bulk = Some(Bulk {
                         paths,
@@ -2135,6 +2241,182 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // Deleting
+    // -----------------------------------------------------------------------
+
+    /// Delete (Del) on a marked selection. The original stops here with a modal
+    /// ("Move %2 to the Trash", `ConfirmTrash` in its Confirmations page); the
+    /// person asked for the mark and the key press to be the whole action, so the
+    /// dialog only appears when that switch is on, and it ships off.
+    pub fn ask_or_trash(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        // Inside the Trash there is nowhere further to move an item to, so Delete
+        // there means what it means in the original: gone for good.
+        if self.pane().is_trash() {
+            self.ask_or_delete(paths);
+            return;
+        }
+        if self.config.confirm_trash {
+            self.confirm = Some(Confirm {
+                title: "Move to Trash".to_string(),
+                body: format!(
+                    "Move {} item{} to the Trash?",
+                    paths.len(),
+                    if paths.len() == 1 { "" } else { "s" }
+                ),
+                action: ConfirmAction::Trash(paths),
+            });
+            return;
+        }
+        self.trash_now(paths);
+    }
+
+    /// Shift+Delete on a marked selection. Same rule as `ask_or_trash`: the
+    /// question is off unless the person turns it on (`ConfirmDelete`).
+    pub fn ask_or_delete(&mut self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        if self.config.confirm_delete {
+            self.confirm = Some(Confirm {
+                title: "Delete Permanently".to_string(),
+                body: format!(
+                    "Delete {} item{} permanently? This cannot be undone.",
+                    paths.len(),
+                    if paths.len() == 1 { "" } else { "s" }
+                ),
+                action: ConfirmAction::Delete(paths),
+            });
+            return;
+        }
+        self.delete_now(paths);
+    }
+
+    /// Move to the Trash, say how many went, and keep the way back for a few
+    /// seconds. The wording is the original's own (`Trash operation completed.`),
+    /// with the count that was already in this build's toast.
+    pub fn trash_now(&mut self, paths: Vec<PathBuf>) {
+        let (moved, records, problem) = fsutil::trash_with_records(&paths);
+        if moved == 0 {
+            self.toast(&problem.unwrap_or_else(|| "Nothing was moved.".to_string()));
+            return;
+        }
+        let msg = format!(
+            "Trash operation completed. {moved} item{} moved.",
+            if moved == 1 { "" } else { "s" }
+        );
+        self.toast(&match problem {
+            Some(p) => format!("{msg} {p}"),
+            None => msg,
+        });
+        self.undo_trash = Some(UndoTrash {
+            records,
+            at: Instant::now(),
+        });
+        self.reload_after_delete();
+    }
+
+    /// Delete for good. `Delete operation completed.` is the original's wording
+    /// for the same action, so the little toast reads the same way.
+    pub fn delete_now(&mut self, paths: Vec<PathBuf>) {
+        let (gone, problems) = fsutil::delete_permanently(&paths);
+        // A permanent delete ends the offer: what went cannot come back, and an
+        // older offer would put something else back under a misleading toast.
+        self.undo_trash = None;
+        if problems.is_empty() {
+            if gone > 0 {
+                self.toast("Delete operation completed.");
+                self.reload_after_delete();
+            }
+        } else {
+            self.toast(&format!("Could not delete: {}", problems.join(", ")));
+            if gone > 0 {
+                self.reload_after_delete();
+            }
+        }
+    }
+
+    /// Empty the Trash. The original puts the row in the Trash view's own menu
+    /// and greys it out while the Trash is empty (`FUN_0018db20` adds
+    /// `"@action:inmenu" "Empty Trash"` at 0x8e6cf and then calls `setEnabled`
+    /// with the negation of the emptiness test at `FUN_001a3750`). The question
+    /// before it is the third of the original's Confirmations keys,
+    /// `ConfirmEmptyTrash` (written by `FUN_001283f0` at 0x1285e9 into the
+    /// `Confirmations` group of `kiorc`); it ships on here, because nothing can
+    /// be brought back from this one.
+    pub fn ask_or_empty_trash(&mut self) {
+        let items = self.pane().entries.len();
+        if items == 0 && self.pane().is_trash() {
+            self.toast("The Trash is already empty.");
+            return;
+        }
+        if self.config.confirm_empty_trash {
+            self.confirm = Some(Confirm {
+                title: "Empty Trash".to_string(),
+                body: if items > 0 && self.pane().is_trash() {
+                    format!(
+                        "Empty the Trash and delete its {items} item{} for good?",
+                        if items == 1 { "" } else { "s" }
+                    )
+                } else {
+                    "Empty the Trash and delete everything in it for good?".to_string()
+                },
+                action: ConfirmAction::EmptyTrash,
+            });
+            return;
+        }
+        self.empty_trash_now();
+    }
+
+    /// The deed behind both routes into it. The Trash view is reloaded so the
+    /// rows the person was looking at disappear at once.
+    pub fn empty_trash_now(&mut self) {
+        // No offer to undo survives clearing the Trash: whatever was put back
+        // before this is gone with the rest.
+        self.undo_trash = None;
+        match fsutil::empty_trash() {
+            Ok(()) => {
+                self.toast("Trash emptied.");
+                self.reload_after_delete();
+            }
+            Err(e) => self.toast(&format!("Could not empty the Trash: {e}")),
+        }
+    }
+
+    /// Put back whatever the toast is still offering. Called by its Undo button.
+    pub fn undo_last_trash(&mut self) {
+        let Some(undo) = self.undo_trash.take() else {
+            return;
+        };
+        let back = fsutil::restore_trashed(&undo.records);
+        match back {
+            0 => self.toast("Nothing came back — the items are no longer in the Trash."),
+            1 => {
+                self.toast("Put back. The item is where it was.");
+                self.reload_after_delete();
+            }
+            n => {
+                self.toast(&format!("Put back. {n} items are where they were."));
+                self.reload_after_delete();
+            }
+        }
+    }
+
+    /// A deletion changes the folder, so every pane — both halves of a split and
+    /// every tab — is read again, and nothing stays marked that is no longer
+    /// there.
+    pub fn reload_after_delete(&mut self) {
+        for tab in self.tabs.iter_mut() {
+            for pane in tab.panes.iter_mut() {
+                pane.reload();
+                pane.sel.clear();
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Shortcuts in the navigation panel
     // -----------------------------------------------------------------------
 
@@ -2363,6 +2645,12 @@ impl App {
             if i.consume_key(ctrl, Key::F) {
                 reqs.push(Request::Toast("__search__".into()));
             }
+            // Ctrl+Z takes back the last Move to Trash, the way the original's
+            // own Undo does ("This undoes the last change you made to files or
+            // folders").
+            if i.consume_key(ctrl, Key::Z) {
+                reqs.push(Request::Toast("__undo__".into()));
+            }
             if i.consume_key(Modifiers::NONE, Key::F1) {
                 reqs.push(Request::Toast("__guide__".into()));
             }
@@ -2501,6 +2789,73 @@ impl App {
         }
     }
 
+    /// A short description of the open tabs: which folder each tab is showing
+    /// and which tab is in front. The settings file is only rewritten when this
+    /// changes or a setting changed, so a still window does not touch the disk.
+    fn session_signature(&self) -> String {
+        let mut sig = String::new();
+        for tab in &self.tabs {
+            sig.push_str(&tab.panes[tab.active].current_dir().to_string_lossy());
+            sig.push('\u{1f}');
+        }
+        sig.push_str(&self.active_tab.to_string());
+        sig
+    }
+
+    /// Copy the live window state into the settings file. Called when a setting
+    /// changed, when the session changed, and once when the window closes, so
+    /// the next start opens the way this one was left: same sort, same view and
+    /// zoom, same tabs, same window size.
+    fn persist(&mut self, ctx: Option<&egui::Context>) {
+        if self.shot.is_some() {
+            return;
+        }
+        let mut cfg = self.config.clone();
+        cfg.split = self.split;
+        cfg.places_visible = self.places_visible;
+        cfg.info_panel = self.info_panel;
+        cfg.show_hidden = self.pane().show_hidden;
+        cfg.previews = self.pane().previews;
+        cfg.view = self.pane().view.index();
+        cfg.zoom = self.pane().zoom;
+        cfg.folders_first = self.pane().folders_first;
+        cfg.name_sort = self.pane().name_sort.index();
+        // The person's own words: a sort chosen now is the sort next time.
+        cfg.sort_key = self.pane().sort.index();
+        cfg.sort_desc = !self.pane().asc;
+        cfg.split_frac = self.split_frac;
+        cfg.pictures = self.pane().pictures;
+        cfg.thumb_px = self.pane().thumb_px;
+        cfg.gallery_names = self.pane().gallery_names;
+        cfg.gallery_dims = self.pane().gallery_dims;
+        cfg.gallery_round = self.pane().gallery_round;
+        cfg.last_dir = self.pane().current_dir().display().to_string();
+        // The session, in tab order. The active pane of each tab is the folder
+        // that tab stands for.
+        cfg.session = self
+            .tabs
+            .iter()
+            .map(|t| {
+                let pane = &t.panes[t.active];
+                SavedTab {
+                    path: pane.current_dir(),
+                    sort_key: Some(pane.sort.index()),
+                    sort_desc: Some(!pane.asc),
+                }
+            })
+            .collect();
+        cfg.session_tab = self.active_tab;
+        if let Some(ctx) = ctx {
+            if let Some(size) = ctx.input(|i| i.viewport().inner_rect.map(|r| [r.width(), r.height()])) {
+                cfg.window_px = Some(size);
+            }
+        }
+        cfg.save();
+        self.config = cfg;
+        self.session_sig = self.session_signature();
+        self.config_dirty = false;
+    }
+
     fn apply_tag(&mut self, tag: &str) {
         match tag {
             "__newtab__" => {
@@ -2565,7 +2920,8 @@ impl App {
             "__pictures__" => {
                 // Added feature: the picture gallery on and off (F4).
                 let pane = self.pane_mut();
-                pane.pictures = !pane.pictures;
+                let on = !pane.pictures;
+                pane.set_pictures(on);
                 self.config.pictures = pane.pictures;
                 self.config_dirty = true;
             }
@@ -2603,6 +2959,13 @@ impl App {
             "__quick__" => {
                 if let Some(e) = self.pane().primary_selection().cloned() {
                     self.reqs.push(Request::QuickLook(e.path));
+                }
+            }
+            "__undo__" => {
+                if self.undo_trash.is_some() {
+                    self.undo_last_trash();
+                } else {
+                    self.toast("Nothing to undo.");
                 }
             }
             "__trash__" => {
@@ -2689,12 +3052,19 @@ impl App {
     }
 
     fn move_cursor(&mut self, delta: i32) {
-        let count = self.pane().display_entries().len();
-        if count == 0 {
+        // The arrow keys move through what the view actually shows: on the
+        // picture wall that is the pictures, never the documents between them.
+        let shown = self.pane().shown_indices();
+        if shown.is_empty() {
             return;
         }
-        let cur = self.pane().cursor as i32 + delta;
-        let next = cur.clamp(0, count as i32 - 1) as usize;
+        let at = self.pane().cursor;
+        let pos = shown.iter().position(|i| *i == at);
+        let next = match pos {
+            Some(p) => shown[(p as i32 + delta).clamp(0, shown.len() as i32 - 1) as usize],
+            None if delta > 0 => shown[0],
+            None => *shown.last().unwrap(),
+        };
         self.pane_mut().cursor = next;
         self.pane_mut().select_single(next);
         self.pane_mut().scroll_to = Some(next);
@@ -2788,6 +3158,20 @@ impl eframe::App for App {
             }
         }
         self.handle_shortcuts(ctx);
+        // `--trash-demo <folder>`: mark everything in that folder and take it to
+        // the Trash once the listing is there, so the toast and its Undo button
+        // can be photographed. It never deletes anything for good.
+        if let Some(dir) = self.pending_trash_demo.clone() {
+            let here = self.pane().current_dir();
+            if here == dir && !self.pane().entries.is_empty() {
+                let paths: Vec<PathBuf> = self.pane().entries.iter().map(|e| e.path.clone()).collect();
+                self.pane_mut().sel = (0..paths.len()).collect();
+                self.trash_now(paths);
+                self.pending_trash_demo = None;
+            } else if self.frames > 180 {
+                self.pending_trash_demo = None;
+            }
+        }
         self.top_toolbar(ctx);
         self.tab_strip(ctx);
         self.places_panel(ctx);
@@ -2803,29 +3187,37 @@ impl eframe::App for App {
         self.thumbs.poll(ctx);
         self.big.poll(ctx);
 
-        // A captured picture must not rewrite the person's settings.
-        if self.config_dirty && self.shot.is_none() {
-            let mut cfg = self.config.clone();
-            cfg.split = self.split;
-            cfg.places_visible = self.places_visible;
-            cfg.info_panel = self.info_panel;
-            cfg.show_hidden = self.pane().show_hidden;
-            cfg.previews = self.pane().previews;
-            cfg.view = self.pane().view.index();
-            cfg.zoom = self.pane().zoom;
-            cfg.folders_first = self.pane().folders_first;
-            cfg.name_sort = self.pane().name_sort.index();
-            cfg.pictures = self.pane().pictures;
-            cfg.thumb_px = self.pane().thumb_px;
-            cfg.gallery_names = self.pane().gallery_names;
-            cfg.gallery_dims = self.pane().gallery_dims;
-            cfg.gallery_round = self.pane().gallery_round;
-            cfg.last_dir = self.pane().current_dir().display().to_string();
-            cfg.save();
-            self.config = cfg;
-            self.config_dirty = false;
+        // A captured picture must not rewrite the person's settings. Outside a
+        // capture, the settings file is written whenever a setting changed, and
+        // about once a second when the *session* changed (a tab opened, closed or
+        // switched, or another folder opened), so those survive a crash as well
+        // as a tidy exit.
+        if self.shot.is_none() {
+            if self.frames % 30 == 0 {
+                let sig = self.session_signature();
+                if !sig.is_empty() && sig != self.session_sig {
+                    self.config_dirty = true;
+                }
+                let size = ctx.input(|i| i.viewport().inner_rect.map(|r| [r.width(), r.height()]));
+                if let Some(size) = size {
+                    let saved = self.config.window_px.unwrap_or(size);
+                    if (saved[0] - size[0]).abs() > 1.0 || (saved[1] - size[1]).abs() > 1.0 {
+                        self.config_dirty = true;
+                    }
+                }
+            }
+            if self.config_dirty {
+                self.persist(Some(ctx));
+            }
         }
         self.screenshot_tick(ctx);
+    }
+
+    /// The window is closing: one last write, so the tabs, the sort and the
+    /// window size are current even if nothing was marked dirty since the last
+    /// save. The original does the same in `DolphinMainWindow::slotSaveSession`.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.persist(None);
     }
 }
 
@@ -3191,6 +3583,15 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> bool {
         .clicked()
 }
 
+/// The two rows whose wording must not promise a question this build no longer
+/// asks. The original spells the first without an ellipsis too: its own binary
+/// carries `Move to Trash` (0x12f039) and no `Delete Permanently` at all — that
+/// one comes from KIO, whose action name has no ellipsis either. The person's
+/// rule is that the mark and the key press are the whole action, so a trailing
+/// "…" here would be a promise the row does not keep.
+pub const DELETE_PERMANENT_LABEL: &str = "Delete Permanently";
+pub const EMPTY_TRASH_LABEL: &str = "Empty Trash";
+
 /// A command row inside a menu: the name on the left, its keyboard shortcut
 /// on the right, the way the original shows them.
 pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
@@ -3387,6 +3788,12 @@ fn main() -> eframe::Result<()> {
     let mut start_deep = false;
     let mut start_guide = false;
     let mut start_menu = false;
+    // Deep-pass captures: open the Sort By popup on the first frame, or open the
+    // window already sorted by one key so the direction each key starts in can be
+    // seen (see MECHANICS.md, "The Sort By menu, read out of the code").
+    let mut start_sort_menu = false;
+    let mut start_sort: Option<state::SortKey> = None;
+    let mut trash_demo: Option<PathBuf> = None;
     // Window size, so a narrow layout can be looked at (and checked) without a
     // mouse: `--size 980x700`.
     let mut window_size: Option<[f32; 2]> = None;
@@ -3454,6 +3861,14 @@ fn main() -> eframe::Result<()> {
             "--deep" => start_deep = true,
             "--guide" => start_guide = true,
             "--menu" => start_menu = true,
+            // Moves a folder's contents to the Trash once so the Undo toast can be
+            // photographed; see the comment on `pending_trash_demo`.
+            "--trash-demo" => {
+                if i + 1 < args.len() {
+                    trash_demo = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
             "--keep-settings" => {
                 keep_settings = true;
             }
@@ -3499,9 +3914,20 @@ fn main() -> eframe::Result<()> {
         i += 1;
     }
 
+    // The window opens the size it was left, as the original's saved window state
+    // does. A capture keeps the fixed size so the picture is the same every run,
+    // and `--size` still wins.
+    let startup_size = window_size.or_else(|| {
+        if screenshot.is_some() {
+            return None;
+        }
+        Config::load()
+            .window_px
+            .filter(|s| s[0] >= 640.0 && s[1] >= 400.0)
+    });
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size(window_size.unwrap_or([1440.0, 900.0]))
+            .with_inner_size(startup_size.unwrap_or([1440.0, 900.0]))
             .with_min_inner_size([880.0, 540.0])
             // The window title is the name the person sees on the title bar and
             // in the task switcher. Renamed from the original program's name to
@@ -3516,7 +3942,7 @@ fn main() -> eframe::Result<()> {
         APP_NAME,
         options,
         Box::new(move |cc| {
-            Ok(Box::new(App::new(
+            let mut app = App::new(
                 cc,
                 start_dir.clone(),
                 shot.clone(),
@@ -3533,7 +3959,9 @@ fn main() -> eframe::Result<()> {
                 start_guide,
                 start_menu,
                 start_details,
-            )))
+            );
+            app.pending_trash_demo = trash_demo.clone();
+            Ok(Box::new(app))
         }),
     )
 }

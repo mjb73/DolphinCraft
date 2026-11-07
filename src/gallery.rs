@@ -638,17 +638,15 @@ impl Pane {
                 self.gallery_bar(ui, vctx);
             });
 
-        // The wall holds the folder's pictures, plus its sub-folders so the
-        // person can walk into the next folder of photographs. Documents are
-        // left to the list views behind the gallery: a wall of letter icons is
-        // not what the person asked for, and a 400 px tile of `notes.txt` is
-        // nothing but an empty square.
+        // The wall holds the folder's pictures and nothing else. Folders used to
+        // sit here as square tiles so the person could walk into the next folder
+        // of photographs; the person asked for pictures alone, so a sub-folder or
+        // a document is left to the grid and list views behind the wall, and the
+        // path bar above the wall is how one walks into a sub-folder.
         let entries: Vec<(usize, Entry)> = self
-            .display_entries()
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e.is_dir || e.is_image())
-            .map(|(i, e)| (i, e.clone()))
+            .shown_indices()
+            .into_iter()
+            .filter_map(|i| self.display_entries().get(i).map(|e| (i, e.clone())))
             .collect();
         if entries.is_empty() {
             let rect = ui.available_rect_before_wrap();
@@ -662,7 +660,7 @@ impl Pane {
             ui.painter().text(
                 Pos2::new(rect.center().x, rect.top() + 112.0),
                 Align2::CENTER_CENTER,
-                "The gallery shows pictures and folders; the list views show every file.",
+                "The wall shows pictures only; the list views show every file.",
                 FontId::proportional(12.0),
                 TEXT_FAINT,
             );
@@ -671,13 +669,12 @@ impl Pane {
 
         // Each picture is laid out at its own shape, so the wall needs the
         // width divided by height of every entry before it can pack the rows.
-        // Folders have no shape of their own and stay square; a picture whose
-        // header cannot be read is treated as square too.
+        // A picture whose header cannot be read is treated as square.
         let previews = self.previews;
         let aspects: Vec<f32> = entries
             .iter()
             .map(|(_, e)| {
-                if previews && !e.is_dir && e.is_image() {
+                if previews {
                     wall_aspect(vctx.thumbs.aspect(&e.path))
                 } else {
                     1.0

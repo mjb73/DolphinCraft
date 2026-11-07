@@ -1274,6 +1274,7 @@ impl Pane {
                 vec![entry.path.clone()]
             };
             let in_trash = self.is_trash();
+            let trash_empty = self.display_entries().is_empty();
             let clipboard_has = !vctx.clipboard.paths.is_empty();
             resp.context_menu(|ui| {
                 ui.set_min_width(210.0);
@@ -1282,8 +1283,20 @@ impl Pane {
                         vctx.reqs.push(Request::Restore(selected_paths.clone()));
                         ui.close();
                     }
-                    if ui.button("Delete Permanently").clicked() {
+                    if ui.button(crate::DELETE_PERMANENT_LABEL).clicked() {
                         vctx.reqs.push(Request::DeletePermanent(vec![entry.path.clone()]));
+                        ui.close();
+                    }
+                    // The Trash's own row, greyed out while the Trash is empty,
+                    // exactly as the original's context menu has it.
+                    let mut empty = false;
+                    ui.add_enabled_ui(!trash_empty, |ui| {
+                        if ui.button(crate::EMPTY_TRASH_LABEL).clicked() {
+                            empty = true;
+                        }
+                    });
+                    if empty {
+                        vctx.reqs.push(Request::EmptyTrash);
                         ui.close();
                     }
                     ui.separator();
@@ -1415,7 +1428,7 @@ impl Pane {
                     vctx.reqs.push(Request::Trash(selected_paths.clone()));
                     ui.close();
                 }
-                if ui.button("Delete Permanently…").clicked() {
+                if ui.button(crate::DELETE_PERMANENT_LABEL).clicked() {
                     vctx.reqs.push(Request::DeletePermanent(selected_paths.clone()));
                     ui.close();
                 }

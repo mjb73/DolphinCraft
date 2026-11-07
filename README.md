@@ -44,8 +44,11 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   band of empty wall around it. Rounded corners, an optional size line under each
   name (width × height, aspect ratio, megapixels), drawn in the file name's own
   font, size and colour, and a switch to hide the file
-  names. Enter it with the picture button in the toolbar; folders sit in the same
-  wall.
+  names. Enter it with the picture button in the toolbar. The wall holds the
+  folder's pictures and nothing else: sub-folders and documents stay in the icon
+  and list views, and the path bar above the wall is how you step into a
+  sub-folder. Marking, Ctrl+A, Shift+click and the arrow keys follow the pictures
+  on screen, so a hidden document can never be caught up in a selection.
 - **Picture viewer and slideshow**: open a picture and page through the folder,
   zoom, and read the generation prompt, negative prompt, steps, sampler, CFG
   scale, seed, size, model and denoising strength straight out of the file
@@ -77,6 +80,13 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   - **Open Terminal Here** — a shell in the folder you are looking at.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
   properties, all with the shortcuts you already know from Dolphin.
+- **Deleting asks nothing first** (as you asked): mark the pictures — or any
+  files — and press Delete; they are in the Trash before you let go of the key.
+  Shift+Delete removes them for good the same way. What replaces the question is
+  a way back: the toast at the bottom offers **Undo** for eight seconds, and
+  **Ctrl+Z** or the app menu's *Undo Move to Trash* still brings the items back
+  afterwards. If you ever want the question back, all three of Dolphin's
+  confirmation switches live in the app menu under *Deleting*.
 
 ## Running it
 
@@ -120,6 +130,8 @@ Options:
 --deep                   with --find, look through every folder below as well
 --guide                   open the card that explains Find, Open in and Menu
 --menu                    open the app's own menu (used to photograph it)
+--trash-demo <folder>     move that folder's contents to the Trash once, so the
+                          Undo toast can be photographed; nothing is deleted for good
 --size <WxH>              open the window at a given size
 --selftest                run the built-in checks and exit
 ```

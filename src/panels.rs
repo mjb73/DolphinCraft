@@ -106,10 +106,12 @@ impl App {
         if ui.checkbox(&mut show_hidden, "Show Hidden Files").changed() {
             self.pane_mut().show_hidden = show_hidden;
             self.pane_mut().reload();
+            self.config_dirty = true;
         }
         let mut previews = self.pane().previews;
         if ui.checkbox(&mut previews, "Show Preview").changed() {
             self.pane_mut().previews = previews;
+            self.config_dirty = true;
         }
         // Three settings the original keeps on two of its own pages, together
         // here. Each is the original's own key and range:
@@ -184,7 +186,7 @@ impl App {
             .on_hover_text("Thumbnails of this folder at 50–400 px, with a viewer and a slideshow (F4)")
             .changed()
         {
-            self.pane_mut().pictures = pictures;
+            self.pane_mut().set_pictures(pictures);
             self.config.pictures = pictures;
             self.config_dirty = true;
         }
@@ -218,7 +220,90 @@ impl App {
         let mut info = self.info_panel;
         if ui.checkbox(&mut info, "Show Information Panel").changed() {
             self.info_panel = info;
+            self.config_dirty = true;
         }
+        ui.separator();
+        // The original's Startup page offers "Folders, tabs, and window state
+        // from last time" (0x137dc8) and saves it in
+        // `DolphinMainWindow::slotSaveSession`. Everything else on this page is
+        // always remembered; this switch is only about the tabs, because a window
+        // that reopens seven tabs is not everyone's wish.
+        menu_group(ui, "Starting");
+        let mut reopen = self.config.restore_session;
+        if ui
+            .checkbox(&mut reopen, "Reopen the tabs I had open")
+            .on_hover_text(
+                "Sorting, view, zoom, panel widths and window size are always remembered",
+            )
+            .changed()
+        {
+            self.config.restore_session = reopen;
+            self.config_dirty = true;
+        }
+        ui.separator();
+        // The original keeps these three on its Confirmations page, one switch
+        // per destructive action (`ConfirmTrash`, `ConfirmDelete`,
+        // `ConfirmEmptyTrash`). Here the two that the person asked to be
+        // question-free start off, and the one that cannot be undone starts on.
+        menu_group(ui, "Deleting");
+        let mut ask_trash = self.config.confirm_trash;
+        if ui
+            .checkbox(&mut ask_trash, "Ask before moving to the Trash")
+            .on_hover_text("Off: Delete on a marked selection moves it at once, with Undo")
+            .changed()
+        {
+            self.config.confirm_trash = ask_trash;
+            self.config_dirty = true;
+        }
+        let mut ask_delete = self.config.confirm_delete;
+        if ui
+            .checkbox(&mut ask_delete, "Ask before deleting permanently")
+            .on_hover_text("Off: Shift+Delete on a marked selection deletes it at once")
+            .changed()
+        {
+            self.config.confirm_delete = ask_delete;
+            self.config_dirty = true;
+        }
+        let mut ask_empty = self.config.confirm_empty_trash;
+        if ui
+            .checkbox(&mut ask_empty, "Ask before emptying the Trash")
+            .changed()
+        {
+            self.config.confirm_empty_trash = ask_empty;
+            self.config_dirty = true;
+        }
+        let undo_ready = self
+            .undo_trash
+            .as_ref()
+            .map(|u| u.at.elapsed().as_secs_f32() < crate::UNDO_SECS)
+            .unwrap_or(false);
+        // The Trash's own action, in the original's own words and with its own
+        // rule: the row is there in the Trash view and greyed out while there is
+        // nothing in it (`FUN_0018db20`).
+        let in_trash = self.pane().is_trash();
+        let trash_items = if in_trash {
+            self.pane().entries.len()
+        } else {
+            0
+        };
+        if in_trash {
+            let mut empty = false;
+            ui.add_enabled_ui(trash_items > 0, |ui| {
+                if crate::menu_row(ui, crate::EMPTY_TRASH_LABEL, "").clicked() {
+                    empty = true;
+                }
+            });
+            if empty {
+                self.reqs.push(Request::EmptyTrash);
+                ui.close();
+            }
+        }
+        ui.add_enabled_ui(undo_ready, |ui| {
+            if crate::menu_row(ui, "Undo Move to Trash", "Ctrl+Z").clicked() && undo_ready {
+                self.undo_last_trash();
+                ui.close();
+            }
+        });
         ui.separator();
         // Sorting is also reachable here, so it stays available in a window so
         // narrow that the toolbar's sort control gives way to the location bar.
@@ -234,15 +319,20 @@ impl App {
                 ] {
                     let checked = pane.sort == key;
                     if ui.selectable_label(checked, key.label()).clicked() {
-                        if pane.sort == key {
-                            pane.asc = !pane.asc;
-                        } else {
-                            pane.sort = key;
-                            pane.asc = true;
-                        }
-                        pane.sort_entries();
+                        changed |= pane.choose_sort(key);
                         ui.close();
                     }
+                }
+                ui.separator();
+                // The original's own pair under the key list
+                // (`DolphinViewActionHandler::createActions` @0x28e380).
+                if ui.selectable_label(pane.asc, "Ascending").clicked() {
+                    changed |= pane.set_sort_dir(false);
+                    ui.close();
+                }
+                if ui.selectable_label(!pane.asc, "Descending").clicked() {
+                    changed |= pane.set_sort_dir(true);
+                    ui.close();
                 }
                 ui.separator();
                 // Same three comparisons the original's Sort page lists
@@ -268,6 +358,7 @@ impl App {
                 });
             }
             if changed {
+                // Every one of these is remembered for the next start.
                 self.config_dirty = true;
             }
         });
@@ -585,15 +676,31 @@ impl App {
     pub fn toast_ui(&mut self, ctx: &egui::Context) {
         let Some((msg, when)) = self.toast.clone() else { return };
         let age = when.elapsed();
-        if age > Duration::from_secs(4) {
+        // A toast that still has an offer attached lives longer, so the way back
+        // is on screen long enough to be used.
+        let undo_live = self
+            .undo_trash
+            .as_ref()
+            .map(|u| u.at.elapsed() < Duration::from_secs_f32(crate::UNDO_SECS))
+            .unwrap_or(false);
+        let life = if undo_live {
+            Duration::from_secs_f32(crate::UNDO_SECS)
+        } else {
+            Duration::from_secs(4)
+        };
+        if age > life {
+            // Only the offer's time on screen runs out. The record of what was
+            // moved stays, so Ctrl+Z still brings it back later.
             self.toast = None;
             return;
         }
-        let alpha = if age > Duration::from_secs(3) {
-            (1.0 - (age.as_secs_f32() - 3.0)) as f32
+        let fade_from = life.as_secs_f32() - 1.0;
+        let alpha = if age.as_secs_f32() > fade_from {
+            (life.as_secs_f32() - age.as_secs_f32()).clamp(0.0, 1.0) as f32
         } else {
             1.0
         };
+        let mut undo_clicked = false;
         let screen = ctx.screen_rect();
         egui::Area::new(Id::new("toast"))
             .fixed_pos(Pos2::new(screen.center().x - 200.0, screen.bottom() - 74.0))
@@ -608,13 +715,36 @@ impl App {
                     .inner_margin(Margin::symmetric(14, 8))
                     .show(ui, |ui| {
                         ui.set_min_width(360.0);
-                        ui.label(
-                            egui::RichText::new(msg)
-                                .size(12.5)
-                                .color(TEXT.gamma_multiply(alpha)),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(msg)
+                                    .size(12.5)
+                                    .color(TEXT.gamma_multiply(alpha)),
+                            );
+                            if undo_live {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let button = egui::Button::new(
+                                        egui::RichText::new("Undo")
+                                            .size(12.5)
+                                            .color(Color32::WHITE),
+                                    )
+                                    .fill(Color32::from_rgb(61, 130, 180))
+                                    .min_size(Vec2::new(64.0, 20.0));
+                                    if ui
+                                        .add(button)
+                                        .on_hover_text("Put the items back where they were")
+                                        .clicked()
+                                    {
+                                        undo_clicked = true;
+                                    }
+                                });
+                            }
+                        });
                     });
             });
+        if undo_clicked {
+            self.undo_last_trash();
+        }
         ctx.request_repaint_after(Duration::from_millis(200));
     }
 
@@ -772,33 +902,11 @@ impl App {
 
     fn run_confirm(&mut self, action: ConfirmAction) {
         match action {
-            ConfirmAction::Trash(paths) => match fsutil::move_to_trash(&paths) {
-                Ok(n) => {
-                    self.toast(&format!(
-                        "Trash operation completed. {} item{} moved.",
-                        n,
-                        if n == 1 { "" } else { "s" }
-                    ));
-                }
-                Err(e) => self.toast(&e),
-            },
-            ConfirmAction::Delete(paths) => {
-                let mut errors = Vec::new();
-                for p in &paths {
-                    if std::fs::remove_dir_all(p).is_err() && std::fs::remove_file(p).is_err() {
-                        errors.push(p.display().to_string());
-                    }
-                }
-                if errors.is_empty() {
-                    self.toast("Delete operation completed.");
-                } else {
-                    self.toast(&format!("Could not delete: {}", errors.join(", ")));
-                }
-            }
-            ConfirmAction::EmptyTrash => match fsutil::empty_trash() {
-                Ok(()) => self.toast("Trash emptied."),
-                Err(e) => self.toast(&e),
-            },
+            // The switch the person turned on only puts a question first; the
+            // deed and its toast are the same either way.
+            ConfirmAction::Trash(paths) => self.trash_now(paths),
+            ConfirmAction::Delete(paths) => self.delete_now(paths),
+            ConfirmAction::EmptyTrash => self.empty_trash_now(),
             ConfirmAction::Restore(paths) => {
                 let mut ok = 0;
                 for p in &paths {

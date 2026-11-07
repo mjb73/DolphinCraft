@@ -24,6 +24,26 @@ pub struct ShortcutColor {
     pub rgb: [u8; 3],
 }
 
+/// One tab restored from the last run, by the folder it was showing.
+///
+/// The original saves the whole session — "Folders, tabs, and window state from
+/// last time" is the wording of its Startup page (`FoldersTabsSettingsPage`,
+/// string at 0x137dc8 in `/usr/bin/dolphin`) — in
+/// `DolphinMainWindow::slotSaveSession`, so tabs, the active tab and the window
+/// come back on the next start. This build stores just the folder of each tab's
+/// active pane: the per-tab split state and the history are session details the
+/// person has not asked to keep.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SavedTab {
+    pub path: PathBuf,
+    /// The sort this tab was showing. `None` in a file written before tabs kept
+    /// their own sort, in which case the window's saved sort is used.
+    #[serde(default)]
+    pub sort_key: Option<usize>,
+    #[serde(default)]
+    pub sort_desc: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     /// Which set of factory defaults this file was written with. Files from
@@ -56,6 +76,41 @@ pub struct Config {
     /// 0 Natural, 1 Alphabetical case insensitive, 2 Alphabetical case sensitive.
     #[serde(default)]
     pub name_sort: usize,
+    /// The sort key the window last used, as an index into the four keys (Name,
+    /// Size, Type, Modified). The original keeps a key *per folder* — the
+    /// `sortRole`/`sortOrder` pair that `ViewProperties` @0x29fdd0 reads and
+    /// saves — while this build keeps one for the window; the person asked for
+    /// the choice to carry forward to the next start, and one default is what
+    /// that means when a new folder may never have been opened before.
+    #[serde(default)]
+    pub sort_key: usize,
+    /// Whether that key is descending. Size and Modified start descending
+    /// (`DolphinView::defaultSortOrderForRole` @0x273910), so a fresh profile
+    /// stores `false` here and still shows the newest file first after picking
+    /// Modified.
+    #[serde(default)]
+    pub sort_desc: bool,
+    /// Where the split divider was dragged to, 0..1 across the pane. The original
+    /// feeds `QSplitter::setSizes` from its saved config (call sites 0x90e2a,
+    /// 0x927f3, …), i.e. it remembers the drag rather than opening at a fixed
+    /// width.
+    #[serde(default = "half")]
+    pub split_frac: f32,
+    /// Reopen the tabs of the last run. The original's Startup page offers
+    /// "Folders, tabs, and window state from last time" (0x137dc8) and saves it
+    /// in `DolphinMainWindow::slotSaveSession`.
+    #[serde(default = "yes")]
+    pub restore_session: bool,
+    /// One entry per open tab, in tab order.
+    #[serde(default)]
+    pub session: Vec<SavedTab>,
+    /// Index of the tab that was in front.
+    #[serde(default)]
+    pub session_tab: usize,
+    /// Inner size of the window on the last run, so the window opens the size it
+    /// was left. Not used in screenshot mode, so captures stay identical.
+    #[serde(default)]
+    pub window_px: Option<[f32; 2]>,
     /// The Shortcuts section of the navigation panel can be folded away.
     #[serde(default = "yes")]
     pub shortcuts_expanded: bool,
@@ -105,6 +160,18 @@ pub struct Config {
     /// they left it.
     #[serde(default = "yes")]
     pub prompt_open: bool,
+    /// The original's Confirmations page keeps three separate switches, one per
+    /// destructive action (`ConfirmTrash`, `ConfirmDelete`, `ConfirmEmptyTrash`;
+    /// the page is labelled "Ask for confirmation in Dolphin when:"). The
+    /// rebuild stores the same three, but the first two ship **off**: the person
+    /// asked for a marked picture and a press of Delete to be the whole action.
+    /// Emptying the Trash stays on, because nothing can be brought back from it.
+    #[serde(default)]
+    pub confirm_trash: bool,
+    #[serde(default)]
+    pub confirm_delete: bool,
+    #[serde(default = "yes")]
+    pub confirm_empty_trash: bool,
     /// `[PreviewSettings] MaximumSize` read by the previews page
     /// (`FUN_00217c30` @0x217c30): a file bigger than this many MiB gets no
     /// thumbnail. 0 is the spin box's "files of any size" special value, i.e. no
@@ -127,6 +194,10 @@ fn gallery_thumb() -> f32 {
 
 fn yes() -> bool {
     true
+}
+
+fn half() -> f32 {
+    0.5
 }
 
 fn details() -> usize {
@@ -162,6 +233,13 @@ impl Default for Config {
             zoom: crate::theme::default_zoom(true),
             folders_first: true,
             name_sort: 0,
+            sort_key: 0,
+            sort_desc: false,
+            split_frac: 0.5,
+            restore_session: true,
+            session: Vec::new(),
+            session_tab: 0,
+            window_px: None,
             shortcuts_expanded: true,
             shortcut_keys: true,
             shortcut_colors: Vec::new(),
@@ -177,6 +255,12 @@ impl Default for Config {
             show_zoom_slider: true,
             size_limit: crate::search::SIZE_LIMIT_DEFAULT,
             prompt_open: true,
+            // The person's rule wins over the original's factory setting: a
+            // marked picture and a press of Delete is the whole action, no
+            // question in between. Emptying the Trash still asks.
+            confirm_trash: false,
+            confirm_delete: false,
+            confirm_empty_trash: true,
             preview_max_mib: 0,
         }
     }
@@ -222,6 +306,18 @@ impl Config {
         if let Ok(text) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(path, text);
         }
+    }
+
+    /// The folders of the tabs remembered from the last run, leaving out any that
+    /// no longer exist. A session file can outlive a folder (an unmounted disk, a
+    /// deleted directory), and the original's restore drops such a URL rather
+    /// than opening an error page.
+    pub fn remembered_tabs(&self) -> Vec<SavedTab> {
+        self.session
+            .iter()
+            .filter(|t| t.path.is_dir())
+            .cloned()
+            .collect()
     }
 
     /// The colour of one shortcut row, if the person chose one.

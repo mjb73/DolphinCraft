@@ -154,6 +154,14 @@ These do not exist in the original and are labelled as additions in the UI:
     both changeable while it plays.
 13. Side-by-side picture comparison, with the browser's three modes (side,
     split, overlay), synced zoom and a swap.
+14. **No question before a delete, with Undo instead** (asked for by the person:
+    "When I mark images and press delete, I don't want another confirmation
+    step"). Delete on a marked selection moves it to the Trash and Shift+Delete
+    deletes it for good, both at once. A Move to the Trash leaves a toast with an
+    **Undo** button for eight seconds, and **Ctrl+Z** or the app menu's *Undo Move
+    to Trash* puts the items back after that. The original's three confirmation
+    switches are kept in the app menu under *Deleting*, off by default for the two
+    the person asked about and on for emptying the Trash.
 
 ## Thumbnails follow the zoom level (asked for by the person)
 
@@ -1133,14 +1141,148 @@ both are recorded here rather than copied.
 * name comparison default — **now measured**: `SortingChoice` default index 0 =
   `NaturalSorting` (see above); the note that called *Natural* an estimate is
   superseded;
-* "show folders first" and the sort key/order defaults are still not read out of
-  a settings constructor, so they stay marked `estimated` in `mechanics.json`;
+* "show folders first" and the sort key/order defaults are **now measured** in the
+  round below (`ViewProperties` ctor @0x29fdd0, `defaultSortOrderForRole` @0x273910);
+  what is still estimated is only which key a brand-new folder opens with, because
+  the role is not a constant: `KFileItemModel::loadSortingSettings` @0x194e20 leaves
+  the model on the name comparator it builds, and a folder's own `sortRole` overrides
+  it whenever the person has changed it;
 * details row height 26 px, places 208 px, information panel 288 px stay
   approximations of the theme: the splitter sizes are **not** constants in the
   program — `QSplitter::setSizes` is fed either from the saved config or from the
   live widget widths (call sites at 0x90e2a, 0x927f3, 0x94673, 0x986eb), so the
   original remembers whatever the person dragged rather than opening at a fixed
   width.
+
+## The Sort By menu, read out of the code (asked for by the person)
+
+The person's words: *"if I choose to sort by date descending … this should carry
+forward to the next time I open the app."* The sorting this build already had was
+a guess in two places — clicking the key that was already chosen flipped the
+order, and every key started ascending, so picking *Size* showed the smallest file
+first and *Modified* the oldest date first. Neither is what the original does.
+
+The original's sorting lives in `/usr/lib/libdolphinprivate.so.6` (the main program
+`/usr/bin/dolphin` is a stripped shell around it: its own string pool holds only
+`SortingChoice`, at 0x22cddc, and `SortOrderForUrl`, at 0x23b543). Strings were
+found first, then their references were followed:
+
+| string | analysed address | read from |
+| --- | --- | --- |
+| `SortingChoice` | `/usr/bin/dolphin` 0x22cddc | `FUN_001e7af0` (the View → Display page's write-back) |
+| `Sort By` | lib 0x2bfcc6 | `DolphinViewActionHandler::createActions` @0x28e380 |
+| `Folders First` | lib 0x2bf50d (`@action:inmenu Sort`) | same function |
+| `Show folders first` | lib 0x2bf50d | same string, used as the settings-row wording |
+| `Sort by Field` | lib 0x2bfa58 | `createFileItemRolesActionGroup` @0x28d3f0 |
+| `Descending` / `ascending`, `descending` | lib 0x2bf502 / 0x2c0448, 0x2c0432 | `createActions` @0x28e380, `slotSortOrderChanged` @0x292640 |
+| `Hidden Files Last` | lib 0x2c02fa (`hidden_last`) | `createActions` @0x28e380 |
+
+Functions read with the decompiler (pseudo-code kept under `rea/deep3/`, whole-run
+evidence `ev_b684ee56…fd5355` for the role default, `ev_8d30cf28…6e1aedb` for the
+role list, `ev_bc293f78…8681c45` for the menu handler):
+
+| function (libdolphinprivate.so.6) | address | what it is |
+| --- | --- | --- |
+| `DolphinViewActionHandler::createActions` | 0x28e380 | builds every action, including the Sort By menu |
+| `DolphinViewActionHandler::createFileItemRolesActionGroup` | 0x28d3f0 | one tickable action per sortable role, role kept in the action's data |
+| `DolphinViewActionHandler::slotSortTriggered` | 0x291f30 | a key was chosen: tick it, hand the role to the view |
+| `DolphinViewActionHandler::slotSortOrderChanged` | 0x292640 | Ascending / Descending chosen: remember it for the current role |
+| `DolphinView::setSortRole` | 0x2716d0 | applies a role and asks for that role's order |
+| `DolphinView::preferredSortOrder` | 0x2859a0 | the order last chosen for a role, else its default |
+| `DolphinView::defaultSortOrderForRole` | 0x273910 | is this role in the "descending first" set |
+| `DolphinView::updateSortFoldersFirst` | 0x27d7c0 | writes the folders-first switch into the folder's properties |
+| `KFileItemModel::loadSortingSettings` | 0x194e20 | turns the three name comparisons into two comparators |
+| `ViewProperties::ViewProperties(QUrl const&)` | 0x29fdd0 | a folder's fresh defaults: order, folders-first, hidden-last |
+
+**The menu is two radio groups and a switch, not a toggling list.**
+`createActions` builds a `KActionMenu` named `sort`, titled *Sort By*
+(`@action:inmenu View`, icon `view-sort`), fills it with the role actions from
+`createFileItemRolesActionGroup("sort_by_")` — an **exclusive** `QActionGroup`, so
+exactly one key is ticked — then `addSeparator()`, then a second exclusive group
+holding *Ascending* (`ascending`) and *Descending* (`descending`), then the
+*Folders First* toggle (`folders_first`, `toggleSortFoldersFirst`) and *Hidden Files
+Last* (`hidden_last`, `toggleSortHiddenLast`).
+
+`slotSortTriggered` is three lines of real work: tick the clicked action, read the
+role out of `QAction::data()`, call `DolphinView::setSortRole(role)`. There is no
+branch that reverses the order, so **clicking the key that is already ticked does
+nothing**. Direction is only ever the pair underneath.
+
+**A new key starts in its own direction.** `setSortRole` @0x2716d0 writes the role
+into the folder's properties and then compares `preferredSortOrder(role)` with the
+order in force; if they differ it stores the preferred one and pushes it into the
+model. `preferredSortOrder` @0x2859a0 looks the role up in a hash of orders chosen
+during the session (at `DolphinView+0x130`) and, when the role is not in it, returns
+`defaultSortOrderForRole(role)`. That function is a static set built once from the
+sixteen pointers at **0x2f3960** (up to `PTR_FUN_002f39e0`) and answers "is this role
+in it". The sixteen strings, read out of the library:
+
+    modificationtime  creationtime  accesstime  deletiontime  imageDateTime
+    releaseYear       size          width       height        pageCount
+    wordCount         lineCount     rating      duration      bitrate
+    (the sixteenth pointer lands inside the string "Color Space" and reads "ace",
+     so it can never match a role)
+
+A member of that set is held **descending**; everything outside it — `name`, `type`,
+`permissions`, `owner`, `group`, `path`, `tags`, `comment` — is **ascending**. So:
+
+| key in this build | role | first direction in the original | in the build now |
+| --- | --- | --- | --- |
+| Name | `name` | ascending (A → Z) | ascending |
+| Size | `size` | **descending** (biggest first) | descending |
+| Type | `type` | ascending | ascending |
+| Modified | `modificationtime` | **descending** (newest first) | descending |
+
+**A direction chosen by hand stays with that key.** `slotSortOrderChanged`
+@0x292640 ticks the two actions and calls `DolphinView::setPreferredSortOrder(role,
+order)`, i.e. it writes the order into that per-role hash — for the current role
+only. Switching to another key and back therefore comes back to the direction the
+person last gave it, and a key that was never touched falls back to the table above.
+
+**Folders First and the two fresh-folder defaults.** `updateSortFoldersFirst`
+@0x27d7c0 stores the switch in the *current folder's* view properties
+(`ViewProperties::setSortFoldersFirst`) and calls
+`KFileItemModel::setSortDirectoriesFirst`. A folder that has never been given one
+takes the `ViewProperties` constructor's defaults, and the constructor @0x29fdd0
+writes the three bytes `0, 1, 0` at `this+8, +9, +10`: **sort order ascending, folders
+first on, hidden files last off**. That is where "folders first is on by default"
+comes from — the earlier sheet only guessed it.
+
+**What the three name comparisons really do.** `loadSortingSettings` @0x194e20
+reads `GeneralSettings+0xac` (`SortingChoice`) and sets two things: a natural-sort
+flag at `this+0x60` and the `QCollator`'s case sensitivity at `this+0x58`.
+
+| SortingChoice | natural compare | collator case |
+| --- | --- | --- |
+| 0 `NaturalSorting` (default) | **on** | insensitive |
+| 1 `CaseInsensitiveSorting` | off | insensitive |
+| 2 `CaseSensitiveSorting` | off | sensitive |
+
+So *Natural* is not "the byte order with digits handled": it is natural order **with
+case folded**, which is what `state::NameSort::Natural` does through
+`fsutil::name_cmp`. The two alphabetical modes differ from each other only in that
+one collator flag; this build compares case-folded strings and exact strings
+respectively, because a `QCollator` is ICU-backed and the rebuild does not ship ICU —
+that difference is recorded as an estimate, and only for accented letters.
+
+**What changed in the build** (`app/src/state.rs`, `app/src/main.rs`):
+
+* `SortKey::descends_first()` carries the table above, so `Pane::choose_sort` opens
+  Size and Modified biggest/newest first and Name and Type A-first;
+* `Pane::preferred_desc` is the per-key memory (`[Option<bool>; 4]`), written by
+  `Pane::set_sort_dir` and read by `choose_sort` before the default — the same order
+  of preference as `preferredSortOrder` → `defaultSortOrderForRole`;
+* choosing the key that is already chosen no longer flips anything (`choose_sort`
+  returns early), and the popup now has the original's *Ascending* / *Descending*
+  pair under the key list, then the *Folders First* switch with the original's own
+  wording (it used to read "Show folders first");
+* `--selftest` gained three checks: the per-key first direction, "a second click on
+  the chosen key keeps the order", and "a direction chosen for one key is still
+  there when you come back to it".
+
+Pictures of the new popup: `app/shots/sort/menu.png` and `sort/descending.png`.
+
+
 
 
 
@@ -1456,6 +1598,58 @@ guard that no row overflows.
 
 Measured after the change (`app/shots/wall400-fixed.png`, same folder and
 window): row 1 = 398–400 px tall, row 2 = 400 px tall.
+
+## The picture wall holds pictures only (asked for by the person)
+
+The person's words: *"in the \"Pictures - thumbnails of this folder\" view only
+pictures should be displayed."* That view is this build's own picture wall
+(`app/src/gallery.rs`, `ui_pictures`), reached from the picture button in the
+toolbar or **F4**; the original Dolphin has three view modes only — Icons, Compact
+and Details. `DolphinView::setViewMode` (`@0x2710c0`) does nothing but store the
+mode at `this+0x58` and hand it to `ViewProperties`; the mode names in
+`ViewModeController` are exactly those three, and the only mention of browsing
+pictures is the icons view note, "handy to browse through pictures when the
+Preview option is enabled", in the documentation string table of
+`/usr/lib/libdolphinprivate.so.6`. There is therefore no original listing rule to
+copy here, and the wall's contents are decided by the person's request.
+
+**What the wall does now** (`app/src/state.rs`, `Pane::shown_indices`;
+`app/src/gallery.rs`, `ui_pictures`):
+
+* the wall draws `shown_indices()` filtered to `!is_dir && is_image()`: a
+  sub-folder or a document is not drawn at all. Before, the filter was
+  `e.is_dir || e.is_image()`, so a folder sat on the wall as a square tile and a
+  wall of letter tiles was possible in a folder of documents;
+* a picture is recognised by its file name's extension, the same list the
+  previews, the viewer and the slideshow already use: `png jpg jpeg gif bmp webp
+  tif tiff svg ico heic avif xpm ppm` (`app/src/fsutil.rs`, `kind_for`). A symlink
+  whose name ends in one of those is a picture too; a symlink to a folder is a
+  folder and stays off the wall;
+* hidden pictures still obey the *Show hidden files* switch, and the find bar
+  still narrows the wall to the pictures whose names match, because the wall
+  starts from `visible()` and then keeps the pictures;
+* a folder with no pictures shows *"No pictures in this folder"* and *"The wall
+  shows pictures only; the list views show every file."* The path bar above the
+  wall is how the person steps into a sub-folder now that folders have no tile.
+
+**The selection follows the wall.** Filtering the drawing was not enough: Ctrl+A,
+Shift+click and the arrow keys walked the whole folder listing by index, so a
+document hidden behind the wall could still be marked — and Delete would then
+remove a file the person could not see. `Pane::shown_indices()` is now the one
+list every one of those paths uses (`select_all`, `select_range`, `App::
+move_cursor`), and `Pane::set_pictures(true)` drops any mark the wall does not
+show, which is where the toolbar button, the app-menu row, the settings panel's
+*Pictures (Gallery)* switch and the **F4** request all arrive.
+
+`--selftest` checks it with a folder holding two pictures, a text file, a video
+file and a sub-folder: *"the picture wall shows pictures and nothing else"*
+requires exactly the two pictures on the wall, Ctrl+A to mark exactly two items, a
+Shift+click from a document to mark the one picture clicked, and a folder marked
+before the wall came on to be unmarked after it. Window pictures:
+`app/shots/wall-only.png` (13 pictures, the 12-photo roll plus the prompt sample,
+with `notes.txt`, `budget.csv` and `Subfolder` in the same folder but not on the
+wall) and `app/shots/wall-none.png` (a folder with one document: the empty-wall
+message).
 
 ## The prompt area folds away (asked for by the person)
 
