@@ -1,39 +1,48 @@
 DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with a few tools of its own.
 
-## What's new in 0.1.3
+## What's new in 0.1.4
 
-* **Open With**, as the original has it: the first row of a file's right-click menu
-  opens it in the program your desktop already prefers, *Open With ▸* lists the
-  other programs that claim that kind of file, and **Other Application…** opens a
-  chooser with every installed program — the ones for that type first, the rest by
-  name, a text field to narrow them. Ticking *Remember this choice for all files of
-  type…* writes the preference into your desktop's own `mimeapps.list`, so the first
-  row changes here and everywhere else.
-* **Files whose name says nothing are read**: a `Makefile`, a `Cargo.lock`, a plain
-  text file with an unusual extension now offers editors instead of nothing.
-* **Recently Closed Tabs** under *File*, with **Ctrl+Shift+T** to bring the last one
-  back where it was; the list keeps the ten most recent, newest first.
-* **The picture wall holds pictures only** — sub-folders and documents stay in the
-  icon and list views, and marking, Ctrl+A, Shift+click and the arrow keys follow the
-  pictures on screen, so a hidden file cannot be caught by a Delete.
-* **The picture details panel starts closed**, and the recipe is read behind it;
-  **P** or the info button opens it.
-* **Deleting asks nothing first**: mark and press Delete, with an eight-second **Undo**
-  in the toast and **Ctrl+Z** afterwards. Dolphin's three confirmation switches are in
-  the app menu under *Deleting* if you want the questions back.
-* Sort, view, zoom, colours, picture switches and the window's size and place are
-  saved as you choose them; a settings file from an older version still opens.
-
-* **Recent Files and Recent Locations** sit under the shortcuts in the navigation
-  panel: the documents this computer last used, read from your desktop's own
-  recently-used list, and the folders this window has been through.
-* **The toolbar now carries two words, Find and Menu.** The Open button (and the
-  arrow that listed other places) is gone — opening is a double-click, or Open and
-  Open With on the right-click menu — and the app menu scrolls when the window is
-  short instead of running off the bottom of the screen.
-* **A start is always one view**: split view is F3 for the window you are in and is
-  no longer brought back on the next launch.
-* **About** names the release this build came from — 0.1.3.
+* **Find in Files** (**Ctrl+Shift+F**): the find bar only ever filtered names; this
+  window reads inside them. Three modes worded the way Dolphin words them — *File
+  names*, *File names and contents*, *File contents* — with a *Case sensitive*
+  switch and an *Include binary files* switch, one row per file carrying the line
+  the phrase was written on, and **Show** / **Open** beside every row. It never
+  follows links, leaves hidden folders out, skips anything over 4 MB, and its
+  summary line says exactly what it passed over.
+* **Manage Disk Space Usage**, under *Tools*: adds up everything below the folder on
+  show and lists what takes the room, largest first, with a *Free Up Disk Space*
+  shortlist of the biggest files and a **Show** button for each. The original hands
+  this question to Filelight and offers to install it; this window answers it
+  itself, so nothing has to be installed. Hidden files count, a symbolic link is
+  never followed, and a folder you cannot read is reported instead of being quietly
+  left out.
+* **Compress…** turns the marked items — or the folder on show — into one ZIP in the
+  folder they came from, with the name filled in and editable first: `photos.zip`
+  for one folder, `Archive.zip` for several items, and `photos (1).zip` rather than
+  overwriting anything. The size of what is marked is added up **off the drawing
+  thread**, so a big folder shows *adding up…* while the window keeps drawing.
+* **Extract…** unpacks a ZIP or a tar archive into a folder named after the file
+  (or into this folder, if you untick *Into a folder of its own*) and takes you
+  there afterwards. Both tools use the `zip`, `unzip` and `tar` programs your
+  computer already has, and say so plainly when one is missing.
+* **The Network group** in the sidebar, where the original's *Remote* heading sits:
+  it lists the network folders this computer already has — SMB, NFS and SSH shares
+  in the mount table, and shares opened through the desktop's own file choosers,
+  each named after its share. Nothing is mounted from here; with none mounted it
+  says *No shared folders found*, and the heading folds away.
+* **Recent Files is ordered by visit, not by date**: a document written last year
+  and opened this morning now sits at the top, one row per path, and files that
+  have since been moved or deleted are left out rather than offered as dead rows.
+  The panel scrolls now that it carries four groups, so the last one is no longer
+  pushed under the bottom edge.
+* **Previews on and off each keep their own zoom size**, as the original does: zoom
+  the wall with previews on, switch them off, and the size you chose is waiting
+  when you switch them back. The picture-strip slider stays inside its one-row
+  strip, and the details rows keep the original's 20 px side padding.
+* **About** names the release this build came from — 0.1.4.
+* 111 built-in checks (`dolphincraft --selftest`), all passing — the new ones cover
+  the disk-usage walk, the compress and extract windows, the text search and what it
+  skips, the recent-file order and the network parser.
 
 **Linux** — `install.sh` (no root), or the tarball for your architecture.
 ```sh
@@ -41,12 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 ```
 It installs `dolphincraft` to `~/.local/bin`, writes the menu entry, and refreshes the launcher.
 
-**Archives** — `dolphincraft-0.1.3-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
+**Archives** — `dolphincraft-0.1.4-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
 `.zip`, each with a `.sha256`. Unpack one and run the binary:
 
 ```sh
-tar xzf dolphincraft-0.1.3-x86_64-linux.tar.gz
-./dolphincraft-0.1.3-x86_64-linux/dolphincraft
+tar xzf dolphincraft-0.1.4-x86_64-linux.tar.gz
+./dolphincraft-0.1.4-x86_64-linux/dolphincraft
 ```
 
 The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,

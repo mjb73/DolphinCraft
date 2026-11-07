@@ -7,7 +7,7 @@
 pub const APP_NAME: &str = "DolphinCraft";
 
 /// The release this build came from. `Cargo.toml`'s `version` is the number on
-/// the GitHub release tag (`v0.1.3`), so About names the download the person
+/// the GitHub release tag (`v0.1.4`), so About names the download the person
 /// actually has — no network call, no guessing from a commit hash.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
