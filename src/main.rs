@@ -63,6 +63,16 @@ pub(crate) fn remember_closed_tab(list: &mut Vec<PathBuf>, path: PathBuf, cap: u
     }
 }
 
+/// Put a folder at the newest end of *Recent Locations*. A folder already in the
+/// list moves up instead of appearing twice, and the list stops at `cap`, so the
+/// group always shows the most recent walks first. Split out from the window so
+/// the rule can be checked without one.
+pub(crate) fn note_location(list: &mut Vec<PathBuf>, path: &Path, cap: usize) {
+    list.retain(|p| p != path);
+    list.insert(0, path.to_path_buf());
+    list.truncate(cap);
+}
+
 pub struct Tab {
     pub panes: Vec<Pane>,
     pub active: usize,
@@ -1314,6 +1324,13 @@ impl App {
                     .inner_margin(Margin::symmetric(6, 8)),
             )
             .show(ctx, |ui| {
+                // The panel now carries four groups plus whatever the person has
+                // pinned, so it scrolls when the window is short instead of
+                // pushing the last group off the bottom edge (the original's
+                // places panel scrolls for the same reason).
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 let (fold, add) = shortcuts_header(ui, expanded, self.config.bookmarks.len());
                 if fold {
@@ -1458,9 +1475,43 @@ impl App {
                     }
                 }
 
+                // The original's *Remote* group, above Recent and Devices: the
+                // network folders this desktop already has. It carries what is
+                // mounted rather than a way to mount something, so the row is a
+                // jump, not a connection dialog.
+                let network = fsutil::network_places();
+                ui.add_space(8.0);
+                if recent_group_header(
+                    ui,
+                    "Network",
+                    self.config.network_expanded,
+                    network.len(),
+                ) {
+                    self.config.network_expanded = !self.config.network_expanded;
+                    self.config_dirty = true;
+                }
+                if self.config.network_expanded {
+                if network.is_empty() {
+                    // The original's own sentence for a Remote group with
+                    // nothing in it (0x1bf952 in libdolphinprivate.so.6).
+                    quiet_row(ui, "No shared folders found");
+                } else {
+                    for (label, path) in network.iter() {
+                        let selected = !is_trash && current == *path;
+                        let resp = place_row(ui, label, theme::PlaceIcon::Network, selected)
+                            .on_hover_text(path.display().to_string());
+                        if resp.clicked() {
+                            navigate = Some(path.clone());
+                        }
+                    }
+                }
+                }
+
                 // Added feature: the two groups the original's navigation panel
-                // shows under Places — *Recent Files* (0x2bf937's "No recently
-                // used items" is the original's own wording for the empty case)
+                // shows under Places — *Recent Files* (0x1bf937's "No recently
+                // used items" is the original's own wording for the empty case,
+                // next to 0x1bf92a's worker name `recentlyused` in
+                // libdolphinprivate.so.6)
                 // and *Recent Locations*. Dolphin leaves both empty until an
                 // application publishes places into them; here they carry the
                 // desktop's recently used files and the folders this window has
@@ -1617,6 +1668,10 @@ impl App {
                 if tool_row(ui, "Quick Look", "Preview the selected file (Space)", Some("Space")) {
                     open_quick = true;
                 }
+                // A little air under the last row, so a section that only just
+                // fits is not cut in half by the panel's own bottom edge.
+                ui.add_space(10.0);
+                    });
             });
 
         if let Some(p) = navigate {
@@ -2853,9 +2908,7 @@ impl App {
             return;
         }
         let mut list = self.config.recent_locations.clone();
-        list.retain(|p| p != path);
-        list.insert(0, path.to_path_buf());
-        list.truncate(RECENT_LOCATIONS_MAX);
+        note_location(&mut list, path, RECENT_LOCATIONS_MAX);
         if list != self.config.recent_locations {
             self.config.recent_locations = list;
             self.config_dirty = true;

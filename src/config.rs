@@ -130,6 +130,10 @@ pub struct Config {
     pub recent_files_expanded: bool,
     #[serde(default = "yes")]
     pub recent_locations_expanded: bool,
+    /// The *Network* group folds the same way. It is open on a fresh profile
+    /// because the original shows its Remote group from the start.
+    #[serde(default = "yes")]
+    pub network_expanded: bool,
     /// How many rows *Recent Files* asks the list for. The panel is narrow and
     /// a group taller than the window is not a shortcut, so it stops at eight.
     #[serde(default = "recent_rows")]
@@ -275,6 +279,7 @@ impl Default for Config {
             shortcuts_expanded: true,
             recent_files_expanded: true,
             recent_locations_expanded: true,
+            network_expanded: true,
             recent_files_shown: 8,
             recent_locations: Vec::new(),
 

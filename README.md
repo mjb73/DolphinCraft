@@ -92,6 +92,18 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   `mimeapps.list`, so the first row changes here and in every other program. A
   file whose name says nothing (a `Makefile`, a `Cargo.lock`) is read, so editors
   are offered for it instead of nothing.
+- **Network group** in the sidebar, where the original's *Remote* group is: it
+  lists the network folders this computer already has — SMB, NFS and SSH shares in
+  the mount table, and shares opened through the desktop's own file choosers —
+  each named after its share. Nothing is mounted from here; with none mounted it
+  says *No shared folders found*, and the heading folds away.
+- **Two recent groups in the sidebar**, under your shortcuts: **Recent Files**
+  lists what you have actually opened lately, newest visit first, read from the
+  desktop's own recently-used list — a row opens the file, its menu can show it
+  in its folder or copy its path, and files that have since been moved or deleted
+  are left out rather than offered as dead rows. **Recent Locations** remembers
+  the six folders you have walked into this window, newest first, so the way back
+  to a deep folder is one click; either heading folds away when you don't need it.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
   properties, all with the shortcuts you already know from Dolphin.
 - **Deleting asks nothing first** (as you asked): mark the pictures — or any

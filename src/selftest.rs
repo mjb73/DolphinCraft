@@ -3052,6 +3052,222 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // ---- the navigation panel's recent groups ----------------------------
+    // *Recent Files* is read from the desktop's own `recently-used.xbel`, the
+    // same list KIO's `recentlyused:` worker (0x1bf92a in libdolphinprivate)
+    // sorts by: last visited wins, folders and things that are gone stay out.
+    r.check(
+        "recent files come newest visit first, without folders or files that have gone",
+        (|| {
+            let dir = base.join("recent");
+            for name in ["old.txt", "new.txt", "in-folder.txt"] {
+                write(&dir.join(name), b"x")?;
+            }
+            fs::create_dir_all(dir.join("a-folder")).map_err(|e| e.to_string())?;
+            let xbel = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<xbel version="1.0">
+ <bookmark href="file://{}/old.txt" added="2020-01-01T00:00:00Z" modified="2020-01-01T00:00:00Z" visited="2020-01-01T00:00:00Z"/>
+ <bookmark href="file://{}/new.txt" added="2021-01-01T00:00:00Z" modified="2021-01-01T00:00:00Z" visited="2026-06-01T09:00:00Z"/>
+ <bookmark href="file://{}/gone.txt" added="2026-01-01T00:00:00Z" visited="2026-07-01T09:00:00Z"/>
+ <bookmark href="file://{}/a-folder" visited="2026-08-01T09:00:00Z"/>
+ <bookmark href="file://{}/in-folder.txt" visited="2026-05-01T09:00:00Z"/>
+ <bookmark href="file://{}/old.txt" visited="2026-09-01T09:00:00Z"/>
+ <bookmark href="smb://server/share/doc.txt" visited="2026-10-01T09:00:00Z"/>
+</xbel>"#,
+                dir.display(),
+                dir.display(),
+                dir.display(),
+                dir.display(),
+                dir.display(),
+                dir.display(),
+            );
+            let list = fsutil::parse_recent_xbel(&xbel, 8);
+            let names: Vec<String> = list.iter().map(|e| e.name.clone()).collect();
+            // The second bookmark for old.txt is the latest visit, so it leads;
+            // the duplicate does not give it two rows.
+            if names != vec!["old.txt", "new.txt", "in-folder.txt"] {
+                return Err(format!("rows came back as {names:?}"));
+            }
+            if list.iter().any(|e| e.is_dir) {
+                return Err("a folder was listed as a recent file".into());
+            }
+            if list.iter().any(|e| e.name == "gone.txt") {
+                return Err("a file that no longer exists is still offered".into());
+            }
+            // The row keeps the file's own date; only the order uses the visit.
+            let old = list.iter().find(|e| e.name == "old.txt").unwrap();
+            let stamp = old
+                .modified
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if stamp > 1_800_000_000 {
+                return Err("the row took the visit stamp as the file's own date".into());
+            }
+            let short = fsutil::parse_recent_xbel(&xbel, 2);
+            if short.len() != 2 {
+                return Err(format!("asking for 2 rows gave {}", short.len()));
+            }
+            Ok(format!("{} rows, newest visit first", names.len()))
+        })(),
+    );
+    r.check(
+        "a folder walked into is remembered once, newest first, and the list stops at six",
+        (|| {
+            let mut list: Vec<PathBuf> = Vec::new();
+            for n in 0..8 {
+                crate::note_location(
+                    &mut list,
+                    Path::new(&format!("/tmp/place{n}")),
+                    crate::RECENT_LOCATIONS_MAX,
+                );
+            }
+            if list.len() != crate::RECENT_LOCATIONS_MAX {
+                return Err(format!("the list kept {} entries", list.len()));
+            }
+            if list.first().map(|p| p.ends_with("place7")) != Some(true) {
+                return Err(format!("the newest place is not first: {:?}", list.first()));
+            }
+            crate::note_location(&mut list, Path::new("/tmp/place3"), crate::RECENT_LOCATIONS_MAX);
+            let seen = list.iter().filter(|p| p.ends_with("place3")).count();
+            if seen != 1 {
+                return Err(format!("place3 appears {seen} times"));
+            }
+            if list.first().map(|p| p.ends_with("place3")) != Some(true) {
+                return Err("the place did not move back to the top".into());
+            }
+            Ok(format!(
+                "{} kept, newest first, no duplicate",
+                crate::RECENT_LOCATIONS_MAX
+            ))
+        })(),
+    );
+    // The heading row is a real button, not a label: one click folds the group
+    // and the same click opens it again, which is how the original's places
+    // panel behaves and how the counts beside the words get out of the way.
+    r.check(
+        "a recent group folds with one click and opens with the next",
+        (|| {
+            use egui::{Context, Event, PointerButton, Pos2, RawInput, Rect, Vec2};
+            let ctx = Context::default();
+            let mut folds = 0usize;
+            let mut clicks = 0usize;
+            let mut header_rect = Rect::NOTHING;
+            let mut expanded = true;
+            let mut body_rows = 0usize;
+            for frame in 0..4 {
+                let mut events: Vec<Event> = Vec::new();
+                if frame == 1 {
+                    events.push(Event::PointerMoved(header_rect.center()));
+                }
+                if frame == 2 {
+                    clicks += 1;
+                    events.push(Event::PointerButton {
+                        pos: header_rect.center(),
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Default::default(),
+                    });
+                    events.push(Event::PointerButton {
+                        pos: header_rect.center(),
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Default::default(),
+                    });
+                }
+                let mut folded_now = false;
+                let _ = ctx.run(
+                    RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(220.0, 300.0))),
+                        time: Some(frame as f64 * 0.1),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE)
+                            .show(ctx, |ui| {
+                                let top = ui.cursor().min;
+                                header_rect = Rect::from_min_size(
+                                    top,
+                                    Vec2::new(ui.available_width(), 22.0),
+                                );
+                                if crate::recent_group_header(ui, "Recent Files", expanded, 3) {
+                                    folded_now = true;
+                                }
+                                if expanded {
+                                    for _ in 0..3 {
+                                        ui.label("row");
+                                        body_rows += 1;
+                                    }
+                                }
+                            });
+                    },
+                );
+                if folded_now {
+                    folds += 1;
+                    expanded = false;
+                }
+            }
+            if folds != 1 {
+                return Err(format!("one click toggled the group {folds} time(s)"));
+            }
+            if clicks != 1 {
+                return Err(format!("the harness sent {clicks} clicks"));
+            }
+            if body_rows == 0 {
+                return Err("the rows were never drawn before the fold".into());
+            }
+            Ok(format!("folded on the click after {body_rows} row(s) drawn"))
+        })(),
+    );
+
+    // ---- the Remote group reads what is actually mounted -----------------
+    r.check(
+        "the Network group lists mounted shares and nothing else",
+        (|| {
+            let mounts = "\
+/dev/nvme0n1p2 / ext4 rw,relatime 0 0
+tmpfs /run tmpfs rw,nosuid 0 0
+//router/media /mnt/media cifs rw,vers=3.1.1 0 0
+nas:/export/photos /mnt/photos nfs4 rw,addr=10.0.0.4 0 0
+me@host:/data /home/me/data fuse.sshfs rw 0 0
+/dev/sdb1 /media/me/My\\040Drive vfat rw 0 0
+";
+            let list = fsutil::parse_network_mounts(mounts);
+            let names: Vec<String> = list.iter().map(|(l, _)| l.clone()).collect();
+            if names != vec!["media", "photos", "data"] {
+                return Err(format!("rows came back as {names:?}"));
+            }
+            if list.iter().any(|(_, p)| p.to_string_lossy().contains("My Drive")) {
+                return Err("a local drive was listed as a share".into());
+            }
+            // A share whose mount point has escaped spaces is unescaped, and a
+            // SMB mount is named after the share rather than the server.
+            let spaced = fsutil::parse_network_mounts(
+                "//box/Team\\040Share /mnt/team\\040share cifs rw 0 0\n",
+            );
+            if spaced.len() != 1 || spaced[0].1 != PathBuf::from("/mnt/team share") {
+                return Err(format!("escaped mount point read as {:?}", spaced));
+            }
+            if spaced[0].0 != "Team Share" {
+                return Err(format!("the share was named {:?}", spaced[0].0));
+            }
+            // The desktop's own mount folder names a share with its parameters.
+            if fsutil::gvfs_label("smb-share:server=router,share=media") != "media" {
+                return Err("an SMB mount was not named after its share".into());
+            }
+            if fsutil::gvfs_label("sftp:host=nas,user=me") != "nas (sftp)" {
+                return Err(format!(
+                    "an SFTP mount was named {:?}",
+                    fsutil::gvfs_label("sftp:host=nas,user=me")
+                ));
+            }
+            Ok(format!("{} share(s), named after the share", names.len()))
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

@@ -422,6 +422,132 @@ pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// The filesystem types that mean "this folder came off the network". The list
+/// is the one the Linux mount table uses for SMB, NFS, SSH and the FUSE
+/// bridges to cloud and WebDAV shares.
+const NETWORK_FS: &[&str] = &[
+    "cifs", "smbfs", "nfs", "nfs4", "afs", "9p", "davfs", "davfs2", "fuse.sshfs",
+    "fuse.rclone", "fuse.s3fs", "fuse.davfs2",
+];
+
+/// Added feature, filling the original's *Remote* group: the network folders this
+/// desktop already has. Nothing is mounted here — the list is read from what is
+/// already mounted, so a share opened in another program appears, and a share
+/// that is not mounted cannot be invented.
+///
+/// Two sources, because Linux desktops keep them in two places: `/proc/mounts`
+/// for anything mounted by the system (SMB, NFS, sshfs) and the GIO mount folder
+/// `/run/user/<uid>/gvfs` for shares opened through the desktop's own file
+/// choosers. The second is a folder of folders, each named after the share.
+pub fn network_places() -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    if let Ok(text) = fs::read_to_string("/proc/mounts") {
+        for (label, path) in parse_network_mounts(&text) {
+            if path.is_dir() {
+                out.push((label, path));
+            }
+        }
+    }
+    for (label, path) in gvfs_places(&gvfs_root()) {
+        out.push((label, path));
+    }
+    out.dedup_by(|a, b| a.1 == b.1);
+    out
+}
+
+/// The `/proc/mounts` half, split out so the rule can be checked on sample text.
+/// A line is `source mount-point type options 0 0`; the mount point is escaped
+/// (`\040` for a space) and is unescaped here.
+pub fn parse_network_mounts(text: &str) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(source) = parts.next() else { continue };
+        let Some(mount) = parts.next() else { continue };
+        let Some(kind) = parts.next() else { continue };
+        if !NETWORK_FS.contains(&kind) {
+            continue;
+        }
+        let mount = unescape_mount(mount);
+        // The source is escaped exactly the same way: `//box/Team\040Share`.
+        let source = unescape_mount(source);
+        let label = network_label(&source, &mount);
+        out.push((label, PathBuf::from(mount)));
+    }
+    out
+}
+
+/// `/run/user/1000/gvfs/sftp:host=nas,user=me` -> the folders under it, labelled
+/// the way a person would name the share.
+pub fn gvfs_places(root: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            (gvfs_label(&name), e.path())
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    out
+}
+
+fn gvfs_root() -> PathBuf {
+    let uid = unsafe { libc::getuid() };
+    PathBuf::from(format!("/run/user/{uid}/gvfs"))
+}
+
+/// A GIO mount's folder name carries its parameters: `sftp:host=nas,user=me`,
+/// `smb-share:server=router,share=media`. The share (or the host when there is
+/// no share) is what the person calls it; the protocol goes in brackets.
+pub fn gvfs_label(folder: &str) -> String {
+    let (proto, rest) = match folder.split_once(':') {
+        Some((p, r)) => (p, r),
+        None => (folder, ""),
+    };
+    let param = |key: &str| {
+        rest.split(',')
+            .filter_map(|kv| kv.split_once('='))
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| v.to_string())
+    };
+    let name = param("share")
+        .or_else(|| param("host"))
+        .unwrap_or_else(|| proto.to_string());
+    match proto {
+        "smb-share" => name,
+        "sftp" | "ftp" | "dav" | "davs" => format!("{name} ({proto})"),
+        _ => name,
+    }
+}
+
+/// The name on the row for a mounted share: the share for a CIFS mount
+/// (`//router/media` -> `media`), otherwise the last part of the mount point.
+fn network_label(source: &str, mount: &str) -> String {
+    let trimmed = source.trim_end_matches('/');
+    let share = trimmed.rsplit('/').next().unwrap_or("");
+    if source.starts_with("//") && !share.is_empty() && share != trimmed {
+        return share.to_string();
+    }
+    let last = mount.rsplit('/').find(|s| !s.is_empty()).unwrap_or(mount);
+    if last.is_empty() {
+        source.to_string()
+    } else {
+        last.to_string()
+    }
+}
+
+/// `/proc/mounts` escapes space, tab, newline and backslash by number.
+fn unescape_mount(s: &str) -> String {
+    s.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+}
+
 /// Strip `.` and tidy `..` out of a path without touching the filesystem.
 ///
 /// The original shows the folder it is in, not the wording that led there:
@@ -883,6 +1009,13 @@ pub fn parse_recent_xbel(text: &str, limit: usize) -> Vec<Entry> {
             .and_then(|v| xbel_time(&v))
             .unwrap_or(UNIX_EPOCH);
         if !seen.insert(path.clone()) {
+            // A second bookmark for the same file is not a second row; the
+            // later visit is the one that says when it was last used.
+            if let Some(slot) = found.iter_mut().find(|(_, p)| *p == path) {
+                if when > slot.0 {
+                    slot.0 = when;
+                }
+            }
             continue;
         }
         found.push((when, path));
@@ -890,18 +1023,25 @@ pub fn parse_recent_xbel(text: &str, limit: usize) -> Vec<Entry> {
     // A bookmark for a folder is still useful — it is a place the person was
     // working in — but the panel's Recent Files group is about files, so a
     // folder stays out of it and reaches the panel as a Recent Location.
-    let mut out: Vec<Entry> = found
+    //
+    // The order is the bookmark's own visit time, not the file's modification
+    // time: a document written last year and opened this morning is the most
+    // recent thing to the person, and this is the same stamp the original's
+    // `recentlyused:` worker sorts by. The modification time shown in the row's
+    // tooltip still comes from the file itself.
+    found.retain(|(_, p)| p.is_file());
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.truncate(limit);
+    found
         .into_iter()
-        .filter(|(_, p)| p.is_file())
         .map(|(when, p)| {
             let mut e = Entry::from_path(&p);
+            // A file whose own date cannot be read falls back to the bookmark's
+            // stamp rather than showing nothing.
             e.modified = e.modified.or(Some(when));
             e
         })
-        .collect();
-    out.sort_by(|a, b| b.modified.cmp(&a.modified));
-    out.truncate(limit);
-    out
+        .collect()
 }
 
 /// One attribute out of an XML tag, `name="value"`. The list is small and

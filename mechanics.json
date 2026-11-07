@@ -1603,6 +1603,122 @@
    "group": "view",
    "value": "Move %2 to the Trash / Permanently Delete %2 / Copy %2 to the Clipboard / Cut %2 to the Clipboard / Duplicate %2 / Rename %2",
    "source": "FUN_001c81f0 @0x1c81f0; strings 0x22e3e6, 0x22e3b1"
+  },
+  {
+   "name": "recent group heading, original",
+   "group": "recent",
+   "value": "Recent",
+   "source": "sidebar capture rea/orig-default.png: Places, Remote, Recent, Devices"
+  },
+  {
+   "name": "recent row, original",
+   "group": "recent",
+   "value": "Recent Files",
+   "source": "that capture's Recent group, top row (document-with-clock icon)"
+  },
+  {
+   "name": "recent row, original (second)",
+   "group": "recent",
+   "value": "Recent Locations",
+   "source": "same capture, second row (folder-with-clock icon, drawn cut off as 'Recent Locatio...')"
+  },
+  {
+   "name": "empty recent group",
+   "group": "recent",
+   "value": "No recently used items",
+   "source": "'No recently used items' @0x1bf937 in libdolphinprivate.so.6, beside 0x1bf92a 'recentlyused'"
+  },
+  {
+   "name": "where recent files come from",
+   "group": "recent",
+   "value": "~/.local/share/recently-used.xbel",
+   "source": "the freedesktop list KRecentDocument maintains and the kio recentlyused: worker reads"
+  },
+  {
+   "name": "recent files order",
+   "group": "recent",
+   "value": "visited stamp, newest first",
+   "source": "the xbel's own visited attribute, the stamp the recentlyused: worker sorts by; not the file's modification date"
+  },
+  {
+   "name": "recent files shown",
+   "group": "recent",
+   "value": 8,
+   "unit": "rows",
+   "source": "this build's own limit (the original's row opens a full scrolling view); recent_rows() in src/config.rs"
+  },
+  {
+   "name": "recent locations kept",
+   "group": "recent",
+   "value": 6,
+   "unit": "folders",
+   "source": "this build's own limit; RECENT_LOCATIONS_MAX in src/main.rs"
+  },
+  {
+   "name": "folders in recent files",
+   "group": "recent",
+   "value": false,
+   "source": "the list holds files only; a folder bookmark belongs to Recent Locations"
+  },
+  {
+   "name": "recent heading folds",
+   "group": "recent",
+   "value": true,
+   "source": "this build's arrangement: one click folds a group, the count stays on the heading"
+  },
+  {
+   "name": "recent groups drawn",
+   "group": "recent",
+   "value": "two folding headings (original: one Recent heading with two rows)",
+   "source": "this build's arrangement, see MECHANICS.md 'The places panel's recent groups'"
+  },
+  {
+   "name": "toolbar open button",
+   "group": "toolbar",
+   "value": "none - double-click, Enter, Open / Open With",
+   "source": "this build: the Open in button and its four-row menu were removed as duplicates"
+  },
+  {
+   "name": "app menu height",
+   "group": "toolbar",
+   "value": "capped to the window, scrolls",
+   "source": "this build: the last rows fell below an unmaximised window's edge"
+  },
+  {
+   "name": "remote group heading, original",
+   "group": "network",
+   "value": "Remote",
+   "source": "sidebar capture rea/orig-default.png, between Places and Recent"
+  },
+  {
+   "name": "network row, original",
+   "group": "network",
+   "value": "Network",
+   "source": "that capture's Remote group; the row opens the original's network:/ worker"
+  },
+  {
+   "name": "empty network group",
+   "group": "network",
+   "value": "No shared folders found",
+   "source": "'No shared folders found' @0x1bf952 in libdolphinprivate.so.6, beside 0x1bf96a 'network'"
+  },
+  {
+   "name": "where network folders come from",
+   "group": "network",
+   "value": "/proc/mounts network types + /run/user/<uid>/gvfs",
+   "source": "this build: the desktop's own mounts; the original browses network:/ through KIO instead"
+  },
+  {
+   "name": "network filesystem types",
+   "group": "network",
+   "value": "cifs, smbfs, nfs, nfs4, afs, 9p, davfs, davfs2, fuse.sshfs, fuse.rclone, fuse.s3fs, fuse.davfs2",
+   "source": "this build's list, from the Linux mount table"
+  },
+  {
+   "name": "network row label",
+   "group": "network",
+   "value": "the share for an SMB mount, else the last part of the mount point",
+   "source": "this build; e.g. //router/media shows as media"
   }
  ]
 }

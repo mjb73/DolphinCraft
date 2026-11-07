@@ -2078,3 +2078,140 @@ three names / a blue *Move to Trash* button.
 before moving to the Trash, but does before a permanent delete and before
 emptying the Trash"* and *"the delete question is worded the way the original
 words it"*.
+
+## The places panel's recent groups, and the shorter toolbar (this pass)
+
+### What the original has
+
+Two independent pieces of evidence, both looked at rather than assumed.
+
+**The strings.** `libdolphinprivate.so.6` holds one run of empty-state sentences,
+which is where the group's own wording was found. Offsets are file offsets,
+verified by a byte search of the installed library:
+
+| string | offset |
+| --- | --- |
+| `recentlyused` (KIO worker name) | 0x1bf92a |
+| `No recently used items` | 0x1bf937 |
+| `Trash is empty` | 0x1bf8f9 |
+| `Folder is empty` | 0x1bf9de |
+| `No items matching the search` | 0x1bf8dc |
+
+The empty case has a sentence of its own, written in the same style as the
+Trash's and an empty folder's — so *Recent Files* is a real place in the original,
+not something invented here. This build shows that sentence word for word when
+the group has nothing in it.
+
+**The sidebar.** A capture of the installed program
+(`rea/orig-default.png`, 1600×1000) shows the panel as: **Places** (Home,
+Wastebin), **Remote** (Network), **Recent** (a document-with-clock row reading
+*Recent Files*, and a folder-with-clock row reading *Recent Locatio…* — cut off by
+the panel's width), then **Devices** (each with a free-space bar). So the original
+has *one* heading, *Recent*, holding two rows, and each row is a place that opens
+a list in the main view (`recentlyused:/` and the recent-locations place), not a
+list drawn inside the panel.
+
+The rebuild keeps the original's names and both of its rows' purposes but draws
+them differently: two headings, *Recent Files* and *Recent Locations*, each of
+which opens to show up to eight files or six folders **inside the panel**, and
+folds shut when the person does not need it. That is a deliberate difference, made
+because the panel is where the person already looks for a way back somewhere, and
+because the build has no `recentlyused:` worker to navigate to. It is listed in
+`mechanics.json` (`recent` group) as this build's arrangement, next to the
+original's wording, so the two can be told apart.
+
+The list itself is the freedesktop one, `~/.local/share/recently-used.xbel`: XML
+`<bookmark href=…>` entries carrying `added`, `modified` and `visited` stamps.
+KRecentDocument maintains it and KIO's `recentlyused:` worker sorts by `visited`,
+which is the rule this build uses, so the two agree on what "recent" means and on
+the order of the rows.
+
+### The rules the rebuild keeps
+
+* **Order: `visited` stamp, newest first** — not the file's modification date. A
+  document written last year and opened this morning is the most recent thing to
+  the person. The row's tooltip still shows the file's own date, read from the
+  file, because that is what a file's date means everywhere else in the window.
+* **One row per file.** A second bookmark for the same path is not a second row;
+  the later visit is the one that counts.
+* **Only files, and only files still there.** Folders belong to *Recent
+  Locations*; a bookmark whose file has been moved or deleted is dropped rather
+  than drawn as a row that opens nothing, and a non-local address (`smb://`,
+  `trash:/`) is dropped because this build cannot open it.
+* **Rows shown: 8** (`recent_rows()` in `src/config.rs`); **folders kept: 6**
+  (`RECENT_LOCATIONS_MAX` in `src/main.rs`), newest first, each once — walking back
+  into a folder moves it to the top instead of adding a duplicate.
+* **Both headings fold on one click**, with the count at the right so a folded
+  group still says how much is behind it.
+
+The two counts, 8 and 6, are **this build's own** numbers. The original caps
+nothing — its rows open a full view that scrolls — so there was no number in the
+code to copy. They were picked to fill the panel without pushing *Devices* off the
+bottom, and are written in `mechanics.json` as the build's values, not as
+measurements.
+
+### The toolbar
+
+The same capture shows the original's row reading: back (with a dropdown), forward
+(with a dropdown), up, then the breadcrumb bar, with the rest of the cluster to its
+right. The rebuild's row had an extra *Open in* button at the left of the cluster,
+whose menu listed a new tab, a new window, the other pane and a terminal — a second
+way to do what a double-click, Enter and the right-click menu already do. It is
+gone; opening is a double-click, Enter, or *Open* / *Open With* on the right-click
+menu, and the row is shorter by one button and its menu.
+
+The app menu is now a scrolling list capped to the window's height: in a window
+that was not maximised its last rows (*Help*, *About*, *Quit*) could sit below the
+bottom edge with no way to reach them. *About* names the release the build came
+from — the crate version, which is the GitHub tag without its `v` — so a picture of
+the box says which build it is.
+
+**Checked without a mouse:** `--selftest` *"the two button words survive an
+ordinary window and give way in order"* walks the toolbar geometry from 360 to
+1600 px and fails if the location bar and the buttons ever overlap, or if the words
+go while they would still fit. The recent groups are covered by *"recent files come
+newest visit first, without folders or files that have gone"*, *"a folder walked
+into is remembered once, newest first, and the list stops at six"* and *"a recent
+group folds with one click and opens with the next"*.
+
+### The Remote group (the *Network* row)
+
+The same sidebar capture shows a **Remote** heading holding a single **Network**
+row, sitting between *Places* and *Recent*. In the original that row is a KIO
+place: clicking it opens `network:/`, the worker that browses SMB, SFTP, NFS and
+WebDAV through the system's own network stack, with its own device discovery.
+
+This build has no KIO, so it cannot browse the network — and a row that opens an
+empty folder would be worse than none. What it does instead: the group lists the
+network folders the desktop **already has**, read from the two places Linux keeps
+them.
+
+* `/proc/mounts`, keeping only the network filesystem types: `cifs`, `smbfs`,
+  `nfs`, `nfs4`, `afs`, `9p`, `davfs`, `davfs2`, `fuse.sshfs`, `fuse.rclone`,
+  `fuse.s3fs`, `fuse.davfs2`. A mount point is listed only if the folder is really
+  there. The name on the row is the share for an SMB mount (`//router/media` ->
+  *media*), otherwise the last part of the mount point.
+* `/run/user/<uid>/gvfs`, the folder of mounts the desktop's own file choosers
+  create. Each folder is named after its parameters (`smb-share:server=…,share=…`,
+  `sftp:host=…,user=…`); the row shows the share, or the host when there is no
+  share, with the protocol in brackets for SFTP, FTP and WebDAV.
+
+Escaping is handled the way the mount table writes it (`\040` for a space in
+either the source or the mount point) — a share named *Team Share* must not read
+as `Team\040Share`.
+
+With nothing mounted the group shows the original's own sentence,
+**No shared folders found** (`0x1bf952` in `libdolphinprivate.so.6`, in the same
+run of empty-state strings as `0x1bf937` *No recently used items*). The heading
+folds like the recent groups, so an empty Network group costs one line, not four.
+
+The group's own label in the original is *Remote* with a row called *Network*;
+this build draws one folding group called *Network* directly. That is written in
+`mechanics.json` (`network` group) next to the original's wording.
+
+`--selftest` *"the Network group lists mounted shares and nothing else"* feeds the
+parser a sample mount table — a local ext4 root, a tmpfs, an SMB share, an NFS
+export, an sshfs mount and a local vfat with an escaped space — and fails unless
+exactly the three shares come back, named *media*, *photos* and *data*, with the
+escaped mount point unescaped and the local drive left out. It also checks the two
+GIO folder names.
