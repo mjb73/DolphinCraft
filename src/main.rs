@@ -6,6 +6,7 @@
 /// the person asked. Everything that shows the app's name reads this one string.
 pub const APP_NAME: &str = "DolphinCraft";
 
+mod apps;
 mod config;
 mod foldercolor;
 mod fsutil;
@@ -20,7 +21,7 @@ mod theme;
 mod views;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
@@ -34,6 +35,18 @@ use search::{DupScan, ThumbCache};
 use state::{Clipboard, Pane, Request, ViewMode, TRASH_URI};
 use theme::*;
 use views::ViewCtx;
+
+/// Remember that a tab was closed, so "Recently Closed Tabs" can put it back.
+/// A folder already in the list moves to the newest end rather than appearing
+/// twice, and the list stops at `cap` entries — the newest are the ones kept.
+pub(crate) fn remember_closed_tab(list: &mut Vec<PathBuf>, path: PathBuf, cap: usize) {
+    list.retain(|p| *p != path);
+    list.push(path);
+    let over = list.len().saturating_sub(cap);
+    if over > 0 {
+        list.drain(0..over);
+    }
+}
 
 pub struct Tab {
     pub panes: Vec<Pane>,
@@ -169,6 +182,12 @@ pub struct UndoTrash {
 /// short would be gone before the eye finds it.
 pub const UNDO_SECS: f32 = 8.0;
 
+/// How many closed tabs the menu remembers. The original's list is a
+/// `KRecentFilesAction` (its subtitle "Recently Closed Tabs", 0x12d8ff in
+/// /usr/bin/dolphin, feeding a `DolphinRecentTabsMenu` at 0x13d9a0), which keeps
+/// ten entries by default; this build keeps the same ten.
+pub const CLOSED_TAB_MEMORY: usize = 10;
+
 pub struct Props {
     pub paths: Vec<PathBuf>,
     pub checksum: Option<String>,
@@ -191,6 +210,23 @@ pub struct Dups {
 pub struct Quick {
     pub path: PathBuf,
     pub text: Option<String>,
+}
+
+/// The chooser behind "Other Application…": every program the desktop knows,
+/// narrowed as the person types, with the original's own tick box ("Remember
+/// application association for all files of type …") underneath.
+pub struct OpenWith {
+    /// What is being opened, in the order the view had it.
+    pub paths: Vec<PathBuf>,
+    /// The type the tick box names.
+    pub mime: String,
+    /// The text that narrows the list.
+    pub filter: String,
+    /// Put the choice into the desktop's own list of preferences.
+    pub remember: bool,
+    /// The row picked with the arrow keys, or the only match when there is one.
+    pub chosen: usize,
+    pub focus: bool,
 }
 
 pub struct NewFolder {
@@ -239,6 +275,12 @@ pub struct App {
     pub dups: Option<Dups>,
     pub quick: Option<Quick>,
     pub new_folder: Option<NewFolder>,
+    /// Added feature, as asked for this round: the chooser behind "Open With…",
+    /// and the folders of the tabs that were closed, newest last, so a tab
+    /// closed by mistake can come back (`Recently Closed Tabs`, 0x12d8ff in
+    /// /usr/bin/dolphin).
+    pub open_with: Option<OpenWith>,
+    pub closed_tabs: Vec<PathBuf>,
     pub shortcut_edit: Option<ShortcutEdit>,
     pub toast: Option<(String, Instant)>,
     /// The Undo offer that follows the last Move to Trash.
@@ -257,6 +299,9 @@ pub struct App {
     /// a captured window shows the toast and its Undo button. Nothing is deleted
     /// for good, and nothing happens unless the flag is given.
     pub pending_trash_demo: Option<PathBuf>,
+    /// `--open-with <file>`: open the chooser on that file once the window is
+    /// up, so the dialog can be photographed without a mouse.
+    pub pending_open_with: Option<PathBuf>,
     /// What each picture's own file says about how it was generated. Read once
     /// per file and kept, so the information panel does not parse a PNG every
     /// frame.
@@ -281,6 +326,57 @@ pub struct App {
     /// even though none of those is a "setting" the menus own. Empty until the
     /// first frame.
     pub session_sig: String,
+    /// The whole settings file as it stood when it was last written, compared
+    /// with the live window about twice a second. Every choice the window keeps
+    /// is in this string, so a switch that forgot to say "I changed" is still
+    /// written — the view buttons used to be exactly that case, and a choice
+    /// made there was lost if the window was not closed tidily.
+    pub settings_sig: String,
+}
+
+/// The settings as one comparable string. Two snapshots that differ mean the
+/// window's choices changed since the last write, which is the whole test for
+/// "is there anything to save" — so a choice cannot be lost just because the
+/// button that made it did not say it had changed.
+pub(crate) fn settings_signature(cfg: &Config) -> String {
+    serde_json::to_string(cfg).unwrap_or_default()
+}
+
+/// Where the window should open: the place it was left, unless that place is
+/// off any plausible screen (a monitor that has since been unplugged), in which
+/// case the window manager picks, as it did before.
+pub(crate) fn startup_position(cfg: &Config) -> Option<[f32; 2]> {
+    let pos = cfg.window_pos?;
+    let sane = |v: f32| v.is_finite() && v >= -32_000.0 && v <= 32_000.0;
+    if sane(pos[0]) && sane(pos[1]) {
+        Some(pos)
+    } else {
+        None
+    }
+}
+
+/// Put every display choice back to its factory default. Used by the menu's
+/// "Forget remembered settings", which is how the person can get back to a
+/// plain window without hunting for the switches they once moved.
+pub(crate) fn apply_defaults(pane: &mut Pane) {
+    let d = Config::default();
+    pane.view = ViewMode::from_index(d.view.min(2));
+    pane.zoom = d.zoom;
+    pane.show_hidden = d.show_hidden;
+    pane.previews = d.previews;
+    pane.folders_first = d.folders_first;
+    pane.name_sort = state::NameSort::from_index(d.name_sort);
+    pane.sort = state::SortKey::from_index(d.sort_key);
+    pane.asc = !d.sort_desc;
+    pane.pictures = false;
+    pane.thumb_px = gallery::clamp_thumb(d.thumb_px);
+    pane.gallery_names = d.gallery_names;
+    pane.gallery_dims = d.gallery_dims;
+    pane.gallery_round = d.gallery_round;
+    pane.filter_on = false;
+    pane.filter.clear();
+    pane.search = None;
+    pane.refilter();
 }
 
 /// A pane set up from the saved settings, so a tab brought back by the session
@@ -462,6 +558,8 @@ impl App {
             dups: None,
             quick: None,
             new_folder: None,
+            open_with: None,
+            closed_tabs: Vec::new(),
             shortcut_edit: None,
             toast: None,
             undo_trash: None,
@@ -476,6 +574,7 @@ impl App {
             big: gallery::BigCache::new(),
             pending_viewer: start_viewer,
             pending_trash_demo: None,
+            pending_open_with: None,
             image_meta: HashMap::new(),
             pending_compare: start_compare,
             frames: 0,
@@ -484,6 +583,7 @@ impl App {
             next_pane_id: next_id,
             split_frac: saved_split_frac,
             session_sig: String::new(),
+            settings_sig: String::new(),
             filter_focus: false,
             shortcut_drag: None,
         };
@@ -496,6 +596,9 @@ impl App {
         } else if shot_mode {
             app.split = false;
         }
+        // The snapshot to compare against: what was just opened. Nothing is
+        // written until a choice really changes something.
+        app.settings_sig = settings_signature(&app.config_from_state(None));
         app
     }
 
@@ -573,6 +676,12 @@ impl App {
     fn close_tab(&mut self, idx: usize) {
         if self.tabs.len() <= 1 {
             return;
+        }
+        // Remember where the tab was, so "Recently Closed Tabs" can put it
+        // back. The original keeps the same list (it is a `KRecentFilesAction`
+        // under the menu's "Recently Closed Tabs", 0x12d8ff).
+        if let Some(path) = self.tabs.get(idx).map(|t| t.panes[t.active].path.clone()) {
+            remember_closed_tab(&mut self.closed_tabs, path, CLOSED_TAB_MEMORY);
         }
         self.tabs.remove(idx);
         if self.active_tab >= self.tabs.len() {
@@ -791,6 +900,10 @@ impl App {
                                 pane.view = mode;
                                 pane.zoom = zoom;
                                 self.config.view = mode.index();
+                                // The view is one of the choices the next start
+                                // opens with, so it is written straight away; the
+                                // whole-settings comparison would catch it too.
+                                self.config_dirty = true;
                             }
                         }
                         ui.add_space(4.0);
@@ -1904,6 +2017,24 @@ impl App {
                 }
                 Request::Trash(paths) => self.ask_or_trash(paths),
                 Request::EmptyTrash => self.ask_or_empty_trash(),
+                Request::ForgetSettings => {
+                    // Every choice back to its factory default, extra tabs
+                    // forgotten, and the file written at once so the next start
+                    // is a plain window. The folder being shown stays open: the
+                    // person asked to forget their settings, not where they were.
+                    let dir = self.pane().current_dir();
+                    self.config = Config::default();
+                    self.places_visible = true;
+                    self.info_panel = false;
+                    self.unsplit();
+                    apply_defaults(self.pane_mut());
+                    self.tabs.truncate(1);
+                    self.active_tab = 0;
+                    self.split_frac = 0.5;
+                    self.pane_mut().load(dir);
+                    self.persist(Some(ctx));
+                    self.toast("Settings are back to their defaults; this window stays open.");
+                }
                 Request::Restore(paths) => {
                     let mut ok = 0;
                     let mut errors = Vec::new();
@@ -2065,6 +2196,75 @@ impl App {
                         self.pane_mut().navigate(path);
                     } else {
                         fsutil::open_with_default(&path);
+                    }
+                }
+                Request::OpenWith {
+                    id,
+                    paths,
+                    remember,
+                } => {
+                    match crate::apps::find(&id) {
+                        Some(app) => {
+                            if let Err(e) = crate::apps::launch(&app, &paths) {
+                                self.toast(&e);
+                            } else {
+                                let what = if paths.len() == 1 {
+                                    format!("Opened in {}", app.name)
+                                } else {
+                                    format!("{} items opened in {}", paths.len(), app.name)
+                                };
+                                self.toast(&what);
+                            }
+                            // The tick box in the chooser: the same file the
+                            // desktop itself reads, so the first row of the menu
+                            // names this program from now on.
+                            if let Some(mime) = remember {
+                                match crate::apps::remember(&mime, &id) {
+                                    Ok(_) => self.toast(&format!(
+                                        "{} now opens {}",
+                                        app.name, mime
+                                    )),
+                                    Err(e) => self.toast(&format!(
+                                        "Could not remember that choice: {}",
+                                        e
+                                    )),
+                                }
+                            }
+                        }
+                        None => self.toast("That program is no longer installed."),
+                    }
+                }
+                Request::OpenWithChoose(paths) => {
+                    if !paths.is_empty() {
+                        let mime = crate::apps::mime_of_selection(&paths);
+                        // The list starts on the desktop's own preferred program
+                        // for this type, the one the menu's first row names, so
+                        // the chooser opens where the person expects; with no
+                        // preference the first row is the first program that
+                        // claims the type.
+                        let wanted = crate::apps::default_for(&mime);
+                        let chosen = wanted
+                            .and_then(|id| crate::apps::chooser(&mime).iter().position(|a| a.id == id))
+                            .unwrap_or(0);
+                        self.open_with = Some(OpenWith {
+                            mime,
+                            paths,
+                            filter: String::new(),
+                            remember: false,
+                            chosen,
+                            focus: false,
+                        });
+                    }
+                }
+                Request::ReopenClosedTab(back) => {
+                    let n = back.min(self.closed_tabs.len().saturating_sub(1));
+                    if self.closed_tabs.is_empty() {
+                        self.toast("No closed tabs to bring back.");
+                    } else {
+                        let idx = self.closed_tabs.len() - 1 - n;
+                        let path = self.closed_tabs.remove(idx);
+                        self.new_tab_public(path);
+                        self.toast("Tab brought back.");
                     }
                 }
                 Request::Cut => {
@@ -2248,24 +2448,38 @@ impl App {
     /// ("Move %2 to the Trash", `ConfirmTrash` in its Confirmations page); the
     /// person asked for the mark and the key press to be the whole action, so the
     /// dialog only appears when that switch is on, and it ships off.
+    ///
+    /// The wording below is the original's own, read out of
+    /// `KIO::JobUiDelegate::askDeleteConfirmation` @0x1a8a20 in
+    /// `libKF6KIOWidgets.so.6.31.0`: the continue button says "Move to Trash",
+    /// and the question is "Do you really want to move this item to the Trash?"
+    /// with the item's name under it (a list when several are marked). See
+    /// MECHANICS.md, "The delete question".
     pub fn ask_or_trash(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }
         // Inside the Trash there is nowhere further to move an item to, so Delete
-        // there means what it means in the original: gone for good.
+        // there means what it means in the original: gone for good. Measured in
+        // `KIO::DeleteOrTrashJob::DeleteOrTrashJob` @0x1b0fa0, which rewrites a
+        // Trash request to a Delete request when the URL's scheme is "trash".
         if self.pane().is_trash() {
             self.ask_or_delete(paths);
             return;
         }
         if self.config.confirm_trash {
+            let name = display_name(&paths[0]);
+            let body = if paths.len() == 1 {
+                format!("Do you really want to move this item to the Trash?\n\n{name}")
+            } else {
+                format!(
+                    "Do you really want to move these items to the Trash?\n\n{}",
+                    name_list(&paths)
+                )
+            };
             self.confirm = Some(Confirm {
                 title: "Move to Trash".to_string(),
-                body: format!(
-                    "Move {} item{} to the Trash?",
-                    paths.len(),
-                    if paths.len() == 1 { "" } else { "s" }
-                ),
+                body,
                 action: ConfirmAction::Trash(paths),
             });
             return;
@@ -2273,20 +2487,31 @@ impl App {
         self.trash_now(paths);
     }
 
-    /// Shift+Delete on a marked selection. Same rule as `ask_or_trash`: the
-    /// question is off unless the person turns it on (`ConfirmDelete`).
+    /// Shift+Delete on a marked selection. Unlike the Trash move, the original
+    /// *does* ask here by default: `ConfirmDelete` is read with a default of
+    /// true in `KIO::WidgetsAskUserActionHandler::askUserDelete` @0x1a7980
+    /// (`libKF6KIOWidgets.so.6.31.0`, key at 0x21e8d4), and the question is
+    /// "Do you really want to permanently delete this item?" followed by
+    /// "This action cannot be undone." (`askDeleteConfirmation` @0x1a8a20).
     pub fn ask_or_delete(&mut self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }
         if self.config.confirm_delete {
+            let name = display_name(&paths[0]);
+            let body = if paths.len() == 1 {
+                format!(
+                    "Do you really want to permanently delete this item?\n\n{name}\n\nThis action cannot be undone."
+                )
+            } else {
+                format!(
+                    "Do you really want to permanently delete these items?\n\n{}\n\nThis action cannot be undone.",
+                    name_list(&paths)
+                )
+            };
             self.confirm = Some(Confirm {
                 title: "Delete Permanently".to_string(),
-                body: format!(
-                    "Delete {} item{} permanently? This cannot be undone.",
-                    paths.len(),
-                    if paths.len() == 1 { "" } else { "s" }
-                ),
+                body,
                 action: ConfirmAction::Delete(paths),
             });
             return;
@@ -2601,6 +2826,8 @@ impl App {
                 self.dups = None;
             } else if self.new_folder.is_some() {
                 self.new_folder = None;
+            } else if self.open_with.is_some() {
+                self.open_with = None;
             } else if self.props.is_some() {
                 self.props = None;
             } else if self.shortcut_edit.is_some() {
@@ -2634,7 +2861,10 @@ impl App {
                 reqs.push(Request::Toast("__quit__".into()));
             }
             if i.consume_key(ctrl_shift, Key::T) {
-                reqs.push(Request::Toast("__newtab__".into()));
+                // Reopen the tab that was closed last, which is what the
+                // original's "Recently Closed Tabs" row does; Ctrl+T already
+                // makes a new one.
+                reqs.push(Request::Toast("__reopen__".into()));
             }
             if i.consume_key(ctrl, Key::L) {
                 reqs.push(Request::Toast("__editloc__".into()));
@@ -2805,11 +3035,24 @@ impl App {
     /// Copy the live window state into the settings file. Called when a setting
     /// changed, when the session changed, and once when the window closes, so
     /// the next start opens the way this one was left: same sort, same view and
-    /// zoom, same tabs, same window size.
+    /// zoom, same tabs, same window size and place.
     fn persist(&mut self, ctx: Option<&egui::Context>) {
         if self.shot.is_some() {
             return;
         }
+        let cfg = self.config_from_state(ctx);
+        cfg.save();
+        self.settings_sig = settings_signature(&cfg);
+        self.config = cfg;
+        self.session_sig = self.session_signature();
+        self.config_dirty = false;
+    }
+
+    /// Everything the next start should open with, taken from the live window.
+    /// Kept apart from `persist` so the same snapshot can be compared with the
+    /// last one written: if anything in it changed, it is worth saving, whether
+    /// or not the part that changed remembered to ask for a save.
+    fn config_from_state(&self, ctx: Option<&egui::Context>) -> Config {
         let mut cfg = self.config.clone();
         cfg.split = self.split;
         cfg.places_visible = self.places_visible;
@@ -2820,7 +3063,6 @@ impl App {
         cfg.zoom = self.pane().zoom;
         cfg.folders_first = self.pane().folders_first;
         cfg.name_sort = self.pane().name_sort.index();
-        // The person's own words: a sort chosen now is the sort next time.
         cfg.sort_key = self.pane().sort.index();
         cfg.sort_desc = !self.pane().asc;
         cfg.split_frac = self.split_frac;
@@ -2846,14 +3088,18 @@ impl App {
             .collect();
         cfg.session_tab = self.active_tab;
         if let Some(ctx) = ctx {
-            if let Some(size) = ctx.input(|i| i.viewport().inner_rect.map(|r| [r.width(), r.height()])) {
-                cfg.window_px = Some(size);
+            let (size, pos) = ctx.input(|i| {
+                let vp = i.viewport();
+                (vp.inner_rect.map(|r| [r.width(), r.height()]), vp.outer_rect.map(|r| r.min))
+            });
+            if let Some(size) = size {
+                cfg.window_px = Some([size[0].round(), size[1].round()]);
+            }
+            if let Some(pos) = pos {
+                cfg.window_pos = Some([pos.x.round(), pos.y.round()]);
             }
         }
-        cfg.save();
-        self.config = cfg;
-        self.session_sig = self.session_signature();
-        self.config_dirty = false;
+        cfg
     }
 
     fn apply_tag(&mut self, tag: &str) {
@@ -2869,6 +3115,12 @@ impl App {
             "__closetab__" => {
                 let idx = self.active_tab;
                 self.close_tab(idx);
+            }
+            // Ctrl+Shift+T: the tab that was closed last comes back. The
+            // original keeps the list under the menu's "Recently Closed Tabs"
+            // (0x12d8ff in /usr/bin/dolphin).
+            "__reopen__" => {
+                self.reqs.push(Request::ReopenClosedTab(0));
             }
             "__editloc__" => {
                 self.pane_mut().begin_location_edit();
@@ -3158,6 +3410,14 @@ impl eframe::App for App {
             }
         }
         self.handle_shortcuts(ctx);
+        // `--open-with <file>`: open the chooser once the window is up, so the
+        // dialog can be photographed.
+        if let Some(file) = self.pending_open_with.clone() {
+            if self.frames > 2 {
+                self.pending_open_with = None;
+                self.reqs.push(Request::OpenWithChoose(vec![file]));
+            }
+        }
         // `--trash-demo <folder>`: mark everything in that folder and take it to
         // the Trash once the listing is there, so the toast and its Undo button
         // can be photographed. It never deletes anything for good.
@@ -3189,21 +3449,15 @@ impl eframe::App for App {
 
         // A captured picture must not rewrite the person's settings. Outside a
         // capture, the settings file is written whenever a setting changed, and
-        // about once a second when the *session* changed (a tab opened, closed or
-        // switched, or another folder opened), so those survive a crash as well
-        // as a tidy exit.
+        // about twice a second it is compared with the live window as a whole:
+        // anything that differs is written, so a choice made by a button that
+        // forgot to announce itself still survives a crash as well as a tidy
+        // exit.
         if self.shot.is_none() {
             if self.frames % 30 == 0 {
-                let sig = self.session_signature();
-                if !sig.is_empty() && sig != self.session_sig {
+                let sig = settings_signature(&self.config_from_state(Some(ctx)));
+                if sig != self.settings_sig {
                     self.config_dirty = true;
-                }
-                let size = ctx.input(|i| i.viewport().inner_rect.map(|r| [r.width(), r.height()]));
-                if let Some(size) = size {
-                    let saved = self.config.window_px.unwrap_or(size);
-                    if (saved[0] - size[0]).abs() > 1.0 || (saved[1] - size[1]).abs() > 1.0 {
-                        self.config_dirty = true;
-                    }
                 }
             }
             if self.config_dirty {
@@ -3554,6 +3808,27 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
     (resp.on_hover_text("Fold the shortcuts away").clicked(), add)
 }
 
+/// The name a delete question shows for one item. The original puts the item's
+/// name in the message body as `<filename>%1</filename>`
+/// (`KIO::JobUiDelegate::askDeleteConfirmation` @0x1a8a20, kio 6.31.0).
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// The list under a question about several items. The original passes the whole
+/// selection to `KMessageBox::warningContinueCancelList`, which lists every name;
+/// this keeps the first eight and counts the rest so the box stays a box.
+fn name_list(paths: &[PathBuf]) -> String {
+    const SHOWN: usize = 8;
+    let mut lines: Vec<String> = paths.iter().take(SHOWN).map(|p| display_name(p)).collect();
+    if paths.len() > SHOWN {
+        lines.push(format!("and {} more", paths.len() - SHOWN));
+    }
+    format!("{} items:\n{}", paths.len(), lines.join("\n"))
+}
+
 /// The "Add Shortcut" row at the bottom of the Shortcuts section.
 fn add_row(ui: &mut egui::Ui, label: &str) -> bool {
     let width = ui.available_width();
@@ -3788,6 +4063,7 @@ fn main() -> eframe::Result<()> {
     let mut start_deep = false;
     let mut start_guide = false;
     let mut start_menu = false;
+    let mut open_with_file: Option<PathBuf> = None;
     // Deep-pass captures: open the Sort By popup on the first frame, or open the
     // window already sorted by one key so the direction each key starts in can be
     // seen (see MECHANICS.md, "The Sort By menu, read out of the code").
@@ -3861,6 +4137,14 @@ fn main() -> eframe::Result<()> {
             "--deep" => start_deep = true,
             "--guide" => start_guide = true,
             "--menu" => start_menu = true,
+            // Opens the "Other Application…" chooser on the first frame, with
+            // this file, so the chooser can be photographed without a mouse.
+            "--open-with" => {
+                if i + 1 < args.len() {
+                    open_with_file = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
             // Moves a folder's contents to the Trash once so the Undo toast can be
             // photographed; see the comment on `pending_trash_demo`.
             "--trash-demo" => {
@@ -3925,15 +4209,26 @@ fn main() -> eframe::Result<()> {
             .window_px
             .filter(|s| s[0] >= 640.0 && s[1] >= 400.0)
     });
+    // The window also opens where it was left. A capture is taken at a fixed
+    // size and place so the picture is the same every run.
+    let startup_pos = if screenshot.is_some() {
+        None
+    } else {
+        startup_position(&Config::load())
+    };
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size(startup_size.unwrap_or([1440.0, 900.0]))
+        .with_min_inner_size([880.0, 540.0])
+        // The window title is the name the person sees on the title bar and
+        // in the task switcher. Renamed from the original program's name to
+        // this build's own name, as asked.
+        .with_title(APP_NAME)
+        .with_app_id("dolphincraft");
+    if let Some(pos) = startup_pos {
+        viewport = viewport.with_position(egui::Pos2::new(pos[0], pos[1]));
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size(startup_size.unwrap_or([1440.0, 900.0]))
-            .with_min_inner_size([880.0, 540.0])
-            // The window title is the name the person sees on the title bar and
-            // in the task switcher. Renamed from the original program's name to
-            // this build's own name, as asked.
-            .with_title(APP_NAME)
-            .with_app_id("dolphincraft"),
+        viewport,
         ..Default::default()
     };
     let shot = screenshot.clone();
@@ -3961,6 +4256,7 @@ fn main() -> eframe::Result<()> {
                 start_details,
             );
             app.pending_trash_demo = trash_demo.clone();
+            app.pending_open_with = open_with_file.clone();
             Ok(Box::new(app))
         }),
     )

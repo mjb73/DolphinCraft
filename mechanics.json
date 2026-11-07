@@ -249,8 +249,8 @@
   {
    "name": "question before a delete",
    "group": "files",
-   "value": "off in this build; the original always asks",
-   "source": "Confirmations page strings 'Ask for confirmation in Dolphin when:' 0x236ae0, keys ConfirmTrash 0x22f2e8 / ConfirmDelete / ConfirmEmptyTrash; switched off on the person's request (src/config.rs)"
+   "value": "three switches, read at delete time by KIO",
+   "source": "KIO::WidgetsAskUserActionHandler::askUserDelete @0x1a7980 (libKF6KIOWidgets.so.6.31.0), group [Confirmations] of kiorc (0x21e8ac, 0x21e8c8); page FUN_001d5010 @0x1d5010"
   },
   {
    "name": "hidden file rule",
@@ -1389,13 +1389,13 @@
    "name": "ask before moving to the Trash",
    "group": "files",
    "value": false,
-   "source": "ConfirmTrash, string 0x22f2e8 in /usr/bin/dolphin; off by default here so Delete on a marked selection acts at once"
+   "source": "ConfirmTrash @0x21e8f0 read with default 0 at 0x1a7a3d (kio 6.31.0); page default byte 0x243f02 = 0; ships off here too, and the person asked for no question on Delete"
   },
   {
    "name": "ask before deleting permanently",
    "group": "files",
-   "value": false,
-   "source": "ConfirmDelete on the original's Confirmations page ('Ask for confirmation in Dolphin when:' 0x236ae0); off by default here"
+   "value": true,
+   "source": "ConfirmDelete @0x21e8d4 read with default 1 at 0x1a7a31 (kio 6.31.0); page default byte 0x243f00 = 1"
   },
   {
    "name": "ask before emptying the Trash",
@@ -1486,6 +1486,123 @@
    "group": "view",
    "value": "Icons, Compact, Details",
    "source": "strings ViewModeController and DolphinView::setViewMode @0x2710c0 (stores the mode at this+0x58, then ViewProperties::setViewMode); no fourth, picture-only mode exists in the original"
+  },
+  {
+   "name": "preferred program row",
+   "group": "open with",
+   "value": "Open with <name>",
+   "source": "'Open &with %1' @0x11c258 in libKF6KIOWidgets.so.6.31.0, loaded at 0x64d34"
+  },
+  {
+   "name": "submenu row",
+   "group": "open with",
+   "value": "Open With",
+   "source": "'&Open With' @0x11c24a, loaded at 0x64b5e"
+  },
+  {
+   "name": "chooser's last row",
+   "group": "open with",
+   "value": "Other Application…",
+   "source": "'&Other Application' @0x11c387, loaded at 0x6e028"
+  },
+  {
+   "name": "remember tick box",
+   "group": "open with",
+   "value": "Remember this choice for all files of type \"%1\" (%2)",
+   "source": "'&Remember application association for all files of type' @0x120210, drawn by the function at 0x834c0"
+  },
+  {
+   "name": "where a remembered choice is stored",
+   "group": "open with",
+   "value": "[Default Applications] in $XDG_CONFIG_HOME/mimeapps.list",
+   "source": "the original's dialog writes the same file (function 0x834c0 next to the tick box); row layout from the freedesktop mime-apps specification"
+  },
+  {
+   "name": "programs listed in the submenu",
+   "group": "open with",
+   "value": "those whose MimeType= names the file's type",
+   "source": "read from the .desktop entries under $XDG_DATA_DIRS/applications; submenu texts from function 0x646d0"
+  },
+  {
+   "name": "submenu rows shown",
+   "group": "open with",
+   "value": 12,
+   "unit": "rows",
+   "estimated": true
+  },
+  {
+   "name": "chooser order",
+   "group": "open with",
+   "value": "programs that claim the type first, then the rest, each by name",
+   "source": "the original's chooser lists the type's own programs first (window from function 0x6d980); name order inside each half is this build's own arrangement"
+  },
+  {
+   "name": "chooser starts on",
+   "group": "open with",
+   "value": "the desktop's preferred program for the type",
+   "source": "mimeapps.list [Default Applications], the same row the menu's first line names"
+  },
+  {
+   "name": "type of a file whose name says nothing",
+   "group": "open with",
+   "value": "text/plain when its first 1024 bytes are text",
+   "estimated": true
+  },
+  {
+   "name": "text sniff window",
+   "group": "open with",
+   "value": 1024,
+   "unit": "bytes",
+   "estimated": true
+  },
+  {
+   "name": "field codes filled",
+   "group": "open with",
+   "value": "%f %F %u %U %i %c %k %%",
+   "source": "the desktop-entry specification's Exec key, which the original's launch path follows (function 0x646d0 hands the row to KIO)"
+  },
+  {
+   "name": "confirm before emptying the Trash",
+   "group": "files",
+   "value": true,
+   "source": "ConfirmEmptyTrash @0x21f2a8 read with default 1 in askUserDelete @0x1a7980 (kio 6.31.0); page default byte 0x243f01 = 1"
+  },
+  {
+   "name": "the Trash question",
+   "group": "files",
+   "value": "Do you really want to move this item to the Trash? + <filename>%1</filename>",
+   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20 (libKF6KIOWidgets.so.6.31.0)"
+  },
+  {
+   "name": "the permanent-delete question",
+   "group": "files",
+   "value": "Do you really want to permanently delete this item? + name + This action cannot be undone.",
+   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; <emphasis strong='true'> around the warning"
+  },
+  {
+   "name": "the three continue buttons",
+   "group": "files",
+   "value": "Move to Trash / Delete Permanently / Empty Trash",
+   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; 'Move to Trash' at 0x21e94c, the other two as literals in the same function"
+  },
+  {
+   "name": "delete inside the Trash",
+   "group": "files",
+   "value": "a Trash request from a trash: URL becomes a permanent delete",
+   "source": "KIO::DeleteOrTrashJob::DeleteOrTrashJob @0x1b0fa0 (kio 6.31.0): scheme \"trash\" rewrites type 1 to 0"
+  },
+  {
+   "name": "row-button caption width",
+   "group": "view",
+   "value": "20 x averageCharWidth, then elided",
+   "unit": "px",
+   "source": "FUN_001c81f0 @0x1c81f0 in /usr/bin/dolphin (imul ...,0x14 before QFontMetrics::averageCharWidth)"
+  },
+  {
+   "name": "row-button captions",
+   "group": "view",
+   "value": "Move %2 to the Trash / Permanently Delete %2 / Copy %2 to the Clipboard / Cut %2 to the Clipboard / Duplicate %2 / Rename %2",
+   "source": "FUN_001c81f0 @0x1c81f0; strings 0x22e3e6, 0x22e3b1"
   }
  ]
 }

@@ -1310,6 +1310,69 @@ impl Pane {
                     vctx.reqs.push(Request::OpenPath(entry.path.clone()));
                     ui.close();
                 }
+                // The original's "Open With": the preferred program's name in
+                // a row of its own ("Open with Kate"), then a submenu holding
+                // the other programs that say they open this type, closed by
+                // "Other Application…" (libKF6KIOWidgets.so.6, 0x11c24a /
+                // 0x11c356 / 0x11c387).
+                {
+                    let mime = crate::apps::mime_of(&entry.path);
+                    let preferred = crate::apps::default_for(&mime)
+                        .and_then(|id| crate::apps::find(&id));
+                    if let Some(app) = preferred.clone() {
+                        if !entry.is_dir
+                            && ui
+                                .button(format!("Open with {}", app.name))
+                                .clicked()
+                        {
+                            vctx.reqs.push(Request::OpenWith {
+                                id: app.id.clone(),
+                                paths: selected_paths.clone(),
+                                remember: None,
+                            });
+                            ui.close();
+                        }
+                    }
+                    let openers: Vec<crate::apps::AppEntry> = crate::apps::openers_for(&mime)
+                        .into_iter()
+                        .filter(|a| preferred.as_ref().map(|p| p.id != a.id).unwrap_or(true))
+                        .collect();
+                    let title = if entry.is_dir {
+                        "Open Folder With"
+                    } else {
+                        "Open With"
+                    };
+                    ui.menu_button(title, |ui| {
+                        ui.set_min_width(220.0);
+                        let mut other = false;
+                        for app in openers.iter().take(12) {
+                            if ui.button(&app.name).clicked() {
+                                vctx.reqs.push(Request::OpenWith {
+                                    id: app.id.clone(),
+                                    paths: selected_paths.clone(),
+                                    remember: None,
+                                });
+                                ui.close();
+                            }
+                        }
+                        if openers.is_empty() {
+                            ui.label(
+                                egui::RichText::new("No program claims this kind of file.")
+                                    .size(11.5)
+                                    .color(TEXT_FAINT),
+                            );
+                        }
+                        ui.separator();
+                        if ui.button("Other Application…").clicked() {
+                            other = true;
+                        }
+                        if other {
+                            vctx.reqs
+                                .push(Request::OpenWithChoose(selected_paths.clone()));
+                            ui.close();
+                        }
+                    });
+                }
                 if !entry.is_dir && entry.is_image() && ui.button("Open in Picture Viewer").clicked() {
                     vctx.reqs.push(Request::OpenViewer(entry.path.clone(), false));
                     ui.close();

@@ -1,6 +1,6 @@
 [package]
 name = "dolphincraft"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with extra tools."
 authors = ["Michael Bayes"]

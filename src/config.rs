@@ -111,6 +111,13 @@ pub struct Config {
     /// was left. Not used in screenshot mode, so captures stay identical.
     #[serde(default)]
     pub window_px: Option<[f32; 2]>,
+    /// Where the window's top-left corner was on the last run, so it opens in
+    /// the same place instead of wherever the window manager drops it. Added
+    /// feature: the original restores its whole window state from the session
+    /// (`DolphinMainWindow::slotSaveSession`), and a window that comes back at
+    /// the same spot is part of that. Not used in screenshot mode.
+    #[serde(default)]
+    pub window_pos: Option<[f32; 2]>,
     /// The Shortcuts section of the navigation panel can be folded away.
     #[serde(default = "yes")]
     pub shortcuts_expanded: bool,
@@ -163,12 +170,15 @@ pub struct Config {
     /// The original's Confirmations page keeps three separate switches, one per
     /// destructive action (`ConfirmTrash`, `ConfirmDelete`, `ConfirmEmptyTrash`;
     /// the page is labelled "Ask for confirmation in Dolphin when:"). The
-    /// rebuild stores the same three, but the first two ship **off**: the person
-    /// asked for a marked picture and a press of Delete to be the whole action.
-    /// Emptying the Trash stays on, because nothing can be brought back from it.
+    /// rebuild stores the same three. `ConfirmTrash` ships **off** here because
+    /// the person asked for a marked picture and a press of Delete to be the
+    /// whole action; the original's own default for it is off as well
+    /// (`KIO::WidgetsAskUserActionHandler::askUserDelete` @0x1a7980 in
+    /// `libKF6KIOWidgets.so.6.31.0`, key at 0x21e8f0, default 0). `ConfirmDelete`
+    /// and `ConfirmEmptyTrash` keep the original's defaults, both on.
     #[serde(default)]
     pub confirm_trash: bool,
-    #[serde(default)]
+    #[serde(default = "yes")]
     pub confirm_delete: bool,
     #[serde(default = "yes")]
     pub confirm_empty_trash: bool,
@@ -240,6 +250,7 @@ impl Default for Config {
             session: Vec::new(),
             session_tab: 0,
             window_px: None,
+            window_pos: None,
             shortcuts_expanded: true,
             shortcut_keys: true,
             shortcut_colors: Vec::new(),
@@ -255,11 +266,13 @@ impl Default for Config {
             show_zoom_slider: true,
             size_limit: crate::search::SIZE_LIMIT_DEFAULT,
             prompt_open: true,
-            // The person's rule wins over the original's factory setting: a
-            // marked picture and a press of Delete is the whole action, no
-            // question in between. Emptying the Trash still asks.
+            // The person's rule wins over the original's factory setting for the
+            // Trash move: a marked picture and a press of Delete is the whole
+            // action, no question in between. The original's default for that
+            // switch is off too. A permanent delete and emptying the Trash keep
+            // the original's defaults and do ask, because there is no way back.
             confirm_trash: false,
-            confirm_delete: false,
+            confirm_delete: true,
             confirm_empty_trash: true,
             preview_max_mib: 0,
         }

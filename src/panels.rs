@@ -51,6 +51,31 @@ impl App {
             self.new_tab_public(d);
             ui.close();
         }
+        // The original's own row, under File: it lists the folders of the tabs
+        // closed since the window opened, newest first ("Recently Closed Tabs",
+        // 0x12d8ff in /usr/bin/dolphin, and Ctrl+Shift+T for the last one).
+        {
+            let list: Vec<PathBuf> = self.closed_tabs.iter().rev().cloned().collect();
+            ui.add_enabled_ui(!list.is_empty(), |ui| {
+                ui.menu_button("Recently Closed Tabs", |ui| {
+                    ui.set_min_width(240.0);
+                    for (i, path) in list.iter().enumerate() {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.display().to_string());
+                        let hint = if i == 0 { "Ctrl+Shift+T" } else { "" };
+                        if crate::menu_row(ui, &name, hint)
+                            .on_hover_text(path.display().to_string())
+                            .clicked()
+                        {
+                            self.reqs.push(Request::ReopenClosedTab(i));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        }
         if crate::menu_row(ui, "New Folder…", "F10").clicked() {
             self.new_folder = Some(NewFolder {
                 name: "New Folder".to_string(),
@@ -239,6 +264,18 @@ impl App {
         {
             self.config.restore_session = reopen;
             self.config_dirty = true;
+        }
+        // Added feature: a plain statement of what is kept, and one row to
+        // forget it. Everything in this window is written as it is chosen, so
+        // the person can see where it went and undo it in a single click.
+        ui.label(
+            egui::RichText::new("Saved as you go: sort, view, zoom, panels, colours, pictures and the window's size and place.")
+                .size(10.5)
+                .color(TEXT_FAINT),
+        );
+        if crate::menu_row(ui, "Forget remembered settings", "").clicked() {
+            self.reqs.push(Request::ForgetSettings);
+            ui.close();
         }
         ui.separator();
         // The original keeps these three on its Confirmations page, one switch
@@ -759,8 +796,151 @@ impl App {
         self.dups_dialog(ctx);
         self.quick_dialog(ctx);
         self.new_folder_dialog(ctx);
+        self.open_with_dialog(ctx);
         self.shortcut_dialog(ctx);
         self.guide_dialog(ctx);
+    }
+
+    /// Added feature: "Other Application…" — the chooser the original opens
+    /// from the bottom of its "Open With" submenu (`&Other Application…`
+    /// @0x11c387 in libKF6KIOWidgets.so.6). Every program the desktop knows is
+    /// listed, narrowed as the person types, with the original's own tick box
+    /// underneath: `&Remember application association for all files of type
+    /// "%1" (%2)` @0x120210, where %1 is the extension and %2 the type.
+    fn open_with_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut ow) = self.open_with.take() else {
+            return;
+        };
+        let mut win_open = true;
+        let mut close = false;
+        let mut run: Option<String> = None;
+        let all = crate::apps::chooser(&ow.mime);
+        let needle = ow.filter.to_lowercase();
+        let matching: Vec<usize> = all
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| needle.is_empty() || a.name.to_lowercase().contains(&needle))
+            .map(|(i, _)| i)
+            .collect();
+        let chosen = ow.chosen.min(matching.len().saturating_sub(1));
+        let what = match ow.paths.len() {
+            0 => String::new(),
+            1 => ow
+                .paths
+                .first()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            n => format!("{} items", n),
+        };
+        window_style("Open With")
+            .open(&mut win_open)
+            .show(ctx, |ui| {
+                ui.set_min_width(460.0);
+                ui.label(egui::RichText::new(what.clone()).size(12.5).color(TEXT_DIM));
+                ui.add_space(6.0);
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut ow.filter)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Type to narrow the list"),
+                );
+                if !ow.focus {
+                    search.request_focus();
+                    ow.focus = true;
+                }
+                ui.add_space(6.0);
+                let height = 18.0 * matching.len().min(11) as f32 + 8.0;
+                egui::ScrollArea::vertical()
+                    .max_height(height.max(60.0))
+                    .show(ui, |ui| {
+                        for (row, &i) in matching.iter().enumerate() {
+                            let app = &all[i];
+                            let picked = row == chosen;
+                            let label = egui::RichText::new(format!("{}  {}", app.name, ""))
+                                .size(12.5)
+                                .color(if picked { Color32::WHITE } else { TEXT_DIM });
+                            let resp = ui.add(
+                                egui::Button::new(label)
+                                    .fill(if picked {
+                                        Color32::from_rgb(61, 130, 180)
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .min_size(Vec2::new(ui.available_width(), 18.0)),
+                            );
+                            if resp.clicked() {
+                                run = Some(app.id.clone());
+                            }
+                            if resp.double_clicked() {
+                                run = Some(app.id.clone());
+                            }
+                        }
+                        if matching.is_empty() {
+                            ui.label(
+                                egui::RichText::new("No program on this computer has that name.")
+                                    .size(12.0)
+                                    .color(TEXT_FAINT),
+                            );
+                        }
+                    });
+                ui.add_space(8.0);
+                let ext = ow
+                    .paths
+                    .first()
+                    .and_then(|p| p.extension())
+                    .map(|e| format!(".{}", e.to_string_lossy()))
+                    .unwrap_or_default();
+                let remember_label = crate::apps::remember_label(&ext, &ow.mime);
+                ui.checkbox(&mut ow.remember, remember_label);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let enabled = !matching.is_empty();
+                        if ui
+                            .add_enabled(enabled, egui::Button::new("Open"))
+                            .clicked()
+                        {
+                            run = Some(all[matching[chosen]].id.clone());
+                        }
+                    });
+                });
+                // The arrow keys walk the list, Enter opens, Escape closes —
+                // the way a chooser is used without the mouse.
+                if search.has_focus() || ui.memory(|m| m.focused().is_some()) {
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) && !matching.is_empty() {
+                        ow.chosen = (chosen + 1).min(matching.len() - 1);
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                        ow.chosen = chosen.saturating_sub(1);
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !matching.is_empty() {
+                        run = Some(all[matching[chosen]].id.clone());
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close = true;
+                    }
+                }
+            });
+        if let Some(id) = run {
+            self.reqs.push(Request::OpenWith {
+                id,
+                paths: ow.paths.clone(),
+                remember: if ow.remember {
+                    Some(ow.mime.clone())
+                } else {
+                    None
+                },
+            });
+            return;
+        }
+        if close || !win_open {
+            return;
+        }
+        ow.chosen = ow.chosen.min(matching.len().saturating_sub(1));
+        self.open_with = Some(ow);
     }
 
     /// Added: the plain-language answer to "what do these three buttons do?".
@@ -873,10 +1053,23 @@ impl App {
                         cancel = true;
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // The continue buttons carry the original's own words:
+                        // "Move to Trash", "Delete Permanently" and "Empty Trash"
+                        // (`KIO::JobUiDelegate::askDeleteConfirmation` @0x1a8a20,
+                        // kio 6.31.0; strings 0x21e94c and the two above).
                         let (label, color) = match &confirm.action {
-                            ConfirmAction::Trash(_) => ("Move to Trash", Color32::from_rgb(61, 130, 180)),
-                            ConfirmAction::Restore(_) => ("Restore", Color32::from_rgb(61, 130, 180)),
-                            _ => ("Delete", Color32::from_rgb(170, 68, 62)),
+                            ConfirmAction::Trash(_) => {
+                                ("Move to Trash", Color32::from_rgb(61, 130, 180))
+                            }
+                            ConfirmAction::Restore(_) => {
+                                ("Restore to Former Location", Color32::from_rgb(61, 130, 180))
+                            }
+                            ConfirmAction::EmptyTrash => {
+                                (crate::EMPTY_TRASH_LABEL, Color32::from_rgb(170, 68, 62))
+                            }
+                            ConfirmAction::Delete(_) => {
+                                (crate::DELETE_PERMANENT_LABEL, Color32::from_rgb(170, 68, 62))
+                            }
                         };
                         if ui
                             .add(

@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 
 `install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
 `~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
-release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.2` to pin a
+release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.3` to pin a
 release.
 
 The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,
@@ -29,6 +29,9 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   Videos, Trash, plus removable drives and your own shortcuts.
   Shortcuts can be given a colour, renamed, reordered by dragging, and removed.
 - **Tabs** with a path bar you can click through, and an address field (Ctrl+L).
+  Closing a tab is never final: *File → Recently Closed Tabs* lists the ten
+  folders closed since the window opened, newest first, and **Ctrl+Shift+T**
+  brings the last one straight back where it was.
 - **Three view modes**: icons, details and columns, each with its own zoom
   level and sort order. The measured ladder is 0–16 zoom steps (16–256 px);
   the icons and compact views continue the same ladder to level 25 = 400 px.
@@ -78,6 +81,15 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   - **Bulk Rename** — renames many files at once from a pattern.
   - **Quick Look** — a fast preview window for a single file (Space).
   - **Open Terminal Here** — a shell in the folder you are looking at.
+- **Open With**, the way the original does it: right-click a file and the first
+  row opens it in the program your desktop already prefers, *Open With ▸* lists
+  the other programs that claim that kind of file, and **Other Application…**
+  opens a chooser with every installed program — the ones for that type first,
+  the rest by name, a text field to narrow them. Ticking *Remember this choice
+  for all files of type…* writes that preference into your desktop's own
+  `mimeapps.list`, so the first row changes here and in every other program. A
+  file whose name says nothing (a `Makefile`, a `Cargo.lock`) is read, so editors
+  are offered for it instead of nothing.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
   properties, all with the shortcuts you already know from Dolphin.
 - **Deleting asks nothing first** (as you asked): mark the pictures — or any
@@ -130,6 +142,8 @@ Options:
 --deep                   with --find, look through every folder below as well
 --guide                   open the card that explains Find, Open in and Menu
 --menu                    open the app's own menu (used to photograph it)
+--open-with <file>        open the Open With chooser on that file at once
+                          (used to photograph it)
 --trash-demo <folder>     move that folder's contents to the Trash once, so the
                           Undo toast can be photographed; nothing is deleted for good
 --size <WxH>              open the window at a given size

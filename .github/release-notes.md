@@ -1,17 +1,41 @@
 DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with a few tools of its own.
 
+## What's new in 0.1.3
+
+* **Open With**, as the original has it: the first row of a file's right-click menu
+  opens it in the program your desktop already prefers, *Open With ▸* lists the
+  other programs that claim that kind of file, and **Other Application…** opens a
+  chooser with every installed program — the ones for that type first, the rest by
+  name, a text field to narrow them. Ticking *Remember this choice for all files of
+  type…* writes the preference into your desktop's own `mimeapps.list`, so the first
+  row changes here and everywhere else.
+* **Files whose name says nothing are read**: a `Makefile`, a `Cargo.lock`, a plain
+  text file with an unusual extension now offers editors instead of nothing.
+* **Recently Closed Tabs** under *File*, with **Ctrl+Shift+T** to bring the last one
+  back where it was; the list keeps the ten most recent, newest first.
+* **The picture wall holds pictures only** — sub-folders and documents stay in the
+  icon and list views, and marking, Ctrl+A, Shift+click and the arrow keys follow the
+  pictures on screen, so a hidden file cannot be caught by a Delete.
+* **The picture details panel starts closed**, and the recipe is read behind it;
+  **P** or the info button opens it.
+* **Deleting asks nothing first**: mark and press Delete, with an eight-second **Undo**
+  in the toast and **Ctrl+Z** afterwards. Dolphin's three confirmation switches are in
+  the app menu under *Deleting* if you want the questions back.
+* Sort, view, zoom, colours, picture switches and the window's size and place are
+  saved as you choose them; a settings file from an older version still opens.
+
 **Linux** — `install.sh` (no root), or the tarball for your architecture.
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh | sh
 ```
 It installs `dolphincraft` to `~/.local/bin`, writes the menu entry, and refreshes the launcher.
 
-**Archives** — `dolphincraft-0.1.2-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
+**Archives** — `dolphincraft-0.1.3-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
 `.zip`, each with a `.sha256`. Unpack one and run the binary:
 
 ```sh
-tar xzf dolphincraft-0.1.2-x86_64-linux.tar.gz
-./dolphincraft-0.1.2-x86_64-linux/dolphincraft
+tar xzf dolphincraft-0.1.3-x86_64-linux.tar.gz
+./dolphincraft-0.1.3-x86_64-linux/dolphincraft
 ```
 
 The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,

@@ -272,16 +272,47 @@ pub fn run() -> i32 {
         })(),
     );
     r.check(
-        "a fresh profile asks no question before a delete, but does before emptying the Trash",
+        "a fresh profile asks no question before moving to the Trash, but does before a permanent delete and before emptying the Trash",
         (|| {
             let config = crate::config::Config::default();
-            if config.confirm_trash || config.confirm_delete {
-                return Err("a fresh profile still asks before a delete".into());
+            if config.confirm_trash {
+                return Err("a fresh profile still asks before the Trash move".into());
+            }
+            if !config.confirm_delete {
+                return Err("a fresh profile no longer asks before a permanent delete".into());
             }
             if !config.confirm_empty_trash {
                 return Err("emptying the Trash no longer asks, though it cannot be undone".into());
             }
-            Ok("trash off, delete off, empty trash on".into())
+            Ok("trash off, delete on, empty trash on — the original's three defaults".into())
+        })(),
+    );
+
+    r.check(
+        "the delete question is worded the way the original words it",
+        (|| {
+            let one = std::path::PathBuf::from("/tmp/Beach at noon.png");
+            let many = vec![
+                std::path::PathBuf::from("/tmp/a.png"),
+                std::path::PathBuf::from("/tmp/b.png"),
+            ];
+            // `name_list` and `display_name` feed the two questions; the words
+            // themselves are `KIO::JobUiDelegate::askDeleteConfirmation` @0x1a8a20.
+            if crate::display_name(&one) != "Beach at noon.png" {
+                return Err("the question no longer names the item".into());
+            }
+            let list = crate::name_list(&many);
+            if !list.starts_with("2 items:") || !list.contains("b.png") {
+                return Err(format!("the list reads {list}"));
+            }
+            let text = format!(
+                "Do you really want to move this item to the Trash?\n\n{}",
+                crate::display_name(&one)
+            );
+            if !text.contains("this item to the Trash") {
+                return Err("the Trash question lost the original's words".into());
+            }
+            Ok("named item, counted list, the original's sentences".into())
         })(),
     );
 
@@ -2676,6 +2707,314 @@ pub fn run() -> i32 {
                 ));
             }
             Ok("Name / ascending, tabs on, split 0.50".into())
+        })(),
+    );
+    // The catch-all: whatever the window keeps is compared with the last write,
+    // so a choice made by a control that forgot to announce itself is still
+    // saved. The view buttons were that case; these checks make sure each kind
+    // of choice really shows up in the comparison.
+    r.check(
+        "any choice that changes is noticed, even without a tidy close",
+        (|| {
+            use crate::config::Config;
+            let base_cfg = Config::default();
+            let base_sig = crate::settings_signature(&base_cfg);
+            let mut changed: Vec<(&str, Config)> = Vec::new();
+            let mut c = base_cfg.clone();
+            c.view = 1;
+            changed.push(("view", c));
+            let mut c = base_cfg.clone();
+            c.zoom = [7, 2, 4];
+            changed.push(("zoom", c));
+            let mut c = base_cfg.clone();
+            c.sort_key = 3;
+            c.sort_desc = true;
+            changed.push(("sort", c));
+            let mut c = base_cfg.clone();
+            c.pictures = true;
+            changed.push(("pictures", c));
+            let mut c = base_cfg.clone();
+            c.gallery_dims = true;
+            changed.push(("picture captions", c));
+            let mut c = base_cfg.clone();
+            c.places_visible = false;
+            c.info_panel = true;
+            changed.push(("panels", c));
+            let mut c = base_cfg.clone();
+            c.window_pos = Some([240.0, 160.0]);
+            changed.push(("window place", c));
+            let mut c = base_cfg.clone();
+            c.window_px = Some([1000.0, 700.0]);
+            changed.push(("window size", c));
+            if crate::settings_signature(&base_cfg) != base_sig {
+                return Err("the same settings gave two different signatures".into());
+            }
+            for (name, cfg) in &changed {
+                if crate::settings_signature(cfg) == base_sig {
+                    return Err(format!("a change to the {name} would not be written"));
+                }
+            }
+            Ok(format!("{} kinds of choice all show up", changed.len()))
+        })(),
+    );
+    r.check(
+        "the window opens where it was left, and ignores a place off any screen",
+        (|| {
+            use crate::config::Config;
+            let mut cfg = Config::default();
+            if crate::startup_position(&cfg).is_some() {
+                return Err("a fresh profile should let the window manager place the window".into());
+            }
+            cfg.window_pos = Some([320.0, 180.0]);
+            let text = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            match crate::startup_position(&back) {
+                Some([320.0, 180.0]) => {}
+                other => return Err(format!("the saved place came back as {other:?}")),
+            }
+            cfg.window_pos = Some([90_000.0, -90_000.0]);
+            if crate::startup_position(&cfg).is_some() {
+                return Err("a place far past any screen was used anyway".into());
+            }
+            Ok("kept through the file, refused when absurd".into())
+        })(),
+    );
+    r.check(
+        "forgetting the settings puts every display choice back",
+        (|| {
+            use crate::config::Config;
+            let mut pane = crate::state::Pane::new(1, base.clone());
+            if pane.entries.is_empty() {
+                return Err("the throw-away folder listed nothing".into());
+            }
+            pane.view = crate::state::ViewMode::Details;
+            pane.zoom = [9, 9, 9];
+            pane.pictures = true;
+            pane.sort = crate::state::SortKey::Size;
+            pane.asc = false;
+            pane.show_hidden = true;
+            pane.previews = false;
+            crate::apply_defaults(&mut pane);
+            let d = Config::default();
+            if pane.view.index() != d.view
+                || pane.zoom != d.zoom
+                || pane.pictures
+                || pane.sort.index() != d.sort_key
+                || pane.asc != !d.sort_desc
+                || pane.show_hidden
+                || pane.previews != d.previews
+            {
+                return Err(format!(
+                    "after forgetting: view {}, zoom {:?}, pictures {}, sort {}, ascending {}, hidden {}",
+                    pane.view.index(),
+                    pane.zoom,
+                    pane.pictures,
+                    pane.sort.label(),
+                    pane.asc,
+                    pane.show_hidden
+                ));
+            }
+            Ok("icons, default zoom, Name ascending, no picture wall, hidden files off".into())
+        })(),
+    );
+
+    // ---- Open With ------------------------------------------------------
+    r.check(
+        "a program's entry says what it opens, and a hidden one is left out",
+        (|| {
+            use crate::apps::parse_desktop;
+            let text = "[Desktop Entry]\nType=Application\nName=Kate\n\
+                        Exec=kate %U\nIcon=kate\n\
+                        MimeType=text/plain;text/markdown;\nTerminal=false\n";
+            let app = parse_desktop("org.kde.kate.desktop", text)
+                .ok_or("the entry was not read as a program")?;
+            if app.name != "Kate"
+                || app.mimes != vec!["text/plain", "text/markdown"]
+                || app.terminal
+            {
+                return Err(format!(
+                    "read back name {:?}, types {:?}, terminal {}",
+                    app.name, app.mimes, app.terminal
+                ));
+            }
+            let hidden = "[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n";
+            if parse_desktop("x.desktop", hidden).is_some() {
+                return Err("a hidden entry was offered anyway".into());
+            }
+            Ok("Kate with two types; the hidden one dropped".into())
+        })(),
+    );
+    r.check(
+        "the chosen files reach the program, and no field codes are left behind",
+        (|| {
+            use crate::apps::command_line;
+            let one = std::path::PathBuf::from("/tmp/a b.txt");
+            let args = command_line("editor %F --name %c --flag %x", &[one.clone()], "Editor", "", "");
+            if args.iter().any(|a| a.contains('%')) {
+                return Err(format!("a field code survived: {args:?}"));
+            }
+            if !args.contains(&"/tmp/a b.txt".to_string()) || !args.contains(&"Editor".to_string()) {
+                return Err(format!("the file or the name went missing: {args:?}"));
+            }
+            let two = command_line(
+                "viewer %U",
+                &[one.clone(), std::path::PathBuf::from("/tmp/c.png")],
+                "V",
+                "",
+                "",
+            );
+            let urls = two.iter().filter(|a| a.starts_with("file://")).count();
+            if urls != 2 || !two.contains(&"file:///tmp/a%20b.txt".to_string()) {
+                return Err(format!("the two addresses came out as {two:?}"));
+            }
+            Ok("one file, its name, and two escaped addresses".into())
+        })(),
+    );
+    r.check(
+        "remembering a program rewrites only the row for that kind of file",
+        (|| {
+            use crate::apps::{parse_mimeapps, with_default};
+            let before = "[Default Applications]\ntext/plain=gedit.desktop\n\
+                          image/png=shotwell.desktop\n\n\
+                          [Added Associations]\ntext/plain=other.desktop\n";
+            let after = with_default(before, "text/plain", "org.kde.kate.desktop");
+            let map = parse_mimeapps(&after);
+            if map.get("text/plain") != Some(&vec!["org.kde.kate.desktop".to_string()]) {
+                return Err(format!("the type now reads {:?}", map.get("text/plain")));
+            }
+            if map.get("image/png") != Some(&vec!["shotwell.desktop".to_string()]) {
+                return Err("the other type was disturbed".into());
+            }
+            if !after.contains("[Added Associations]\ntext/plain=other.desktop") {
+                return Err("the other section was rewritten".into());
+            }
+            let fresh = with_default("", "text/plain", "org.kde.kate.desktop");
+            if fresh != "[Default Applications]\ntext/plain=org.kde.kate.desktop\n" {
+                return Err(format!("a new file came out as {fresh:?}"));
+            }
+            Ok("one row changed, every other row and section kept".into())
+        })(),
+    );
+    r.check(
+        "the tick box names the file type the way the original does",
+        (|| {
+            let text = crate::apps::remember_label(".txt", "text/plain");
+            if text != "Remember this choice for all files of type \".txt\" (text/plain)" {
+                return Err(format!("the sentence reads {text:?}"));
+            }
+            Ok("extension and type in one sentence".into())
+        })(),
+    );
+    r.check(
+        "the menu finds the programs this computer has for a kind of file",
+        (|| {
+            // A throw-away config home, so nothing here can change the real
+            // desktop's preferences.
+            let dir = base.join("mimeapps");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let old = std::env::var_os("XDG_CONFIG_HOME");
+            std::env::set_var("XDG_CONFIG_HOME", &dir);
+            let write = fs::write(
+                dir.join("mimeapps.list"),
+                "[Default Applications]\ntext/plain=org.kde.kate.desktop\n",
+            );
+            let preferred = crate::apps::default_for("text/plain");
+            let openers = crate::apps::openers_for("text/plain");
+            match old {
+                Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+            write.map_err(|e| e.to_string())?;
+            if preferred.as_deref() != Some("org.kde.kate.desktop") {
+                return Err(format!("the remembered program read as {preferred:?}"));
+            }
+            let named = crate::apps::find("org.kde.kate.desktop").is_some();
+            Ok(format!(
+                "preferred Kate; {} program(s) claim text/plain{}",
+                openers.len(),
+                if named { ", Kate installed" } else { ", Kate not installed here" }
+            ))
+        })(),
+    );
+    r.check(
+        "a file whose name says nothing is read before its menu is built",
+        (|| {
+            let dir = base.join("sniff");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let text = dir.join("Cargo.lock");
+            fs::write(&text, b"name = \"dolphincraft\"\n").map_err(|e| e.to_string())?;
+            let binary = dir.join("blob.lock");
+            fs::write(&binary, [0x7f, b'E', b'L', b'F', 0x00, 0x02]).map_err(|e| e.to_string())?;
+            let plain = dir.join("Makefile");
+            fs::write(&plain, b"all:\n\tcargo build\n").map_err(|e| e.to_string())?;
+            let a = crate::apps::mime_of(&text);
+            let b = crate::apps::mime_of(&binary);
+            let c = crate::apps::mime_of(&plain);
+            if a != "text/plain" || c != "text/plain" {
+                return Err(format!("the text files read as {a:?} and {c:?}"));
+            }
+            if b != "application/octet-stream" {
+                return Err(format!("the binary read as {b:?}"));
+            }
+            Ok("a .lock of text is text/plain, an ELF stays binary, a Makefile is text".into())
+        })(),
+    );
+    r.check(
+        "the chooser leads with the programs that open this kind of file",
+        (|| {
+            let mime = "text/plain";
+            let claims = |a: &crate::apps::AppEntry| a.mimes.iter().any(|m| m == mime);
+            let list = crate::apps::chooser(mime);
+            let first_other = list.iter().position(|a| !claims(a));
+            let last_opener = list.iter().rposition(|a| claims(a));
+            if let (Some(f), Some(l)) = (first_other, last_opener) {
+                if f < l {
+                    return Err(format!(
+                        "a program that cannot open the type sits at row {f}, before row {l}"
+                    ));
+                }
+            }
+            if list.windows(2).any(|w| {
+                claims(&w[0]) == claims(&w[1]) && w[0].name.to_lowercase() > w[1].name.to_lowercase()
+            }) {
+                return Err("the names inside one group are out of order".into());
+            }
+            Ok(format!(
+                "{} opener(s) first, {} program(s) in all",
+                list.iter().filter(|a| claims(a)).count(),
+                list.len()
+            ))
+        })(),
+    );
+    r.check(
+        "a closed tab is remembered once, newest first, and the list stops at ten",
+        (|| {
+            let mut list: Vec<std::path::PathBuf> = Vec::new();
+            for n in 0..12 {
+                crate::remember_closed_tab(
+                    &mut list,
+                    std::path::PathBuf::from(format!("/tmp/tab{}", n)),
+                    10,
+                );
+            }
+            if list.len() != 10 {
+                return Err(format!("the list kept {} entries", list.len()));
+            }
+            if list.last().map(|p| p.ends_with("tab11")) != Some(true) {
+                return Err("the newest folder is not last".into());
+            }
+            if list.first().map(|p| p.ends_with("tab2")) != Some(true) {
+                return Err(format!("the oldest kept is {:?}", list.first()));
+            }
+            crate::remember_closed_tab(&mut list, std::path::PathBuf::from("/tmp/tab3"), 10);
+            let seen = list.iter().filter(|p| p.ends_with("tab3")).count();
+            if seen != 1 {
+                return Err(format!("tab3 appears {seen} times"));
+            }
+            if list.last().map(|p| p.ends_with("tab3")) != Some(true) {
+                return Err("the folder did not move to the newest end".into());
+            }
+            Ok("ten kept, newest last, no duplicate".into())
         })(),
     );
 

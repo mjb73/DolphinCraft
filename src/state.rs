@@ -336,6 +336,11 @@ pub enum Request {
     DeletePermanent(Vec<PathBuf>),
     /// Added: empty the Trash, the action the original's `Empty Trash` row runs.
     EmptyTrash,
+    /// Added: put every remembered choice back to its factory default and forget
+    /// the tabs of the last run. The original has no such row — it expects the
+    /// person to walk its settings pages — but a single row is what "start over"
+    /// means in a window that keeps everything by itself.
+    ForgetSettings,
     BulkRename(Vec<PathBuf>),
     QuickLook(PathBuf),
     NewFolder(PathBuf),
@@ -353,6 +358,20 @@ pub enum Request {
     /// Added feature: the gallery's thumbnail size or caption switches changed,
     /// so the choice is worth remembering.
     GalleryChanged,
+    /// Added feature: open these files in a named program (the id of its
+    /// `.desktop` entry). `remember` puts the choice into the desktop's own
+    /// `mimeapps.list` — that is what the original's "Remember application
+    /// association" box does.
+    OpenWith {
+        id: String,
+        paths: Vec<PathBuf>,
+        remember: Option<String>,
+    },
+    /// Added feature: the chooser behind "Other Application…".
+    OpenWithChoose(Vec<PathBuf>),
+    /// Added feature: bring back the tab that was closed, by its place in the
+    /// list of closed tabs (0 is the newest).
+    ReopenClosedTab(usize),
     OpenPath(PathBuf),
     Cut,
     Copy,

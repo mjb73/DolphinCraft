@@ -1843,3 +1843,230 @@ Estimated, and marked so in `mechanics.json`: the **20 ms** duplicate-notch wind
 principle repeat inside 20 ms and lose one step) and the **pan clamp** itself —
 the browser translates freely and can lose a picture, so the stop at the picture's
 edges is this build's own rule, chosen to answer the person's report.
+
+## Open With: the menu rows, the chooser, and remembering (asked for by the person)
+
+The person asked for the everyday Dolphin menu on a file, not just the file
+operations, so this pass added "Open With" to the right-click menu. Everything
+below was read out of the libraries the original loads, then checked against
+the original running under a virtual display (`checks/openwith-orig/`,
+`file-menu.png` and `menu.png`).
+
+**The strings, and the code that loads them** (`libKF6KIOWidgets.so.6.31.0`, the
+file behind `/usr/lib/libKF6KIOWidgets.so.6`; offsets verified with
+`strings -t x` and the references with `objdump -d`):
+
+| string | address | loaded at | enclosing function |
+| --- | --- | --- | --- |
+| `&Open With` (submenu row) | 0x11c24a | 0x64b5e | 0x646d0 |
+| `Open &with %1` (preferred row) | 0x11c258 | 0x64d34 | 0x646d0 |
+| `&Open With` (window title) | 0x11c37c | 0x6e1ca | 0x6d980 |
+| `&Other Application` (last row) | 0x11c387 | 0x6e028 | 0x6d980 |
+| `&Remember application association for all files of type "%1" (%2)` | 0x120210 | 0x84731 | 0x834c0 |
+
+So the menu is two functions, not one: 0x646d0 builds the rows inside the
+right-click menu, 0x6d980 is the chooser window, and 0x834c0 draws the tick box
+that writes the association. The `%1` in `Open &with %1` is the program's own
+`Name=`; the `%2` in the tick box's sentence is the file type.
+
+**The rules the rebuild keeps** (`app/src/apps.rs`, `app/src/panels.rs`,
+`app/src/views.rs`):
+
+* the first row is *"Open with <program>"*, naming the desktop's own preferred
+  program for the file's type, read from `[Default Applications]` in
+  `$XDG_CONFIG_HOME/mimeapps.list` — the same file every other program on the
+  computer reads, so a choice made here is a choice made everywhere;
+* below it *"Open With ▸"* lists the programs whose `.desktop` entry names the
+  type in `MimeType=`, in name order, followed by *"Other Application…"*;
+* that last row opens a chooser holding **every** program the desktop has: the
+  ones that claim the type first, then the rest, each half in name order, with
+  the text field narrowing on the name and ↑/↓, Enter and Escape working
+  without the mouse. The desktop's preferred program is the row it opens on;
+* the tick box is worded exactly as the original's, with the extension and the
+  type filled in: *Remember this choice for all files of type ".md"
+  (text/markdown)*;
+* ticking it rewrites **one** line of `mimeapps.list` — the row for that type in
+  `[Default Applications]` — and leaves every other row, every other section and
+  the file's order alone, which is what makes the first row of the menu change
+  the next time it is opened;
+* `Exec=` is turned into arguments with the desktop-entry field codes filled in
+  (`%f`, `%F`, `%u`, `%U`, `%i`, `%c`, `%k`, `%%`); a program with no file code
+  gets the paths appended, so nothing opens empty;
+* a file whose name says nothing (`Cargo.lock`, `Makefile`, a name with no
+  extension) is read: the first kilobyte of plain text is `text/plain`, and a
+  NUL or a control byte keeps it `application/octet-stream`. Without that,
+  right-clicking a text file with an unusual extension offered *no* program at
+  all, where the original offers editors — the type a desktop reports comes from
+  the file's content as well as its name.
+
+**Checked in the running window** (`app/shots/`): `ctx-file.png` is the file
+menu with *Open* / *Open With ▸*; `ctx-submenu.png` is the submenu on
+`Cargo.lock` reading **Kate, KWrite, Micro, Vim, Other Application…**;
+`openwith3.png` is the chooser, opened on a `.md` file, led by the one program
+that claims `text/markdown` and then every other program by name.
+
+`--selftest` covers the parts without a window: *"a program's entry says what it
+opens, and a hidden one is left out"*, *"the chosen files reach the program, and
+no field codes are left behind"*, *"remembering a program rewrites only the row
+for that kind of file"*, *"the tick box names the file type the way the original
+does"*, *"the menu finds the programs this computer has for a kind of file"*,
+*"a file whose name says nothing is read before its menu is built"* and *"the
+chooser leads with the programs that open this kind of file"*.
+
+Estimated, and marked so in `mechanics.json`: the **1024-byte** sniff window (the
+original's test is shared-mime-info's, whose own rule is a priority question and
+not a fixed length), and the **12-row cap** on the submenu — the original's
+submenu was not measured with more than a handful of programs installed, so the
+cap is this build's own choice to keep the menu on screen.
+
+## The delete question: read out of Dolphin and out of KIO (this pass)
+
+This round the original's **main program** `/usr/bin/dolphin` (26.08.2, sha256
+`341e417b…fad937`) was opened again, and because the first three delete strings
+turned out to be only half the story, the two libraries the program calls were
+opened as well:
+
+| target | why |
+| --- | --- |
+| `/usr/bin/dolphin` | the Confirmations settings page, the keys it writes, the action captions |
+| `/usr/lib/libdolphinprivate.so.6` | `DolphinView::trashSelectedItems` @0x27f2e0 — hands the URLs over, asks nothing itself |
+| `/usr/lib/libKF6KIOWidgets.so.6.31.0` | `KIO::DeleteOrTrashJob` and `KIO::JobUiDelegate` — where the question is really asked and worded |
+
+A Ghidra address is the file offset plus `0x100000` for `/usr/bin/dolphin`
+(stripped, no symbols); in the two libraries the addresses below are virtual
+addresses and the symbol names are real.
+
+**The finding that changes the picture: Dolphin never asks the delete question.
+KIO does.** `DolphinView::trashSelectedItems` @0x27f2e0 builds a
+`KIO::DeleteOrTrashJob`; its result comes back in
+`DolphinView::slotTrashFileFinished` @0x27be30. Everything below — the switch,
+its default, the sentences, the button labels — lives in `libKF6KIOWidgets`.
+
+### The three switches and their defaults
+
+`KIO::WidgetsAskUserActionHandler::askUserDelete` @0x1a7980
+(`libKF6KIOWidgets.so.6.31.0`, pseudo-code `rea/deep4/114-pseudo-1a7a31.c`,
+evidence `ev_c9bf156e…4544f6b`) reads the group **`[Confirmations]`** of
+**`kiorc`** (both names UTF-16 in the library: group @0x21e8ac, file @0x21e8c8,
+read back with `read_bytes`, `ev_ede36175…c22b5f`). Which key it reads depends on
+the deletion type passed in:
+
+| deletion type | key (string address) | default |
+| --- | --- | --- |
+| 0 — Delete | `ConfirmDelete` @0x21e8d4 (13 chars) | **true** |
+| 1 — Move to Trash | `ConfirmTrash` @0x21e8f0 (12 chars) | **false** |
+| 2 — Empty Trash | `ConfirmEmptyTrash` @0x21f2a8 (17 chars, `ev_daef67a0…f1ef99`) | **true** |
+| 3, 4 (other delete kinds) | `ConfirmDelete` @0x21e8d4 again | **true** |
+
+The default is the byte the function stores before the read: `local_101 = 1` at
+the top, flipped to `0` only in the Trash branch. When the read says "do not
+ask" the function calls `KIO::AskUserActionInterface::askUserDeleteResult` with
+the first (yes) result and no dialog appears at all.
+
+Dolphin's own settings page agrees, function by function:
+
+* `FUN_00228ba0` @0x228ba0 (page load, `rea/deep4/033-pseudo-confirmtrash-ref2.c`,
+  `ev_3cfcd8e2…80b950`) reads `ConfirmTrash`, `ConfirmEmptyTrash` and
+  `ConfirmDelete` — in that order — and ticks the three boxes from them. The
+  defaults it passes are three bytes at **0x243f00 = 1, 0x243f01 = 1,
+  0x243f02 = 0** (read with `read_bytes`, `ev_b167d30b…b35b60` and
+  `ev_baf8d6b4…c12bef`; they sit right after the string `sSettingsPage`).
+* `FUN_002283f0` @0x2283f0 (page save, `rea/deep4/032-pseudo-confirmtrash-ref1.c`,
+  `ev_5b21dd77…75469b`) writes the three `writeEntry` calls back into
+  `[Confirmations]` of `kiorc`, and in the same page maps the *Executable
+  scripts* combo box to `behaviourOnLaunch` = `alwaysAsk` / `open` / `execute`.
+* `FUN_001d5010` @0x1d5010 (`rea/deep4/031-pseudo-confirmations-page.c`,
+  `ev_9c70ab6e…2ed43`) is the page itself: **seven** checkboxes, the group
+  header **"Ask for confirmation in Dolphin when:"** @0x236af0
+  (`ev_b30c319c…ccbfe`), and the three delete lines **"Moving files or folders
+  to trash"** @0x236aa0, **"Deleting files or folders"** @0x22e627 (used at
+  0x1d57a0) and **"Emptying trash"** @0x22e618 (used at 0x1d572c). The other four
+  are the tab, folder, terminal and admin questions.
+
+### The sentences in the box
+
+`KIO::JobUiDelegate::askDeleteConfirmation` @0x1a8a20 (`libKF6KIOWidgets`,
+`rea/deep4/112-pseudo-askdelete.c`, `ev_d75520fb…a8554`):
+
+* Moving to the Trash, one item — continue button **"Move to Trash"** (0x21e94c),
+  cancel is the standard Cancel, and the text is
+  `Do you really want to move this item to the Trash?` followed by
+  `<nl/><filename>%1</filename>`, i.e. the item's name on its own line;
+* moving several — the same question through `ki18ndp` (plural) and
+  `KMessageBox::warningContinueCancelList`, which lists every marked name;
+* deleting permanently — continue button **"Delete Permanently"**, text
+  `Do you really want to permanently delete this item?`, the name line, a blank
+  line, then `This action cannot be undone.` inside
+  `<emphasis strong='true'>`; several items take the list form with the same
+  warning;
+* emptying the Trash — continue button **"Empty Trash"** with a theme icon. Its
+  question text is **not** in the binary: the call is
+  `kxi18ndc("kio6", "@info")`, a lookup in kio's translation catalogue, so the
+  wording of that one sentence stays unknown here and the rebuild keeps its own;
+* all three boxes pass flag `0x21` to `KMessageBox` — Dangerous plus a Continue
+  button — which is why the continue button, not the cancel button, is the one
+  that carries the warning colour.
+
+### Inside the Trash, Delete means delete
+
+`KIO::DeleteOrTrashJob::DeleteOrTrashJob` @0x1b0fa0
+(`rea/deep4/103-pseudo-job-ctor.c`, `ev_e4af4735…bd4bdab03`): when the requested
+type is Trash (1) and the first URL's scheme is `trash`, the job rewrites its
+deletion type to Delete (0). So Delete on a row in the Trash skips the move and
+asks the permanent-delete question, under the `ConfirmDelete` switch, never
+`ConfirmTrash`. `KIO::DeleteOrTrashJob::start` @0x1b4970 then hands the work to
+the `AskUserActionInterface` of the window's UI delegate.
+
+### The captions on the row buttons
+
+`FUN_001c81f0` @0x1c81f0 (`rea/deep4/034-pseudo-permadelete.c`,
+`ev_beb9f0bf…dd1243b`) is the function that captions the buttons a row shows on
+hover. The list, all from that one switch:
+
+| case | caption | string |
+| --- | --- | --- |
+| 0 | `Copy %2 to the Clipboard` | — |
+| 1 | `Copy the Location of %2 to the Clipboard` | — |
+| 3 | `Cut %2 to the Clipboard` | — |
+| 4 | `Permanently Delete %2` | 0x22e3b1 |
+| 5 | `Duplicate %2` | — |
+| 8 | `Move %2 to the Trash` | 0x22e3e6 |
+| 10 | `Rename %2` | — |
+
+The caption is measured with `QFontMetrics::averageCharWidth` and elided to
+**20 × that width** (`imul …, 0x14`), so the button keeps the same width for
+every name.
+
+### What the rebuild took from this pass
+
+* **The words.** Both questions now use the original's sentences and the item's
+  own name on a line under the question (`app/src/main.rs`,
+  `display_name` / `name_list`); the continue buttons read "Move to Trash",
+  "Delete Permanently" and "Empty Trash" (`app/src/panels.rs`), and the Trash
+  view's own rows already carried the last two.
+* **The defaults.** `confirm_delete` now ships **on**, the original's default,
+  so Shift+Delete asks first. `confirm_trash` stays **off**: it is off in the
+  original too, and the person asked for a marked picture and a press of Delete
+  to be the whole action. `confirm_empty_trash` stays on. This is the exact
+  three-way state the original opens with, and `--selftest` now states it.
+* **The Trash rule** (Delete inside the Trash is a permanent delete) was already
+  in the build; it is now cited to `DeleteOrTrashJob`'s constructor instead of
+  being described from behaviour.
+* **Still the rebuild's own:** the wording of the Empty-Trash question (not in
+  the binary), and the eight-name cap on the list under a multiple-item
+  question, where the original lists every name in a scrolling
+  `KMessageBox::warningContinueCancelList`.
+
+**Checked in the running window** (`app/shots/delete-question.png`): the box
+that Shift+Delete opens on three marked pictures, reading *Delete Permanently* /
+*Do you really want to permanently delete these items?* / *3 items:* with the
+three names under it / *This action cannot be undone.*, its continue button
+carrying the original's label, and nothing deleted while it was up. With the
+Trash switch turned on, `app/shots/trash-question.png` shows the other path:
+*Move to Trash* / *Do you really want to move these items to the Trash?* / the
+three names / a blue *Move to Trash* button.
+
+`--selftest` covers this without a window: *"a fresh profile asks no question
+before moving to the Trash, but does before a permanent delete and before
+emptying the Trash"* and *"the delete question is worded the way the original
+words it"*.
