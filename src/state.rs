@@ -376,6 +376,12 @@ pub enum Request {
     Compress(Vec<PathBuf>, PathBuf),
     /// Added feature: *Extract* — unpack this archive next to itself.
     Extract(PathBuf),
+    /// Added feature: *Find in Files* — read every text file below this folder
+    /// and count the phrase, with the line it was written on.
+    FindInFiles {
+        root: PathBuf,
+        opts: crate::findtext::Options,
+    },
     /// Added feature: show a file in its folder (the space window's shortlist,
     /// and the same thing the navigation panel's recent rows do).
     Reveal(PathBuf),

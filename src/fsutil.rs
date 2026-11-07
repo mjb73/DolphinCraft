@@ -304,24 +304,99 @@ pub fn long_date(t: Option<SystemTime>) -> String {
     )
 }
 
-pub fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        return format!("{} B", bytes);
+/// Which unit ladder `KIO::convertSize` uses.
+///
+/// `KIO::convertSize` @0x1f25f0 in `libKF6KIOCore.so.6` reads
+/// `[Locale] BinaryUnitDialect` out of `kdeglobals`, clamps anything above 2
+/// back to 0, and hands the value to
+/// `KFormat::formatByteSize(size, 1, dialect, DefaultBinaryUnits)`. 0 is the
+/// factory setting (IEC steps of 1024, `KiB`); 1 keeps 1024-byte steps but
+/// writes the older `KB` labels; 2 uses SI steps of 1000 and `kB`.
+pub fn size_dialect() -> u8 {
+    use std::sync::OnceLock;
+    static DIALECT: OnceLock<u8> = OnceLock::new();
+    *DIALECT.get_or_init(|| {
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+            .map(|dir| dir.join("kdeglobals"));
+        let Some(path) = config else { return 0 };
+        let Ok(text) = fs::read_to_string(path) else {
+            return 0;
+        };
+        let mut in_locale = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_locale = line == "[Locale]";
+                continue;
+            }
+            if !in_locale {
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("BinaryUnitDialect=") {
+                return match value.trim().parse::<i32>() {
+                    Ok(n) if (0..=2).contains(&n) => n as u8,
+                    _ => 0,
+                };
+            }
+        }
+        0
+    })
+}
+
+fn grouped(value: u64) -> String {
+    let digits = value.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
     }
-    let units = ["KiB", "MiB", "GiB", "TiB", "PiB"];
-    let mut value = bytes as f64 / 1024.0;
+    out
+}
+
+/// A size written exactly the way `KFormat::formatByteSize(size, 1)` writes it.
+///
+/// Measured from the installed libraries (`KFormat` probe, see MECHANICS.md):
+/// below one step the number is a whole count of bytes with thousands commas
+/// ("1,023 B"); above it there is always **one** decimal, rounded half **away
+/// from zero** ("1.25 KiB" prints "1.3 KiB"), and the integer part keeps its
+/// commas ("1,024.0 KiB"). The unit changes only when the scaled value reaches
+/// the next step, so 1,048,575 bytes is still "1,024.0 KiB", not "1.0 MiB".
+pub fn format_size_in(bytes: u64, dialect: u8) -> String {
+    let (step, units): (f64, [&str; 6]) = match dialect {
+        1 => (1024.0, ["KB", "MB", "GB", "TB", "PB", "EB"]),
+        2 => (1000.0, ["kB", "MB", "GB", "TB", "PB", "EB"]),
+        _ => (1024.0, ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"]),
+    };
+    if (bytes as f64) < step {
+        return format!("{} B", grouped(bytes));
+    }
+    let mut value = bytes as f64 / step;
     let mut unit = 0;
-    while value >= 1024.0 && unit < units.len() - 1 {
-        value /= 1024.0;
+    while value >= step && unit < units.len() - 1 {
+        value /= step;
         unit += 1;
     }
-    format!("{:.1} {}", value, units[unit])
+    let tenths = (value * 10.0 + 0.5).floor() as u64;
+    format!(
+        "{}.{} {}",
+        grouped(tenths / 10),
+        tenths % 10,
+        units[unit]
+    )
+}
+
+pub fn format_size(bytes: u64) -> String {
+    format_size_in(bytes, size_dialect())
 }
 
 /// Share of a volume that is in use, in whole percent.
 ///
-/// `FUN_001e6a40` @0x1e6a40 in `/usr/bin/dolphin` (the function that fills the
-/// status bar's free-disk-space button) computes
+/// `FUN_001e6a00` @0x1e6a00 in `/usr/bin/dolphin` (the function that fills the
+/// status bar's free-disk-space button; 0x1e6a40 is an instruction inside it) computes
 ///
 ///     pct = (int)(((double)(total - free) * 100.0) / (double)total + 0.5)
 ///

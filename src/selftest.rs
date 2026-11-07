@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::fsutil;
+use crate::findtext;
 use crate::search::{self, DupScan, SearchFilters, SearchSession};
 
 struct Report {
@@ -58,6 +59,21 @@ fn wait_dup(scan: &mut DupScan) -> Result<(), String> {
     scan.poll();
     if scan.scanning {
         return Err("the scan did not finish in 10 seconds".into());
+    }
+    Ok(())
+}
+
+
+/// Wait for a content search to finish, or say it did not.
+fn wait_find(ft: &mut findtext::FindText) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while ft.scanning && Instant::now() < deadline {
+        ft.poll();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    ft.poll();
+    if ft.scanning {
+        return Err("the search did not finish in 15 seconds".into());
     }
     Ok(())
 }
@@ -713,7 +729,7 @@ pub fn run() -> i32 {
     r.check(
         "the status bar counts folders and files the way the original does",
         (|| {
-            // `DolphinView::emitStatusBarText` @0x273180: an empty folder reads
+            // `DolphinView::emitStatusBarText` @0x272f40: an empty folder reads
             // "0 folders, 0 files"; folders alone carry no size; files alone use
             // "%1 (%2)"; both use "%1, %2 (%3)".
             let empty = crate::status_counts(0, 0, 0);
@@ -725,11 +741,13 @@ pub fn run() -> i32 {
                 return Err(format!("three folders read \"{folders_only}\""));
             }
             let one_file = crate::status_counts(0, 1, 1024);
-            if one_file != "1 file (1.0 KiB)" {
+            let want_one = format!("1 file ({})", fsutil::format_size(1024));
+            if one_file != want_one {
                 return Err(format!("one 1 KiB file reads \"{one_file}\""));
             }
             let both = crate::status_counts(2, 3, 2048);
-            if both != "2 folders, 3 files (2.0 KiB)" {
+            let want_both = format!("2 folders, 3 files ({})", fsutil::format_size(2048));
+            if both != want_both {
                 return Err(format!("2 folders and 3 files read \"{both}\""));
             }
             let sel_folders = crate::status_selection(1, 0, 0);
@@ -737,11 +755,16 @@ pub fn run() -> i32 {
                 return Err(format!("one selected folder reads \"{sel_folders}\""));
             }
             let sel_files = crate::status_selection(0, 2, 1536);
-            if sel_files != "2 files selected (1.5 KiB)" {
+            let want_sel = format!("2 files selected ({})", fsutil::format_size(1536));
+            if sel_files != want_sel {
                 return Err(format!("two selected files read \"{sel_files}\""));
             }
             let sel_mixed = crate::status_selection(1, 2, 1536);
-            if sel_mixed != "1 folder selected, 2 files selected (1.5 KiB)" {
+            let want_mixed = format!(
+                "1 folder selected, 2 files selected ({})",
+                fsutil::format_size(1536)
+            );
+            if sel_mixed != want_mixed {
                 return Err(format!("a mixed selection reads \"{sel_mixed}\""));
             }
             Ok(format!("\"{both}\" and \"{sel_mixed}\""))
@@ -909,8 +932,10 @@ pub fn run() -> i32 {
     r.check(
         "the used-space share rounds half up",
         (|| {
-            // `FUN_001e6a40` @0x1e6a40: (total - free) * 100 / total + 0.5,
-            // truncated — never a plain integer division.
+            // `FUN_001e6a00` @0x1e6a00 (the body that writes the free-space
+            // button; 0x1e6a40 is an instruction inside it):
+            // (total - free) * 100 / total + 0.5, truncated — never a plain
+            // integer division.
             let pct = fsutil::used_percent(1, 1000);
             if pct != 100 {
                 return Err(format!("999 of 1000 bytes used read {pct}%"));
@@ -928,6 +953,44 @@ pub fn run() -> i32 {
                 return Err(format!("an unreported volume read {none}%"));
             }
             Ok(format!("999/1000 → {pct}%, 510/1010 → {down}%"))
+        })(),
+    );
+
+    r.check(
+        "sizes are written the way the original's size formatter writes them",
+        (|| {
+            // `KIO::convertSize` @0x1f25f0 in libKF6KIOCore.so.6 passes
+            // precision 1 to `KFormat::formatByteSize` @0x1ba880 in
+            // libKF6CoreAddons.so.6. A probe of that installed formatter gives
+            // the table below: bytes are a whole count with thousands commas,
+            // scaled values always carry one decimal, the half goes away from
+            // zero (1.25 KiB → 1.3), and the unit only changes at the step.
+            let cases: [(u64, &str); 9] = [
+                (999, "999 B"),
+                (1000, "1,000 B"),
+                (1023, "1,023 B"),
+                (1024, "1.0 KiB"),
+                (1280, "1.3 KiB"),
+                (1536, "1.5 KiB"),
+                (1048575, "1,024.0 KiB"),
+                (1048576, "1.0 MiB"),
+                (1099511627776, "1.0 TiB"),
+            ];
+            for (bytes, want) in cases {
+                let got = fsutil::format_size_in(bytes, 0);
+                if got != want {
+                    return Err(format!("{bytes} reads {got:?}, expected {want:?}"));
+                }
+            }
+            let legacy = fsutil::format_size_in(1024, 1);
+            if legacy != "1.0 KB" {
+                return Err(format!("the legacy dialect reads {legacy:?}"));
+            }
+            let si = fsutil::format_size_in(1000, 2);
+            if si != "1.0 kB" {
+                return Err(format!("the SI dialect reads {si:?}"));
+            }
+            Ok("1,023 B, 1.3 KiB at the half, 1,024.0 KiB below the MiB step, 1.0 MiB, 1.0 TiB".to_string())
         })(),
     );
 
@@ -3880,6 +3943,158 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
                 return Err(format!("unzip was asked for {z:?}"));
             }
             Ok("tar -xf, unzip -q -o … -d".into())
+        })(),
+    );
+
+
+    // ---- added feature: finding a phrase inside files --------------------
+    r.check(
+        "a phrase is counted in the text, in either case or in one",
+        (|| {
+            let text = "alpha beta ALPHA\nGamma: alpha";
+            let loose = findtext::count_matches(text, "alpha", false);
+            let exact = findtext::count_matches(text, "alpha", true);
+            if loose != 3 {
+                return Err(format!("case-blind count was {loose}, not 3"));
+            }
+            if exact != 2 {
+                return Err(format!("case-sensitive count was {exact}, not 2"));
+            }
+            if findtext::count_matches(text, "", false) != 0 {
+                return Err("an empty phrase counted matches".into());
+            }
+            Ok(format!("{loose} loose, {exact} exact"))
+        })(),
+    );
+    r.check(
+        "the matching line is reported with its number, trimmed and short",
+        (|| {
+            let text = "one\n    two   spaces\t\tthen the word needle here\nthree";
+            let (line_no, line) =
+                findtext::first_match_line(text, "NEEDLE", false).ok_or("no line found")?;
+            if line_no != 2 {
+                return Err(format!("line {line_no}, not 2"));
+            }
+            if line != "two spaces then the word needle here" {
+                return Err(format!("the line read {line:?}"));
+            }
+            let long = "x".repeat(400);
+            let cut = findtext::snippet(&long);
+            if cut.chars().count() != findtext::SNIPPET_CHARS + 1 || !cut.ends_with('…') {
+                return Err(format!("a long line was cut to {} chars", cut.chars().count()));
+            }
+            Ok(format!("line {line_no}, {} chars for a long one", cut.chars().count()))
+        })(),
+    );
+    let find_root = base.join("findtext");
+    let _ = write(
+        &find_root.join("report.txt"),
+        b"first line\nthe needle is here\nand the needle again\n",
+    );
+    let _ = write(&find_root.join("sub/notes.md"), b"nothing\na second needle\n");
+    let _ = write(&find_root.join("hidden/.secret.txt"), b"a needle nobody asked for\n");
+    let _ = write(&find_root.join("picture.bin"), &[0u8, 1, 2, b'n', b'e', b'e', b'd', b'l', b'e']);
+    let _ = write(&find_root.join("huge.txt"), &vec![b'n'; (findtext::MAX_BYTES + 10) as usize]);
+    let _ = write(&find_root.join("report-again.txt"), b"no phrase at all here\n");
+    r.check(
+        "a real walk finds the phrase, skips binaries, big files and hidden folders",
+        (|| {
+            let mut opts = findtext::Options::new("needle");
+            opts.mode = findtext::Mode::Contents;
+            let mut ft = findtext::FindText::start(find_root.clone(), opts);
+            wait_find(&mut ft)?;
+            let names: Vec<String> = ft.hits.iter().map(|h| h.file_name()).collect();
+            if names.len() != 2 {
+                return Err(format!("hits were {names:?}, not two"));
+            }
+            if !names.contains(&"report.txt".to_string()) || !names.contains(&"notes.md".to_string()) {
+                return Err(format!("wrong files: {names:?}"));
+            }
+            if ft.matches != 3 {
+                return Err(format!("{} matches, not 3", ft.matches));
+            }
+            if ft.skipped_big != 1 {
+                return Err(format!("{} too-big files, not 1", ft.skipped_big));
+            }
+            if ft.skipped_binary != 1 {
+                return Err(format!("{} binary files, not 1", ft.skipped_binary));
+            }
+            let report = ft
+                .hits
+                .iter()
+                .find(|h| h.file_name() == "report.txt")
+                .ok_or("report.txt missing")?;
+            if report.line_no != 2 || !report.line.contains("needle is here") {
+                return Err(format!(
+                    "report.txt pointed at line {} ({:?})",
+                    report.line_no, report.line
+                ));
+            }
+            let summary = ft.summary();
+            if !summary.contains("hidden folders left out") || !summary.contains("too large") {
+                return Err(format!("the summary left out a rule: {summary}"));
+            }
+            Ok(format!("{names:?} on line 2, {} matches", ft.matches))
+        })(),
+    );
+    r.check(
+        "the binary switch reads a file the default walk passes over",
+        (|| {
+            let mut opts = findtext::Options::new("needle");
+            opts.mode = findtext::Mode::Contents;
+            opts.include_binary = true;
+            let mut ft = findtext::FindText::start(find_root.clone(), opts);
+            wait_find(&mut ft)?;
+            if !ft.hits.iter().any(|h| h.file_name() == "picture.bin") {
+                return Err("the binary file was still passed over".into());
+            }
+            if ft.skipped_binary != 0 {
+                return Err(format!("{} binary files counted as skipped", ft.skipped_binary));
+            }
+            Ok(format!("{} hits, binary read", ft.hits.len()))
+        })(),
+    );
+    r.check(
+        "the name mode answers from names alone, and the mixed mode from both",
+        (|| {
+            let mut names_only = findtext::Options::new("report");
+            names_only.mode = findtext::Mode::Names;
+            let mut ft = findtext::FindText::start(find_root.clone(), names_only);
+            wait_find(&mut ft)?;
+            let got: Vec<String> = ft.hits.iter().map(|h| h.file_name()).collect();
+            if got.len() != 2 || ft.matches != 2 {
+                return Err(format!("name mode gave {got:?} / {} matches", ft.matches));
+            }
+            if ft.hits.iter().any(|h| h.line_no != 0) {
+                return Err("a name-only hit carried a line number".into());
+            }
+            let mut both = findtext::Options::new("needle");
+            both.mode = findtext::Mode::NamesAndContents;
+            let mut ft2 = findtext::FindText::start(find_root.clone(), both);
+            wait_find(&mut ft2)?;
+            let names: Vec<String> = ft2.hits.iter().map(|h| h.file_name()).collect();
+            if names.len() != 2 {
+                return Err(format!("mixed mode gave {names:?}"));
+            }
+            Ok(format!("{got:?} by name, {names:?} by name or contents"))
+        })(),
+    );
+
+    r.check(
+        "an empty phrase starts no walk and says there is nothing to search for",
+        (|| {
+            let mut ft = findtext::FindText::start(find_root.clone(), findtext::Options::new(""));
+            if ft.scanning {
+                return Err("an empty phrase started a walk".into());
+            }
+            if ft.files_seen != 0 || !ft.hits.is_empty() {
+                return Err(format!("an empty phrase looked at {} files", ft.files_seen));
+            }
+            let summary = ft.summary();
+            if !summary.starts_with("Nothing searched yet") {
+                return Err(format!("the summary read {summary:?}"));
+            }
+            Ok(summary)
         })(),
     );
 

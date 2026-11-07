@@ -19,6 +19,7 @@ pub fn about_line() -> String {
 mod apps;
 mod archive;
 mod config;
+mod findtext;
 mod foldercolor;
 mod fsutil;
 mod gallery;
@@ -306,6 +307,13 @@ pub struct App {
     pub compress: Option<archive::Compress>,
     /// Added feature: *Extract* — a ZIP or tar archive unpacked in the window.
     pub extract: Option<archive::Extract>,
+    /// Added feature: *Find in Files* — the two content modes the original's
+    /// find bar names (`File names and contents`, `File contents`) but hands to
+    /// KIO to answer. This window reads the files itself.
+    pub findtext: Option<findtext::FindText>,
+    /// `--findtext <phrase>`: open that window on the first frame with the
+    /// phrase already in the field, so the picture can be taken without typing.
+    pub pending_findtext: Option<String>,
     /// `--compress` / `--extract <archive>`: open those windows on the first
     /// frame, so they can be photographed without a mouse.
     pub pending_compress: Option<PathBuf>,
@@ -624,6 +632,8 @@ impl App {
             pending_space: None,
             compress: None,
             extract: None,
+            findtext: None,
+            pending_findtext: None,
             pending_compress: None,
             pending_extract: None,
             quick: None,
@@ -1337,6 +1347,7 @@ impl App {
         let mut forget_location: Option<PathBuf> = None;
         let mut fold_section = false;
         let mut open_dups = false;
+        let mut open_findtext = false;
         let mut open_bulk = false;
         let mut open_quick = false;
         // The two archive/disk rows in the Added tools group: one asks the
@@ -1716,6 +1727,14 @@ impl App {
                 if tool_row(ui, "Duplicates", "Find identical files in this folder (Ctrl+Shift+D)", Some("Ctrl+Shift+D")) {
                     open_dups = true;
                 }
+                if tool_row(
+                    ui,
+                    "Find in Files",
+                    "Search inside the documents of this folder for a phrase (Ctrl+Shift+F)",
+                    Some("Ctrl+Shift+F"),
+                ) {
+                    open_findtext = true;
+                }
                 if tool_row(ui, "Bulk Rename", "Rename many files with a pattern (Ctrl+Shift+R)", Some("Ctrl+Shift+R")) {
                     open_bulk = true;
                 }
@@ -1833,6 +1852,13 @@ impl App {
             self.config.shortcut_colors.retain(|c| c.path != p);
             self.config_dirty = true;
             self.toast("Shortcut removed");
+        }
+        if open_findtext {
+            let root = self.pane().current_dir();
+            self.findtext = Some(findtext::FindText::start(
+                root,
+                findtext::Options::new(String::new()),
+            ));
         }
         if open_dups {
             let root = self.pane().current_dir();
@@ -2563,6 +2589,13 @@ impl App {
                     };
                     self.compress = Some(archive::Compress::new(paths, out));
                 }
+                Request::FindInFiles { root, opts } => {
+                    // A new search replaces the old list outright: the window
+                    // always shows the answer to the question in its own field.
+                    let mut win = findtext::FindText::start(root, opts);
+                    win.poll();
+                    self.findtext = Some(win);
+                }
                 Request::Extract(path) => {
                     let path = std::fs::canonicalize(&path).unwrap_or(path);
                     self.extract = Some(archive::Extract::new(path));
@@ -3253,6 +3286,11 @@ impl App {
             if i.consume_key(ctrl_shift, Key::D) {
                 reqs.push(Request::Toast("__dups__".into()));
             }
+            // Added feature: the content search, which has no key in the
+            // original because the original's find bar holds both modes.
+            if i.consume_key(ctrl_shift, Key::F) {
+                reqs.push(Request::Toast("__findfiles__".into()));
+            }
             if i.consume_key(ctrl_shift, Key::R) {
                 reqs.push(Request::Toast("__bulk__".into()));
             }
@@ -3632,6 +3670,13 @@ impl App {
                 self.pane_mut().select_single(last);
                 self.pane_mut().scroll_to = Some(last);
             }
+            "__findfiles__" => {
+                let root = self.pane().current_dir();
+                self.findtext = Some(findtext::FindText::start(
+                    root,
+                    findtext::Options::new(String::new()),
+                ));
+            }
             "__dups__" => {
                 let root = self.pane().current_dir();
                 self.dups = Some(Dups {
@@ -3799,6 +3844,19 @@ impl eframe::App for App {
         }
         // `--space`: open the usage window on the folder the app started in, as
         // soon as the listing is there.
+        // `--findtext <phrase>`: open the search window on the folder the app
+        // started in, with the phrase already in the field and the search
+        // running, so the picture can be taken without typing.
+        if let Some(phrase) = self.pending_findtext.clone() {
+            if self.frames > 1 {
+                self.pending_findtext = None;
+                let root = self.pane().current_dir();
+                self.findtext = Some(findtext::FindText::start(
+                    root,
+                    findtext::Options::new(phrase),
+                ));
+            }
+        }
         if self.pending_space.is_some() && self.frames > 1 {
             let dir = self.pending_space.take().unwrap_or_else(|| self.pane().current_dir());
             self.reqs.push(Request::SpaceUsage(dir));
@@ -4489,6 +4547,7 @@ fn main() -> eframe::Result<()> {
     let mut start_pictures = false;
     // `--space`: open the disk-usage window on the first frame.
     let mut start_space = false;
+    let mut start_findtext: Option<String> = None;
     // Added feature captures: `--compress` opens the new archive window on the
     // folder; `--extract <archive>` opens the unpack window on that file.
     let mut start_compress = false;
@@ -4596,6 +4655,14 @@ fn main() -> eframe::Result<()> {
             // Added feature: open *Manage Disk Space Usage* on the first frame,
             // so the window can be photographed without a mouse.
             "--space" => start_space = true,
+            // Added feature: open *Find in Files* on the first frame with the
+            // phrase given, for photographs and for a shortcut of one's own.
+            "--findtext" => {
+                if i + 1 < args.len() {
+                    start_findtext = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
             // The two added archive windows, for photographs and for anyone
             // who wants to open them straight away.
             "--compress" => start_compress = true,
@@ -4733,6 +4800,7 @@ fn main() -> eframe::Result<()> {
             if start_space {
                 app.pending_space = Some(app.pane().current_dir());
             }
+            app.pending_findtext = start_findtext.clone();
             if start_compress {
                 app.pending_compress = Some(app.pane().current_dir());
             }

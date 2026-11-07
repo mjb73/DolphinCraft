@@ -136,7 +136,7 @@
    "name": "status bar free space",
    "group": "view",
    "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
-   "source": "FUN_001e6a40 @0x1e6a40 in /usr/bin/dolphin; strings 0x12ec43, 0x12ec68; KCapacityBar::setValue"
+   "source": "FUN_001e6a00 @0x1e6a00 in /usr/bin/dolphin; strings 0x22ec55 (%1 free), 0x22ec7a (%1 free out of %2), 0x237458 (with the Press line); KCapacityBar::setValue"
   },
   {
    "name": "size unit style",
@@ -592,13 +592,13 @@
    "name": "disk space button hidden when the volume reports no size",
    "group": "view",
    "value": true,
-   "source": "FUN_001e6a40 @0x1e6a40: total == 0 falls through to QWidget::hide"
+   "source": "FUN_001e6a00 @0x1e6a00: total == 0 falls through to QWidget::hide"
   },
   {
    "name": "used space percent rounding",
    "group": "view",
    "value": "(total - free) * 100.0 / total + 0.5, truncated",
-   "source": "FUN_001e6a40 @0x1e6a40"
+   "source": "FUN_001e6a00 @0x1e6a00"
   },
   {
    "name": "factory icon size, icons view",
@@ -896,7 +896,7 @@
    "name": "status bar capacity bar share",
    "group": "view",
    "value": "(total - free) * 100.0 / total + 0.5, truncated — same value as the tooltip",
-   "source": "FUN_001e6a40 @0x1e6a40, KCapacityBar::setValue(iVar4)"
+   "source": "FUN_001e6a00 @0x1e6a00, KCapacityBar::setValue(iVar4)"
   },
   {
    "name": "icons view maximum width steps",
@@ -1781,7 +1781,7 @@
    "name": "disk usage share rounding",
    "group": "disk usage",
    "value": "half up",
-   "source": "FUN_001e6a40 @0x1e6a40, the formula fsutil::used_percent also uses"
+   "source": "FUN_001e6a00 @0x1e6a00, the formula fsutil::used_percent also uses"
   },
   {
    "name": "disk usage largest files kept",
@@ -1843,6 +1843,108 @@
    "group": "archives",
    "value": "compressfileitemaction.so, extractfileitemaction.so",
    "source": "ark package, /usr/lib/qt6/plugins/kf6/kfileitemaction/"
+  },
+  {
+   "name": "size formatter precision",
+   "group": "view",
+   "value": "1 decimal",
+   "source": "KIO::convertSize @0x1f25f0 in libKF6KIOCore.so.6 calls KFormat::formatByteSize(size, 1, dialect, default) @0x1bb910 in libKF6CoreAddons.so.6"
+  },
+  {
+   "name": "size formatter step (IEC)",
+   "group": "view",
+   "value": 1024,
+   "unit": "bytes",
+   "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 0 and 1"
+  },
+  {
+   "name": "size formatter step (SI)",
+   "group": "view",
+   "value": 1000,
+   "unit": "bytes",
+   "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 2"
+  },
+  {
+   "name": "size formatter rounding",
+   "group": "view",
+   "value": "half away from zero",
+   "source": "KFormat probe of the installed 6.31.0: 1.25 KiB prints 1.3 KiB, 2.25 KiB prints 2.3 KiB"
+  },
+  {
+   "name": "size formatter thousands separator",
+   "group": "view",
+   "value": true,
+   "source": "KFormat probe: 1000 bytes prints 1,000 B and 1,048,575 prints 1,024.0 KiB"
+  },
+  {
+   "name": "size formatter unit labels",
+   "group": "view",
+   "value": "KiB/MiB/GiB by default; KB/MB/GB when dialect 1; kB/MB/GB when dialect 2",
+   "source": "FUN_001ba880 @0x1ba880, the translate() calls at 0x1cbe41 (IEC), 0x1cbe28 (legacy) and 0x1cbbf2 (SI)"
+  },
+  {
+   "name": "size formatter dialect source",
+   "group": "view",
+   "value": "kdeglobals [Locale] BinaryUnitDialect; anything above 2 reads as 0",
+   "source": "KIO::convertSize @0x1f25f0"
+  },
+  {
+   "name": "disk usage submenu scopes",
+   "group": "disk usage",
+   "value": "current folder, current device, all devices",
+   "source": "strings 0x237538, 0x237560, 0x237588 in FUN_001e8430 @0x1e8430"
+  },
+  {
+   "name": "disk usage window scope label",
+   "group": "disk usage",
+   "value": "Disk Usage Statistics - current folder",
+   "source": "added window walks the open folder, so it uses the original's 0x237538 wording"
+  },
+  {
+   "name": "content search modes",
+   "group": "search",
+   "value": "File names, File names and contents, File contents",
+   "source": "/usr/bin/dolphin strings 0x22e0db \"File names and contents\", 0x22e10c \"File contents\", 0x22caf8 \"FileContents\" (ev_5e70a9dd4972bc0597c7868d29d1a9183cab926ed0f8cdd577960ea0bdaeaf2c)"
+  },
+  {
+   "name": "content search reads files up to",
+   "group": "search",
+   "value": 4194304,
+   "unit": "bytes",
+   "source": "added: MAX_BYTES in findtext.rs (4 MiB)"
+  },
+  {
+   "name": "binary file test",
+   "group": "search",
+   "value": "a NUL byte in the first 8 KiB",
+   "source": "added: findtext::looks_binary, SNIFF_BYTES = 8192"
+  },
+  {
+   "name": "hidden folders in a content search",
+   "group": "search",
+   "value": "left out",
+   "source": "added: the original's find dialog leaves them out by default (find help text 0x231b48)"
+  },
+  {
+   "name": "hits kept before the search stops",
+   "group": "search",
+   "value": 300,
+   "unit": "files",
+   "source": "added: MAX_HITS in findtext.rs"
+  },
+  {
+   "name": "files looked at before the search stops",
+   "group": "search",
+   "value": 20000,
+   "unit": "files",
+   "source": "added: MAX_FILES in findtext.rs"
+  },
+  {
+   "name": "matching line shown, longest",
+   "group": "search",
+   "value": 120,
+   "unit": "characters",
+   "source": "added: SNIPPET_CHARS in findtext.rs (one ellipsis added when cut)"
   }
  ]
 }

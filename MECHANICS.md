@@ -805,7 +805,7 @@ The consequences, all of which the rebuild now reproduces:
 
 `--selftest` now checks all three shapes.
 
-### The disk-space button — `FUN_001e6a40` @0x1e6a40 in `/usr/bin/dolphin`
+### The disk-space button — `FUN_001e6a00` @0x1e6a40 in `/usr/bin/dolphin`
 
 This is the function that fills the status bar's free-space indicator. It reads
 the total size at `+0x20` and the free size at `+0x28` of the space info object
@@ -1004,8 +1004,8 @@ Strings were found first, then their references were followed into functions:
 | `Alphabetical, case insensitive` | 0x1372e0 | `FUN_001e5750` |
 | `Alphabetical, case sensitive` | 0x12eafa | `FUN_001e5750` |
 | `%1 items selected` | 0x12ed75 | `FUN_001f76f0` |
-| `%1 free` | 0x12ec43 | `FUN_001e6a40` |
-| `%1 free out of %2 (%3% used)` | 0x12ec68 | `FUN_001e6a40` |
+| `%1 free` | 0x12ec43 | `FUN_001e6a00` |
+| `%1 free out of %2 (%3% used)` | 0x12ec68 | `FUN_001e6a00` |
 | `Preview icon size:` | 0x12e777 | `FUN_001dcdb0` |
 | `Show previews for` / `… for folders` | 0x12ef59 / 0x12efa6 | `FUN_00217c30` |
 
@@ -1017,7 +1017,7 @@ Functions read (pseudo-code kept under `rea/deep/`, whole-batch evidence
 | `FUN_001e5750` | 0x1e5750 | the **View → Display** page of the settings dialog (sorting mode, folder size, date style, permissions style, long names) |
 | `FUN_001dcdb0` | 0x1dcdb0 | that dialog's view page: icon/preview size sliders, font, maximum width, details rows |
 | `FUN_001f76f0` | 0x1f76f0 | Information panel update (selection count, icon, label) |
-| `FUN_001e6a40` | 0x1e6a40 | status bar free-space widget (text, tooltip, capacity bar, hide) |
+| `FUN_001e6a00` | 0x1e6a40 | status bar free-space widget (text, tooltip, capacity bar, hide) |
 | `GeneralSettings::GeneralSettings` | 0x2b8630 (main program) | the stored sorting choice and its factory default |
 
 ### The three name comparisons, and which one is the default
@@ -1096,7 +1096,7 @@ key, so sorting by size, type or date now breaks ties with
 `Alphabetical, case sensitive` two same-size files order `B.txt, a.txt`, and with
 `Natural` they order `a.txt, B.txt`.
 
-### The free-space widget is a button, a bar and a tooltip — `FUN_001e6a40` @0x1e6a40
+### The free-space widget is a button, a bar and a tooltip — `FUN_001e6a00` @0x1e6a40
 
 Read line by line, in this order:
 
@@ -2449,7 +2449,7 @@ runs no other program, and needs nothing installed.
 | symbolic links | never followed; counted at their own directory-entry size, like a file | rebuild rule, **added** — a link to `/` inside a home folder would otherwise make the total meaningless |
 | an entry that cannot be read | counted in `skipped`, adds nothing to the total, and the window says how many | rebuild rule, **added** |
 | row order | largest first, equal sizes by the file view's own name order (`fsutil::name_cmp`) | rebuild rule, **added** |
-| the share column | whole percent, rounded half **up** (`space::share_percent`) | the formula in `FUN_001e6a40` @`0x1e6a40`, the same arithmetic `fsutil::used_percent` uses for the button |
+| the share column | whole percent, rounded half **up** (`space::share_percent`) | the formula in `FUN_001e6a00` @`0x1e6a00`, the same arithmetic `fsutil::used_percent` uses for the button |
 | the shortlist | the 40 largest files below the folder, 14 of them listed | **estimated**: a "free up space" shortlist, not an inventory; 40 keeps a whole-home walk to a few dozen paths |
 | walking into a folder | taken from the walk already done, no second read of the disk | rebuild rule, **added** |
 | window size | 720 × 590, 640 minimum width | **estimated** from the rebuild's own metrics |
@@ -2495,3 +2495,237 @@ they keep the plugin's own naming where it exists.
 sub-folder is compressed with the code the window uses, the archive is unpacked
 again, and the three files are compared byte for byte — which is what makes the
 pair of windows trustworthy rather than merely drawn.
+
+## This pass: the disk-space control and the size text, read out of the main program
+
+The earlier passes read the private library closely and the main program only in
+parts. This pass opened **`/usr/bin/dolphin`** itself (sha256
+`e824c204f99c17d55a51943790522807f5224f044433d45937a6bcc41d7655ac`, Ghidra
+12.1.4) and walked the disk-space feature from its words to its code:
+
+* core target open — `open_binary` on the main program;
+* native strings find — `search_strings` for the sentences and labels;
+* follow the references — `xrefs` on each string address;
+* native function pseudocode — `procedure_pseudo_code` on every function those
+  references landed in, one call per function, each answer waited for.
+
+The full answers are kept under `rea/deep7/` (`720-open-main.json`,
+`73x-str-*.json`, `75x-xrefs-*.json`, `77x-pseudo-*.json`, `78x`/`79x` for the
+two libraries), so every number below can be checked against the same evidence.
+
+### The words, and the functions they lead to
+
+| string | address | used at | function |
+| --- | --- | --- | --- |
+| `%1 free` (`@info:status Free disk space`) | 0x22ec55 | 0x1e6ab7 | `FUN_001e6a00` @0x1e6a00 |
+| `%1 free out of %2 (%3% used)` | 0x22ec7a | 0x1e6b6a | `FUN_001e6a00` @0x1e6a00 |
+| the same sentence plus `Press to manage disk space usage.` | 0x237458 | 0x1e6c70 | `FUN_001e6a00` @0x1e6a00 |
+| `Manage Disk Space Usage` | 0x22d931 | 0x16a9de | the main window's menu setup |
+| `org.kde.filelight` | 0x22b768 | 0x1e8499 | `FUN_001e8430` @0x1e8430 |
+| `Disk Usage Statistics - current folder` | 0x237538 | 0x1e853b | `FUN_001e8430` @0x1e8430 |
+| `Disk Usage Statistics - current device` | 0x237560 | 0x1e8a80 | `FUN_001e8430` @0x1e8430 |
+| `Disk Usage Statistics - all devices` | 0x237588 | 0x1e86a9 | `FUN_001e8430` @0x1e8430 |
+| `Install additional software to view disk usage statistics…` | 0x2374c8 | 0x1e8d5f | `FUN_001e8430` @0x1e8430 |
+| `<application>Filelight</application> installed successfully.` | 0x2375b0 | 0x1e92e5 | `FUN_001e90f0` @0x1e90f0 |
+
+The first row settles an address this sheet had slightly wrong: **0x1e6a40 is not
+a function entry**. `resolve_containing_procedure` on 0x1e6a40 and 0x1e6c70 both
+report the function that starts at **0x1e6a00** (body 0x1e6a00–0x1e6de2 and two
+further ranges). 0x1e6a40 is the first instruction of the block that computes the
+percentage. The old address has been corrected here and in the code comment that
+cited it.
+
+### The free-space button, line by line — `FUN_001e6a00` @0x1e6a00
+
+It returns through `QWidget::hide()` unless the widget is flagged visible
+(`+0x49 == 1`) **and** the volume reports a total (`total != 0` at
+`[+0x28]+0x20`). When it is shown it does all of this in one pass:
+
+* `free` is `[+0x28]+0x28`, and the percentage is
+
+      iVar4 = (int)(((double)(total - free) * 100.0) / (double)total + 0.5)
+
+  i.e. half **up**, then truncate — exactly `fsutil::used_percent`;
+* the button's text is the `@info:status Free disk space` message (`%1 free`,
+  0x22ec55) filled with `KIO::convertSize(free)` — the free bytes only, never
+  the total;
+* the tooltip on the widget is `@info:tooltip for the free disk space button`
+  (`%1 free out of %2 (%3% used)`, 0x22ec7a) with free, total and that same
+  rounded percentage;
+* a **second** tooltip, on the button itself (`+0x38`), is the long sentence at
+  0x237458 — the same text plus `\nPress to manage disk space usage.`;
+* between one `setUpdatesEnabled(false)` and `setUpdatesEnabled(true)` pair it
+  calls `KCapacityBar::setValue(...)` with the same percentage, so the bar and
+  the number can never disagree.
+
+### The submenu — `FUN_001e8430` @0x1e8430 (`DiskSpaceUsageMenu::aboutToShow`)
+
+It clears the menu first, then asks `KService::serviceByDesktopName` for
+`org.kde.filelight` (0x22b768) and for `org.kde.kdf` (0x22cdf8, the older *KDE
+Disk Free*). What it then builds depends on what is installed:
+
+* **neither program installed** — it checks one more local condition
+  (`FUN_00176ee0` @0x1e76ee0), then inserts a `QWidgetAction` carrying two
+  labels and a push button. The paragraph above the button is the literal at
+  0x2374c8; the button's icon is the theme icon `filelight` (0x22c47c) and its
+  click goes to `FUN_001e2450`, which starts the install;
+* **Filelight installed** — three rows, in this order:
+  * `Disk Usage Statistics - current folder` (0x237538) →
+    `FUN_001e9420` @0x1e9420, which launches Filelight with the current URL
+    through `KIO::ApplicationLauncherJob::setUrls`;
+  * `Disk Usage Statistics - current device` (0x237560), added only when the URL
+    is a local file, → `FUN_001e95f0` @0x1e95f0, which builds a `QStorageInfo`
+    for the path and launches only when it is valid **and** ready;
+  * `Disk Usage Statistics - all devices` (0x237588) →
+    `FUN_001ec2e0` @0x1ec2e0;
+* **only KDF installed** — an *Open in KDF* row → `FUN_001ec430`.
+
+The install job's finished lambda is `FUN_001e90f0` @0x1e90f0. On success
+(`KJob::error() == 0`) it shows the info message (0x2375b0), hides the menu,
+calls `FUN_001e8430` again so the rows are rebuilt, and shows it; on failure it
+shows the job's own error text instead.
+
+### The size text — `KIO::convertSize` @0x1f25f0 and `KFormat::formatByteSize` @0x1bb910
+
+Every size Dolphin prints goes through `KIO::convertSize` (the free-space button
+calls it twice in `FUN_001e6a00`). The function is 537 bytes and does one thing
+before formatting: it reads `[Locale] BinaryUnitDialect` out of `kdeglobals`
+once, keeps 0, 1 or 2, and clamps anything larger back to 0. It then constructs a
+`KFormat` with the current locale and calls
+
+    KFormat::formatByteSize(size, 1, dialect, DefaultBinaryUnits)
+
+The exported `KFormat::formatByteSize` at 0x1bb910 is an 80-byte wrapper; the
+ladder itself is `FUN_001ba880` @0x1ba880 in `libKF6CoreAddons.so.6`. Read from
+that body:
+
+* dialect 0 and 1 divide by **1024**; dialect 2 divides by **1000**;
+* below one step the number is printed as a whole count of bytes and the unit is
+  `B`;
+* otherwise the value is scaled one step at a time and printed with the
+  precision `convertSize` passed — **1 decimal** — through
+  `QLocale::toString`;
+* dialect 0 labels are `KiB, MiB, GiB, TiB, PiB, EiB, ZiB, YiB` (translate calls
+  at 0x1cbe41); dialect 1 keeps the 1024 steps but uses `KB, MB, GB…`
+  (0x1cbe28); dialect 2 uses `kB, MB, GB…` (0x1cbbf2).
+
+A probe compiled against the installed `libKF6CoreAddons.so.6.31.0` (the same
+library the decompiled body comes from) pins the exact output:
+
+| bytes | text | what it shows |
+| --- | --- | --- |
+| 999 | `999 B` | no decimal below one step |
+| 1000 | `1,000 B` | thousands commas in the byte count |
+| 1023 | `1,023 B` | still bytes, comma included |
+| 1024 | `1.0 KiB` | one decimal, IEC label |
+| 1280 | `1.3 KiB` | 1.25 rounds **away from zero**, not to even |
+| 2304 | `2.3 KiB` | 2.25 → 2.3, same rule |
+| 1048575 | `1,024.0 KiB` | the unit changes only when the scaled value reaches it |
+| 1048576 | `1.0 MiB` | exactly one MiB |
+| 1099511627776 | `1.0 TiB` | the ladder continues |
+
+### What the build now does
+
+* `app/src/fsutil.rs` — `format_size_in(bytes, dialect)` implements the ladder
+  and the text above: thousands commas, one decimal, half away from zero, the
+  byte branch, and the IEC / legacy / SI labels. `size_dialect()` reads
+  `[Locale] BinaryUnitDialect` from `kdeglobals` the way `KIO::convertSize`
+  does (missing or unreadable file → 0, values above 2 → 0), and
+  `format_size()` is now `format_size_in(bytes, size_dialect())`. Before this
+  pass it used Rust's `{:.1}`, which rounds halves to even ("1.2 KiB") and never
+  grouped digits ("1023 B").
+* `app/src/panels.rs` — the disk-space window walks the **open folder**, so its
+  heading now uses the original's own wording for that scope,
+  `Disk Usage Statistics - current folder` (0x237538); it had borrowed the
+  *current device* sentence for a scan that never looked at a device.
+* `app/src/selftest.rs` — one new check, *"sizes are written the way the
+  original's size formatter writes them"*, pins all nine probe values plus the
+  legacy and SI labels; the free-space check now cites `FUN_001e6a00`; the
+  status-bar check cites `DolphinView::emitStatusBarText` @0x272f40 (it still
+  carried the 26.08.2 address 0x273180) and compares against `format_size`
+  rather than a literal, so a person who changes the KDE unit dialect does not
+  turn the app's own checks red.
+* `app/mechanics.json` — the two free-space entries now carry `0x1e6a00`, and
+  eight values record the formatter's step, precision, rounding, separators,
+  labels and dialect source, plus the three submenu scopes.
+
+The window picture `app/shots/deep7-space.png` (1440 × 900) shows the new
+heading over a real walk of the home folder: `Disk Usage Statistics - current
+folder`, `351.5 GiB free out of 1.8 TiB (81% used)` — the IEC labels, one
+decimal, and the same percentage in the bar and the sentence.
+
+`cargo build --release` succeeds and `--selftest` passes **110 of 110** checks;
+the new one reads
+
+    PASS  sizes are written the way the original's size formatter writes them
+          (1,023 B, 1.3 KiB at the half, 1,024.0 KiB below the MiB step,
+           1.0 MiB, 1.0 TiB)
+
+### Honest limits of this pass
+
+* The two `ki18nd`/`kxi18ndc` labels inside the missing-Filelight widget (the
+  title and the install button's text) are looked up by message id and have no
+  literal in the binary, so their exact words were not read; only the paragraph
+  at 0x2374c8 and the success sentence at 0x2375b0 are literal strings.
+* The legacy (1) and SI (2) unit labels come from the decompiled translate
+  calls; the probe above measured dialect 0 only. The build's self-check pins
+  the two labels as read from the code, not as measured from a probe.
+* `FUN_001ec2e0` (the *all devices* action) was listed and its address read, but
+  its body was not decompiled line by line; the rebuild does not offer that
+  scope, so no rule depends on it.
+
+## This pass: finding a phrase inside files (added feature)
+
+The request for this round is again *same app but with added features*, and the
+gap this pass fills is the one the find bar has always had here: it filters file
+**names**. The original offers two more modes and names them in
+`/usr/bin/dolphin`:
+
+| what it says | where | read with |
+| --- | --- | --- |
+| `FileContents` | 0x22caf8 | `native_strings_find "Contents"` (Ghidra, ev_5e70a9dd4972bc0597c7868d29d1a9183cab926ed0f8cdd577960ea0bdaeaf2c) |
+| `File names and contents` | 0x22e0db | same search |
+| `File contents` | 0x22e10c | same search |
+| `FileContents` (again, the enum value) | 0x22e145 | same search |
+| the find bar's help paragraph — *"This helps you find files and folders by opening a search bar…"* | 0x231b48 | `native_strings_find "Find Files"` (ev_a9ddfae1b8a9b22cf71a010fc1bb514ffb499f59337d2c8fa0440326481708a8) |
+
+Those four strings are the whole of the evidence for the wording used in the
+new window: the mode buttons are labelled with the original's own two sentences
+plus the plain name mode, in that order. What the strings do **not** contain is
+any file-reading loop — the search work is done by the KIO search worker the
+binary talks to, not by Dolphin itself, so there is nothing in this program to
+decompile for the actual matching. That is why every number below is marked
+*added* rather than measured: the reading rules in this rebuild are its own,
+chosen to be defensible, and each one is stated in the window's summary line so
+the person can see what was left out.
+
+Rules the new window keeps (all in `app/src/findtext.rs`, each pinned by a check
+in `app/selftest.rs`):
+
+| rule | value | why |
+| --- | --- | --- |
+| phrase counting | non-overlapping, case-blind unless *Case sensitive* is ticked | `aaaa` holds `aa` twice, not three times |
+| file read ceiling | 4 MiB (`MAX_BYTES`) | a stray disk image is not pulled into memory |
+| binary test | a NUL byte in the first 8 KiB (`SNIFF_BYTES`) | the same crude test other desktop tools use |
+| hidden files and folders | left out, and the summary says so | the original's find dialog leaves them out by default (help text 0x231b48) |
+| hits kept | 300 (`MAX_HITS`) | a list a person can act on |
+| files looked at | 20 000 (`MAX_FILES`) | a search in a home folder always ends, and says it stopped |
+| matching line shown | first match, trimmed, 120 characters (`SNIPPET_CHARS`) + `…` | one row of the list |
+| symbolic links | never followed | a link to `/` would make the walk endless |
+
+The window is opened three ways: **Tools → Find in Files…**, the side panel's
+*Find in Files* row in *Added tools*, and **Ctrl+Shift+F**. `--findtext <phrase>`
+opens it with the phrase already searched, which is how the picture
+`app/shots/findtext.png` was taken.
+
+`cargo build` succeeds and `--selftest` passes **111 of 111** checks; the six
+new ones read
+
+    PASS  a phrase is counted in the text, in either case or in one  (3 loose, 2 exact)
+    PASS  the matching line is reported with its number, trimmed and short  (line 2, 121 chars for a long one)
+    PASS  a real walk finds the phrase, skips binaries, big files and hidden folders  (["report.txt", "notes.md"] on line 2, 3 matches)
+    PASS  the binary switch reads a file the default walk passes over  (3 hits, binary read)
+    PASS  the name mode answers from names alone, and the mixed mode from both  (["report.txt", "report-again.txt"] by name, ["report.txt", "notes.md"] by name or contents)
+    PASS  an empty phrase starts no walk and says there is nothing to search for  (Nothing searched yet  ·  hidden folders left out)
+
+`app/mechanics.json` gains six values for the same rules, each marked *added*.

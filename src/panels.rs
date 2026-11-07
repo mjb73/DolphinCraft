@@ -11,6 +11,7 @@ use eframe::egui::{
 
 use crate::fsutil::{self, Entry};
 use crate::state::Request;
+use crate::findtext;
 use crate::space;
 use crate::theme;
 use crate::theme::*;
@@ -126,6 +127,15 @@ impl App {
                 ui.close();
             }
         });
+        // Added feature: *Find in Files* — the content modes the original's
+        // find bar names but answers elsewhere.
+        if crate::menu_row(ui, "Find in Files…", "Ctrl+Shift+F").clicked() {
+            self.findtext = Some(findtext::FindText::start(
+                dir.clone(),
+                findtext::Options::new(String::new()),
+            ));
+            ui.close();
+        }
         if crate::menu_row(ui, "Find Duplicates…", "Ctrl+Shift+D").clicked() {
             self.dups = Some(Dups {
                 scan: crate::search::DupScan::start(dir.clone()),
@@ -831,6 +841,7 @@ impl App {
         self.new_folder_dialog(ctx);
         self.open_with_dialog(ctx);
         self.space_dialog(ctx);
+        self.findtext_dialog(ctx);
         self.compress_dialog(ctx);
         self.extract_dialog(ctx);
         self.shortcut_dialog(ctx);
@@ -886,16 +897,16 @@ impl App {
             )
             .show(ctx, |ui| {
                 ui.set_min_width(680.0);
-                // The volume line. The original's menu carries its own row for
-                // this ("Disk Usage Statistics - current device", literal
-                // 0x2374xx in the submenu builder); the same sentence heads the
-                // numbers here.
+                // The volume line. The original's submenu offers three scopes —
+                // "Disk Usage Statistics - current folder" (string 0x237538),
+                // "- current device" (0x237560) and "- all devices" (0x237588);
+                // this window walks the open folder, so it is the first one.
                 if let Some((free, whole)) = volume {
                     if whole > 0 {
                         let pct = fsutil::used_percent(free, whole);
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("Disk Usage Statistics - current device")
+                                egui::RichText::new("Disk Usage Statistics - current folder")
                                     .size(11.5)
                                     .color(TEXT_DIM),
                             );
@@ -2137,6 +2148,212 @@ impl App {
             return;
         }
         self.bulk = Some(bulk);
+    }
+
+    /// Added feature: *Find in Files*.
+    ///
+    /// The original's find bar names two content modes — `File names and
+    /// contents` (string 0x22e0db in `/usr/bin/dolphin`) and `File contents`
+    /// (0x22e10c) — and then hands the reading to KIO's search helper. This
+    /// window does the reading itself, so the two modes answer here even when
+    /// no helper is installed: one row per file, with the line the phrase was
+    /// written on.
+    fn findtext_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut ft) = self.findtext.take() else {
+            return;
+        };
+        ft.poll();
+        if ft.scanning {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
+        let mut win_open = true;
+        let mut close = false;
+        let mut start: Option<findtext::Options> = None;
+        let mut stop = false;
+        let mut reveal: Option<PathBuf> = None;
+        let mut open_file: Option<PathBuf> = None;
+        let root = ft.root.clone();
+        let summary = ft.summary();
+        let scanning = ft.scanning;
+        let hits = ft.hits.clone();
+        let phrase_empty = ft.opts.phrase.trim().is_empty();
+
+        window_style("Find in Files")
+            .open(&mut win_open)
+            .default_size(Vec2::new(700.0, 540.0))
+            .show(ctx, |ui| {
+                ui.set_min_width(660.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Folder:").size(11.0).color(TEXT_DIM));
+                    ui.label(
+                        egui::RichText::new(root.display().to_string())
+                            .size(11.0)
+                            .color(TEXT_DIM),
+                    );
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Search for:").size(12.0));
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut ft.opts.phrase)
+                            .hint_text("a word or a sentence")
+                            .desired_width(380.0),
+                    );
+                    if ft.focus {
+                        field.request_focus();
+                        ft.focus = false;
+                    }
+                    // Enter in the field starts the search, the same as pressing
+                    // the button: the field is the reason the window is open.
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if !ft.opts.phrase.trim().is_empty() {
+                            start = Some(ft.opts.clone());
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                // The three modes, in the original's own wording for the two it
+                // names: a plain name search, names and contents together, or
+                // contents alone.
+                ui.horizontal(|ui| {
+                    for mode in [
+                        findtext::Mode::Names,
+                        findtext::Mode::NamesAndContents,
+                        findtext::Mode::Contents,
+                    ] {
+                        if ui
+                            .selectable_label(ft.opts.mode == mode, mode.label())
+                            .clicked()
+                        {
+                            ft.opts.mode = mode;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut ft.opts.case_sensitive, "Case sensitive");
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut ft.opts.include_binary, "Include binary files");
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if scanning {
+                            if ui.button("Stop").clicked() {
+                                stop = true;
+                            }
+                        } else if ui
+                            .add_sized([72.0, 22.0], egui::Button::new("Find"))
+                            .clicked()
+                        {
+                            start = Some(ft.opts.clone());
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(summary)
+                        .size(11.0)
+                        .color(TEXT_DIM),
+                );
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .max_height(340.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        if hits.is_empty() {
+                            let line = if phrase_empty {
+                                "Type a phrase, then press Enter."
+                            } else if scanning {
+                                "Looking inside the files…"
+                            } else {
+                                "No file in this folder holds that phrase."
+                            };
+                            ui.label(egui::RichText::new(line).size(12.0).color(TEXT_DIM));
+                        }
+                        for hit in hits.iter() {
+                            egui::Frame::new()
+                                .fill(Color32::from_rgb(37, 41, 45))
+                                .corner_radius(CornerRadius::same(4))
+                                .inner_margin(Margin::symmetric(8, 5))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(hit.file_name())
+                                                .size(12.5)
+                                                .color(TEXT)
+                                                .strong(),
+                                        );
+                                        if hit.matches > 1 {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} matches",
+                                                    hit.matches
+                                                ))
+                                                .size(10.0)
+                                                .color(TEXT_FAINT),
+                                            );
+                                        }
+                                        ui.label(
+                                            egui::RichText::new(format!("— {}", hit.folder()))
+                                                .size(10.0)
+                                                .color(TEXT_FAINT),
+                                        );
+                                        ui.with_layout(
+                                            Layout::right_to_left(Align::Center),
+                                            |ui| {
+                                                if ui.small_button("Open").clicked() {
+                                                    open_file = Some(hit.path.clone());
+                                                }
+                                                if ui.small_button("Show").clicked() {
+                                                    reveal = Some(hit.path.clone());
+                                                }
+                                            },
+                                        );
+                                    });
+                                    if hit.line_no > 0 {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{}: {}",
+                                                hit.line_no, hit.line
+                                            ))
+                                            .monospace()
+                                            .size(10.5)
+                                            .color(TEXT_DIM),
+                                        );
+                                    }
+                                });
+                            ui.add_space(4.0);
+                        }
+                    });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            });
+
+        if stop {
+            ft.stop();
+        }
+        if close {
+            win_open = false;
+        }
+        if let Some(opts) = start {
+            let mut fresh = findtext::FindText::start(root, opts);
+            fresh.poll();
+            self.findtext = Some(fresh);
+        } else if !win_open {
+            self.findtext = None;
+        } else {
+            self.findtext = Some(ft);
+        }
+        if let Some(path) = reveal {
+            self.reqs.push(Request::Reveal(path));
+        }
+        if let Some(path) = open_file {
+            self.reqs.push(Request::OpenPath(path));
+        }
     }
 
     fn dups_dialog(&mut self, ctx: &egui::Context) {
