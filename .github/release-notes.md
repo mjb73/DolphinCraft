@@ -24,6 +24,17 @@ DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin w
 * Sort, view, zoom, colours, picture switches and the window's size and place are
   saved as you choose them; a settings file from an older version still opens.
 
+* **Recent Files and Recent Locations** sit under the shortcuts in the navigation
+  panel: the documents this computer last used, read from your desktop's own
+  recently-used list, and the folders this window has been through.
+* **The toolbar now carries two words, Find and Menu.** The Open button (and the
+  arrow that listed other places) is gone — opening is a double-click, or Open and
+  Open With on the right-click menu — and the app menu scrolls when the window is
+  short instead of running off the bottom of the screen.
+* **A start is always one view**: split view is F3 for the window you are in and is
+  no longer brought back on the next launch.
+* **About** names the release this build came from — 0.1.3.
+
 **Linux** — `install.sh` (no root), or the tarball for your architecture.
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh | sh

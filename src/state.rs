@@ -426,6 +426,13 @@ pub struct Pane {
     pub gallery_dims: bool,
     /// Rounded corners on the gallery's thumbnails.
     pub gallery_round: bool,
+    /// Added feature: the wall is looking inside the sub-folders too. The wall
+    /// then shows the pictures of the whole tree below the folder — the shape
+    /// of a photo library sorted into year or month folders — through the same
+    /// listing a search uses, so marking, deleting and the viewer keep working
+    /// on the real files. Off by default and not remembered: it belongs to the
+    /// folder on screen, not to the window.
+    pub gallery_below: bool,
     pub show_hidden: bool,
     pub previews: bool,
     pub filter: String,
@@ -481,6 +488,7 @@ impl Pane {
             gallery_names: true,
             gallery_dims: false,
             gallery_round: true,
+            gallery_below: false,
             show_hidden: false,
             previews: true,
             filter: String::new(),
@@ -544,8 +552,43 @@ impl Pane {
         self.rename = None;
         self.location_edit = None;
         self.search = None;
+        // A wall that was looking below one folder does not follow into the
+        // next one: the switch belongs to what is on screen.
+        self.gallery_below = false;
         self.error = None;
         self.reload();
+    }
+
+    /// Added feature: turn the wall's "Sub-folders" switch on or off. On starts
+    /// a walk of the folder and everything under it, keeping pictures only; off
+    /// throws the walk away and shows the folder itself again, exactly as it
+    /// was. The walk is the same one the find bar uses, so the result arrives in
+    /// batches and a big tree never freezes the window.
+    pub fn set_pictures_below(&mut self, on: bool) {
+        if on == self.gallery_below {
+            return;
+        }
+        self.gallery_below = on;
+        self.sel.clear();
+        self.cursor = 0;
+        self.anchor = 0;
+        self.selected_size = None;
+        if on {
+            let filters = crate::search::SearchFilters {
+                pictures_only: true,
+                ..Default::default()
+            };
+            let mut session = crate::search::SearchSession::start(
+                self.path.clone(),
+                String::new(),
+                filters,
+            );
+            session.pictures_below = true;
+            self.search = Some(session);
+        } else {
+            self.search = None;
+            self.reload();
+        }
     }
 
     pub fn reload(&mut self) {

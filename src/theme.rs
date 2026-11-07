@@ -587,6 +587,8 @@ pub enum PlaceIcon {
     Disk,
     Bookmark,
     Recent,
+    /// Added feature: a single file, for the rows of the Recent Files group.
+    File,
     Network,
     Search,
     Tools,
@@ -784,6 +786,32 @@ pub fn draw_place_icon(painter: &egui::Painter, rect: Rect, icon: PlaceIcon, tin
             painter.circle_stroke(r.center(), r.width() * 0.42, st);
             painter.line_segment([r.center(), Pos2::new(cx, t + r.height() * 0.16)], st);
             painter.line_segment([r.center(), Pos2::new(cx + r.width() * 0.26, r.center().y)], st);
+        }
+        PlaceIcon::File => {
+            // A page with its top-right corner turned down, drawn in outline.
+            let fold = r.width() * 0.26;
+            let page = vec![
+                Pos2::new(l + r.width() * 0.16, t),
+                Pos2::new(rr - fold, t),
+                Pos2::new(rr - r.width() * 0.10, t + fold),
+                Pos2::new(rr - r.width() * 0.10, b),
+                Pos2::new(l + r.width() * 0.16, b),
+            ];
+            painter.add(egui::Shape::closed_line(page, st));
+            painter.line_segment(
+                [
+                    Pos2::new(rr - fold, t),
+                    Pos2::new(rr - fold, t + fold),
+                ],
+                Stroke::new(st.width * 0.8, tint),
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(rr - fold, t + fold),
+                    Pos2::new(rr - r.width() * 0.10, t + fold),
+                ],
+                Stroke::new(st.width * 0.8, tint),
+            );
         }
         PlaceIcon::Network => {
             painter.circle_stroke(r.center(), r.width() * 0.42, st);

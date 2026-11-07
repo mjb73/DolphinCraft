@@ -401,12 +401,12 @@ impl App {
         });
         ui.separator();
         menu_group(ui, "Help");
-        if crate::menu_row(ui, "What the Three Buttons Do…", "F1").clicked() {
+        if crate::menu_row(ui, "What the Two Buttons Do…", "F1").clicked() {
             self.guide_open = true;
             ui.close();
         }
         if crate::menu_row(ui, "About", "").clicked() {
-            self.toast(&format!("{} — file manager with extra tools", crate::APP_NAME));
+            self.toast(&crate::about_line());
             ui.close();
         }
         if crate::menu_row(ui, "Quit", "Ctrl+Q").clicked() {
@@ -953,20 +953,13 @@ impl App {
         }
         let mut open = true;
         let mut close = false;
-        let rows: [(&str, &str, &str); 3] = [
+        let rows: [(&str, &str, &str); 2] = [
             (
                 "search",
                 "Find",
                 "Narrows what you see to the names that match. “This folder” \
                  looks at the list in front of you while you type; “In subfolders” \
                  also looks inside every folder below.",
-            ),
-            (
-                "openin",
-                "Open in",
-                "Chooses where the thing you picked appears: a new tab, a new \
-                 window, the other pane, or a terminal. The button itself just \
-                 opens it here; the little arrow beside it lists the other places.",
             ),
             (
                 "menu",
@@ -976,7 +969,7 @@ impl App {
                  files on its own.",
             ),
         ];
-        window_style("What the Three Buttons Do")
+        window_style("What the Two Buttons Do")
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.set_min_width(440.0);
@@ -1015,7 +1008,7 @@ impl App {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("The arrow on a split button only lists more places.")
+                        egui::RichText::new("Right-click a file or folder for its own menu.")
                             .size(10.5)
                             .color(TEXT_FAINT),
                     );

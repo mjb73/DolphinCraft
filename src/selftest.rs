@@ -1286,6 +1286,40 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // ---- About names the release this build came from --------------------
+    // The number is `Cargo.toml`'s `version`, which is exactly the GitHub release
+    // tag without its `v` — `cargo` writes it into the binary with `env!`, so the
+    // About row cannot disagree with the tag the download was cut from. When the
+    // manifest is beside the build (a developer's tree), the two are compared;
+    // a downloaded binary has no manifest and keeps the compiled number.
+    r.check(
+        "About names the release this build came from",
+        (|| {
+            let line = crate::about_line();
+            let version = crate::APP_VERSION;
+            if version.is_empty() || version.trim() != version {
+                return Err(format!("the compiled release reads {version:?}"));
+            }
+            if !line.contains(crate::APP_NAME) || !line.contains(version) {
+                return Err(format!("About does not carry the release: {line:?}"));
+            }
+            let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+            if let Ok(text) = std::fs::read_to_string(&manifest) {
+                let declared = text
+                    .lines()
+                    .find_map(|l| l.strip_prefix("version = \""))
+                    .and_then(|rest| rest.split('"').next())
+                    .unwrap_or("");
+                if declared != version {
+                    return Err(format!(
+                        "the manifest says {declared:?} and the build says {version:?}"
+                    ));
+                }
+            }
+            Ok(line)
+        })(),
+    );
+
     // ---- added feature: the picture wall, its captions and its prompt reader ----
     r.check(
         "thumbnail size stops at 400 px",
@@ -2498,10 +2532,10 @@ pub fn run() -> i32 {
 
     // ---- the three verbs and the location bar never share pixels --------
     r.check(
-        "the three button words survive an ordinary window and give way in order",
+        "the two button words survive an ordinary window and give way in order",
         (|| {
             use crate::toolbar_metrics;
-            let words = 110.0; // "Find" + "Open in" + "Menu" at 12 px
+            let words = 65.0; // "Find" + "Menu" at 12 px
             let label = 62.0; // "Sort: Modified"
             let wide = toolbar_metrics(900.0, label, true, words);
             if !wide.labeled {

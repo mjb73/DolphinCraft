@@ -6,6 +6,16 @@
 /// the person asked. Everything that shows the app's name reads this one string.
 pub const APP_NAME: &str = "DolphinCraft";
 
+/// The release this build came from. `Cargo.toml`'s `version` is the number on
+/// the GitHub release tag (`v0.1.3`), so About names the download the person
+/// actually has — no network call, no guessing from a commit hash.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The one line About shows: the name, the release, and what the app is.
+pub fn about_line() -> String {
+    format!("{APP_NAME} {APP_VERSION} — a file manager with extra tools")
+}
+
 mod apps;
 mod config;
 mod foldercolor;
@@ -35,6 +45,11 @@ use search::{DupScan, ThumbCache};
 use state::{Clipboard, Pane, Request, ViewMode, TRASH_URI};
 use theme::*;
 use views::ViewCtx;
+
+/// How many folders the navigation panel's *Recent Locations* group keeps. The
+/// group is a way back to somewhere the person was, not a history browser; six
+/// rows fit beside the other groups without pushing Devices off the panel.
+pub const RECENT_LOCATIONS_MAX: usize = 6;
 
 /// Remember that a tab was closed, so "Recently Closed Tabs" can put it back.
 /// A folder already in the list moves to the newest end rather than appearing
@@ -72,19 +87,15 @@ pub const TOOLBAR_CLUSTER_GAP: f32 = 8.0;
 pub const TOOLBAR_BAR_USABLE: f32 = 70.0;
 /// Widest the bar may become before the cluster would start squeezing.
 pub const TOOLBAR_BAR_MIN: f32 = 110.0;
-/// Seven icon buttons, the split button's chevron, the two 4 px separators
-/// (each also costs one item gap) and the ten item gaps between the eleven
-/// things in the cluster.
+/// Seven icon buttons, the two 4 px separators (each also costs one item gap)
+/// and the eight item gaps between the nine things in the cluster.
 pub const TOOLBAR_CLUSTER_FIXED: f32 =
-    8.0 * TOOLBAR_ICON_W + TOOLBAR_CHEVRON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP)
-        + 10.0 * TOOLBAR_ITEM_GAP;
+    7.0 * TOOLBAR_ICON_W + 2.0 * (4.0 + TOOLBAR_ITEM_GAP) + 8.0 * TOOLBAR_ITEM_GAP;
 
-/// Width of the chevron on the right-hand side of a split toolbar button.
-pub const TOOLBAR_CHEVRON_W: f32 = 16.0;
 /// Padding between a toolbar button's icon and the word beside it.
 pub const TOOLBAR_LABEL_PAD: f32 = 6.0;
-/// What the three words cost on top of the icons they sit beside.
-pub const TOOLBAR_LABEL_EXTRA: f32 = 3.0 * TOOLBAR_LABEL_PAD + TOOLBAR_CHEVRON_W;
+/// What the two words cost on top of the icons they sit beside.
+pub const TOOLBAR_LABEL_EXTRA: f32 = 2.0 * TOOLBAR_LABEL_PAD;
 
 /// How much of the sort control is shown. It gives way, label first, so the
 /// location bar keeps a workable width in a narrow window.
@@ -98,7 +109,7 @@ pub enum SortControl {
 #[derive(Clone, Copy, Debug)]
 pub struct ToolbarMetrics {
     pub sort: SortControl,
-    /// Whether the three verbs ("Find", "Open in", "Menu") are spelled out.
+    /// Whether the two verbs ("Find", "Menu") are spelled out.
     pub labeled: bool,
     pub cluster_w: f32,
     pub bar_w: f32,
@@ -253,8 +264,8 @@ pub struct Shot {
 pub struct App {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
-    /// Added: the little card that explains what Find, Open in and Menu each do,
-    /// so the three icons stop being a guessing game.
+    /// Added: the little card that explains what Find, Open and Menu each do,
+    /// so the two icons stop being a guessing game.
     pub guide_open: bool,
     /// `--menu`: open the app menu on the first frame so a picture of it can be
     /// taken. A click on the button opens it in normal use.
@@ -332,6 +343,12 @@ pub struct App {
     /// written — the view buttons used to be exactly that case, and a choice
     /// made there was lost if the window was not closed tidily.
     pub settings_sig: String,
+    /// Added feature: the files the navigation panel's *Recent Files* group
+    /// shows, read from the desktop's own recently used list. Kept with the
+    /// moment they were read, so a window open all day does not ask the disk
+    /// for that list on every frame.
+    pub recent_files: Vec<fsutil::Entry>,
+    pub recent_files_at: Option<Instant>,
 }
 
 /// The settings as one comparable string. Two snapshots that differ mean the
@@ -425,6 +442,7 @@ impl App {
         start_guide: bool,
         start_menu: bool,
         open_details_at_start: bool,
+        start_below: bool,
     ) -> Self {
         theme::install(&cc.egui_ctx);
         if shot.is_some() {
@@ -476,6 +494,11 @@ impl App {
         // Added feature: the gallery's own last state, restored like the rest of
         // the window's furniture.
         pane.pictures = cfg.pictures || start_pictures;
+        // `--below`: the wall looking inside the folders below, so the switch
+        // can be photographed without a mouse. Only with the wall up.
+        if start_below && pane.pictures {
+            pane.set_pictures_below(true);
+        }
         if let Some(text) = start_find.clone() {
             pane.filter_on = true;
             pane.filter = text;
@@ -545,7 +568,11 @@ impl App {
             guide_open: start_guide,
             open_menu_once: start_menu,
             open_sort_once: false,
-            split: cfg.split,
+            // A start is always one view. Split is chosen in the window (F3,
+            // the menu switch, or "In the other pane"), and is not carried into
+            // the next start: an app that opens as two folders every time makes
+            // the person undo a choice they did not make this run.
+            split: false,
             places_visible: cfg.places_visible,
             info_panel: cfg.info_panel,
             clipboard: Clipboard::new(),
@@ -584,16 +611,15 @@ impl App {
             split_frac: saved_split_frac,
             session_sig: String::new(),
             settings_sig: String::new(),
+            recent_files: Vec::new(),
+            recent_files_at: None,
             filter_focus: false,
             shortcut_drag: None,
         };
-        // The remembered split view needs its second pane rebuilt, otherwise a
-        // saved "split" flag with a single pane hides the location bar entirely
-        // (the toolbar gives that slot to the panes). Screenshot mode stays a
-        // plain single view so the capture is the same every time.
-        if app.split && !shot_mode {
-            app.ensure_split();
-        } else if shot_mode {
+        // Nothing to restore for the panes: a start is one view, whatever the
+        // last window was left as. Screenshot mode is a plain single view too,
+        // so the capture is the same every time.
+        if shot_mode {
             app.split = false;
         }
         // The snapshot to compare against: what was just opened. Nothing is
@@ -747,11 +773,11 @@ impl App {
                             .size()
                             .x
                     });
-                    // The three words the row spells out when it has room. They
+                    // The two words the row spells out when it has room. They
                     // are measured here so the bar and the buttons still never
                     // share pixels.
                     let words_w = ui.fonts_mut(|f| {
-                        ["Find", "Open in", "Menu"]
+                        ["Find", "Menu"]
                             .iter()
                             .map(|t| {
                                 f.layout_no_wrap(
@@ -801,11 +827,10 @@ impl App {
 
                     let mut sort_rect: Option<Rect> = None;
                     let labeled = metrics.labeled;
-                    // Three verbs sit at the far right and say what they do:
-                    // Find (narrow what you see), Open in (choose where it
-                    // opens), Menu (change the app). Everything left of them is
-                    // layout — sorting and the three views — which is why they
-                    // are grouped and only these three carry a word.
+                    // Two verbs sit at the far right and say what they do: Find
+                    // (narrow what you see) and Menu (change the app). Everything
+                    // left of them is layout — sorting and the three views — which
+                    // is why they are grouped and only these two carry a word.
                     let cluster_inner = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
                         let menu = toolbar_word_button(ui, "menu", labeled.then_some("Menu"), false, true);
@@ -824,33 +849,26 @@ impl App {
                                 egui::Popup::default_response_id(&menu),
                             );
                         }
-                        popup.show(|ui| self.app_menu(ui));
-
-                        let targets = self.open_targets();
-                        let (open_main, open_chev) = toolbar_split_button(
-                            ui,
-                            "openin",
-                            labeled.then_some("Open in"),
-                            true,
-                        );
-                        if open_main
-                            .clone()
-                            .on_hover_text("Open what is selected — a folder opens, a file starts its program")
-                            .clicked()
-                        {
-                            let idx = self.pane().cursor;
-                            let mut reqs = Vec::new();
-                            self.pane_mut().open_entry(idx, &mut reqs);
-                            for r in reqs {
-                                self.reqs.push(r);
-                            }
-                        }
-                        let chev = open_chev.on_hover_text(
-                            "Where to open it: a new tab, a new window, the other pane, or a terminal",
-                        );
-                        egui::Popup::menu(&chev)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
-                            .show(|ui| self.open_in_menu(ui, &targets));
+                        // The menu is long — New, Tools, View, Starting, Deleting,
+                        // Sort by, Help — and in a window that is not maximised it
+                        // used to run off the bottom of the screen with no way to
+                        // reach the last rows. It scrolls now, capped to the height
+                        // of the window itself so it fits whether egui opens it
+                        // below the button or flips it above.
+                        popup.show(|ui| {
+                            let limit = (ui.ctx().content_rect().height() - 96.0).max(120.0);
+                            egui::ScrollArea::vertical()
+                                .max_height(limit)
+                                .auto_shrink([false, true])
+                                // Shown even when the pointer is elsewhere: a menu
+                                // that is quietly cut at the bottom is the fault
+                                // being fixed here, so the bar has to say "there is
+                                // more" without waiting for a hover.
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                                )
+                                .show(ui, |ui| self.app_menu(ui));
+                        });
 
                         let find_on = self.pane().filter_on;
                         if toolbar_word_button(ui, "search", labeled.then_some("Find"), find_on, true)
@@ -977,80 +995,6 @@ impl App {
             .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| self.sort_menu(ui));
         resp
-    }
-
-    /// The folders the "Open in" destinations act on: the folders that are
-    /// selected, or the folder being looked at when the selection holds no
-    /// folder at all. A file selection therefore still behaves predictably —
-    /// the destinations mean "the place I am looking at".
-    fn open_targets(&self) -> Vec<PathBuf> {
-        let picked: Vec<PathBuf> = self
-            .pane()
-            .selected_paths()
-            .into_iter()
-            .filter(|p| p.is_dir())
-            .collect();
-        if picked.is_empty() {
-            vec![self.pane().current_dir()]
-        } else {
-            picked.into_iter().take(8).collect()
-        }
-    }
-
-    /// The chevron's list. It is deliberately about *places*, not about the app
-    /// and not about finding things: that is what makes it different from the
-    /// two buttons beside it.
-    fn open_in_menu(&mut self, ui: &mut egui::Ui, targets: &[PathBuf]) {
-        ui.set_min_width(250.0);
-        let what = targets
-            .first()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "this folder".to_string());
-        ui.label(
-            egui::RichText::new(if targets.len() > 1 {
-                format!("Where to open these {} folders", targets.len())
-            } else {
-                format!("Where to open “{what}”")
-            })
-            .size(11.0)
-            .color(TEXT_DIM),
-        );
-        ui.add_space(3.0);
-        if menu_row(ui, "In a new tab", "Ctrl+Enter").clicked() {
-            for t in targets {
-                self.new_tab_public(t.clone());
-            }
-            ui.close();
-        }
-        if menu_row(ui, "In a new window", "").clicked() {
-            for t in targets {
-                spawn_folder_window(t);
-            }
-            ui.close();
-        }
-        if menu_row(ui, "In the other pane", "").clicked() {
-            self.ensure_split();
-            let tab = &mut self.tabs[self.active_tab];
-            let other = 1 - tab.active;
-            if let Some(t) = targets.first() {
-                tab.panes[other].navigate(t.clone());
-            }
-            tab.active = other;
-            self.config_dirty = true;
-            ui.close();
-        }
-        if menu_row(ui, "In a terminal here", "").clicked() {
-            if let Some(t) = targets.first() {
-                fsutil::open_terminal(t);
-            }
-            ui.close();
-        }
-        ui.separator();
-        ui.label(
-            egui::RichText::new("The button itself just opens the folder where you are.")
-                .size(10.5)
-                .color(TEXT_FAINT),
-        );
     }
 
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
@@ -1330,6 +1274,15 @@ impl App {
         let mut rename_bookmark: Option<(PathBuf, String)> = None;
         let mut move_bookmark: Option<(usize, i32)> = None;
         let mut add_shortcut = false;
+        // Added feature: rows of the two recent groups. A click on a file row
+        // opens the file itself (that is the point of a recent list); a click
+        // on a folder row walks there. Both menus can also open the file's
+        // folder with the file marked, which is what the original's places
+        // panel offers for a recently used document.
+        let mut open_recent_file: Option<PathBuf> = None;
+        let mut show_recent_in_folder: Option<PathBuf> = None;
+        let mut copy_recent_path: Option<PathBuf> = None;
+        let mut forget_location: Option<PathBuf> = None;
         let mut fold_section = false;
         let mut open_dups = false;
         let mut open_bulk = false;
@@ -1505,6 +1458,134 @@ impl App {
                     }
                 }
 
+                // Added feature: the two groups the original's navigation panel
+                // shows under Places — *Recent Files* (0x2bf937's "No recently
+                // used items" is the original's own wording for the empty case)
+                // and *Recent Locations*. Dolphin leaves both empty until an
+                // application publishes places into them; here they carry the
+                // desktop's recently used files and the folders this window has
+                // walked through, so the two headings are worth their space.
+                self.refresh_recent_files();
+                let recent_files = self.recent_files.clone();
+                ui.add_space(8.0);
+                if recent_group_header(
+                    ui,
+                    "Recent Files",
+                    self.config.recent_files_expanded,
+                    recent_files.len(),
+                ) {
+                    self.config.recent_files_expanded = !self.config.recent_files_expanded;
+                    self.config_dirty = true;
+                }
+                if self.config.recent_files_expanded {
+                    if recent_files.is_empty() {
+                        quiet_row(ui, "No recently used items");
+                    } else {
+                        for item in recent_files.iter() {
+                            let resp = row_impl(
+                                ui,
+                                &item.name,
+                                Some(theme::PlaceIcon::File),
+                                false,
+                                None,
+                            )
+                            .on_hover_text(format!(
+                                "{}\n{}",
+                                item.path.display(),
+                                fsutil::human_date(item.modified)
+                            ));
+                            if resp.clicked() {
+                                open_recent_file = Some(item.path.clone());
+                            }
+                            let path = item.path.clone();
+                            let name = item.name.clone();
+                            let dir = path.parent().map(|p| p.to_path_buf());
+                            resp.context_menu(|ui| {
+                                ui.set_min_width(214.0);
+                                if menu_row(ui, "Open", "").clicked() {
+                                    open_recent_file = Some(path.clone());
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Show in Folder", "").clicked() {
+                                    show_recent_in_folder = Some(path.clone());
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Open Folder in New Tab", "").clicked() {
+                                    if let Some(dir) = &dir {
+                                        new_tab_path = Some(dir.clone());
+                                    }
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if menu_row(ui, "Copy File Name", "").clicked() {
+                                    copy_recent_path = Some(PathBuf::from(name.clone()));
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Copy Full Path", "").clicked() {
+                                    copy_recent_path = Some(path.clone());
+                                    ui.close();
+                                }
+                            });
+                        }
+                    }
+                }
+
+                let locations = self.config.recent_locations.clone();
+                ui.add_space(6.0);
+                if recent_group_header(
+                    ui,
+                    "Recent Locations",
+                    self.config.recent_locations_expanded,
+                    locations.len(),
+                ) {
+                    self.config.recent_locations_expanded = !self.config.recent_locations_expanded;
+                    self.config_dirty = true;
+                }
+                if self.config.recent_locations_expanded {
+                    if locations.is_empty() {
+                        quiet_row(ui, "No places visited yet");
+                    } else {
+                        for folder in locations.iter() {
+                            let label = folder
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "/".to_string());
+                            let selected = !is_trash && current == *folder;
+                            let resp = row_impl(
+                                ui,
+                                &label,
+                                Some(theme::PlaceIcon::Recent),
+                                selected,
+                                None,
+                            )
+                            .on_hover_text(folder.display().to_string());
+                            if resp.clicked() {
+                                navigate = Some(folder.clone());
+                            }
+                            if resp.middle_clicked() {
+                                new_tab_path = Some(folder.clone());
+                            }
+                            let folder = folder.clone();
+                            resp.context_menu(|ui| {
+                                ui.set_min_width(210.0);
+                                if menu_row(ui, "Open in New Tab", "").clicked() {
+                                    new_tab_path = Some(folder.clone());
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Copy Full Path", "").clicked() {
+                                    copy_recent_path = Some(folder.clone());
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if menu_row(ui, "Forget This Location", "").clicked() {
+                                    forget_location = Some(folder.clone());
+                                    ui.close();
+                                }
+                            });
+                        }
+                    }
+                }
+
                 ui.add_space(10.0);
                 section_header(ui, "Devices");
                 for (label, path) in fsutil::mounted_devices() {
@@ -1540,6 +1621,35 @@ impl App {
 
         if let Some(p) = navigate {
             self.pane_mut().navigate(p);
+        }
+        if let Some(path) = open_recent_file {
+            if path.is_file() {
+                self.reqs.push(Request::OpenPath(path));
+            } else {
+                self.toast("That file is no longer there.");
+                self.recent_files_at = None;
+            }
+        }
+        if let Some(path) = show_recent_in_folder {
+            // The original's places panel opens the item's folder with the item
+            // marked; the pane's pending-select does exactly that once the
+            // listing has arrived.
+            if let Some(dir) = path.parent().map(|p| p.to_path_buf()) {
+                self.pane_mut().navigate(dir);
+                if let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) {
+                    self.pane_mut().pending_select = Some(name);
+                    self.pane_mut().apply_pending_select();
+                }
+            }
+        }
+        if let Some(path) = copy_recent_path {
+            let text = path.display().to_string();
+            ctx.copy_text(text.clone());
+            self.toast(&format!("Copied {text}"));
+        }
+        if let Some(path) = forget_location {
+            self.config.recent_locations.retain(|p| p != &path);
+            self.config_dirty = true;
         }
         if let Some(p) = new_tab_path {
             self.new_tab_public(p);
@@ -1652,7 +1762,19 @@ impl App {
                     let shown = pane.display_entries();
                     let mut text = if pane.search.is_some() {
                         let s = pane.search.as_ref().unwrap();
-                        if !s.done {
+                        if s.pictures_below {
+                            // The wall's own walk: "found" would say a search
+                            // was typed when nothing was.
+                            if !s.done {
+                                format!("Looking below… {} pictures so far", shown.len())
+                            } else {
+                                format!(
+                                    "{} picture{} below",
+                                    shown.len(),
+                                    if shown.len() == 1 { "" } else { "s" }
+                                )
+                            }
+                        } else if !s.done {
                             format!("Searching… {} items found", shown.len())
                         } else {
                             format!(
@@ -2701,6 +2823,45 @@ impl App {
         self.shortcut_entries().len() - self.config.bookmarks.len()
     }
 
+    // -----------------------------------------------------------------------
+    // Added feature: the two recent groups in the navigation panel
+    // -----------------------------------------------------------------------
+
+    /// Read the desktop's recently used list again when the copy in hand has
+    /// gone stale. The list only changes when another program opens a file, so
+    /// a few seconds of age costs nothing and re-reading it every frame would
+    /// touch the disk sixty times a second.
+    pub fn refresh_recent_files(&mut self) {
+        let stale = match self.recent_files_at {
+            None => true,
+            Some(at) => at.elapsed() > std::time::Duration::from_secs(3),
+        };
+        if !stale {
+            return;
+        }
+        self.recent_files_at = Some(Instant::now());
+        let limit = self.config.recent_files_shown.max(1);
+        self.recent_files = fsutil::recent_files(limit);
+    }
+
+    /// Note the folder now in front, newest first, so *Recent Locations* holds
+    /// the way back to it. The list belongs to the window rather than to the
+    /// desktop's own recent list: walking into a folder is not "using a file",
+    /// and the two groups should not say the same thing.
+    pub fn remember_location(&mut self, path: &Path) {
+        if !path.is_dir() {
+            return;
+        }
+        let mut list = self.config.recent_locations.clone();
+        list.retain(|p| p != path);
+        list.insert(0, path.to_path_buf());
+        list.truncate(RECENT_LOCATIONS_MAX);
+        if list != self.config.recent_locations {
+            self.config.recent_locations = list;
+            self.config_dirty = true;
+        }
+    }
+
     /// Give one shortcut row a colour, or put it back to normal with `None`.
     /// The choice is remembered in the config, next to the shortcuts.
     pub fn set_shortcut_color(&mut self, path: &std::path::Path, rgb: Option<[u8; 3]>) {
@@ -3054,7 +3215,10 @@ impl App {
     /// or not the part that changed remembered to ask for a save.
     fn config_from_state(&self, ctx: Option<&egui::Context>) -> Config {
         let mut cfg = self.config.clone();
-        cfg.split = self.split;
+        // Split is a choice for the window you are in, not a setting: it is
+        // neither restored nor written back, so the file cannot claim a start
+        // will be two views.
+        cfg.split = false;
         cfg.places_visible = self.places_visible;
         cfg.info_panel = self.info_panel;
         cfg.show_hidden = self.pane().show_hidden;
@@ -3410,6 +3574,14 @@ impl eframe::App for App {
             }
         }
         self.handle_shortcuts(ctx);
+        // Added feature: every folder that comes to the front is noted for the
+        // navigation panel's Recent Locations group. The Trash is not a folder
+        // with a way back — the pane reports the home folder for it — so it is
+        // left out rather than filling the group with Home.
+        if !self.pane().is_trash() {
+            let dir = self.pane().current_dir();
+            self.remember_location(&dir);
+        }
         // `--open-with <file>`: open the chooser once the window is up, so the
         // dialog can be photographed.
         if let Some(file) = self.pending_open_with.clone() {
@@ -3617,30 +3789,6 @@ fn toolbar_word_button(
     resp
 }
 
-/// A split button: the main part does the thing, the chevron beside it opens
-/// the list of other places the same thing can go. Two responses, because they
-/// are two different jobs — that is the whole point of the pair.
-fn toolbar_split_button(
-    ui: &mut egui::Ui,
-    glyph: &str,
-    label: Option<&str>,
-    enabled: bool,
-) -> (egui::Response, egui::Response) {
-    // In the right-to-left row the chevron is laid out first so it lands on the
-    // right of the pair, the way a dropdown arrow reads.
-    let (chev_rect, chev) =
-        ui.allocate_exact_size(Vec2::new(TOOLBAR_CHEVRON_W, TOOLBAR_ICON_W), Sense::click());
-    toolbar_plate(ui, chev_rect, &chev, false, enabled);
-    theme::draw_glyph(
-        ui.painter(),
-        chev_rect,
-        "dropdown",
-        if enabled { TEXT } else { TEXT_FAINT },
-    );
-    let main = toolbar_word_button(ui, glyph, label, false, enabled);
-    (main, chev)
-}
-
 fn toolbar_button(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
     let hovered = resp.hovered() && enabled;
@@ -3695,6 +3843,60 @@ fn section_header(ui: &mut egui::Ui, text: &str) {
             .color(TEXT_DIM),
     );
     ui.add_space(2.0);
+}
+
+/// A group heading in the navigation panel that folds its rows away, drawn in
+/// the same shape as the Shortcuts heading: a chevron, the name, and how many
+/// rows are inside. Returns true when the heading itself was clicked.
+fn recent_group_header(ui: &mut egui::Ui, text: &str, expanded: bool, count: usize) -> bool {
+    ui.add_space(4.0);
+    let width = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), ROW_HOVER);
+    }
+    let chev = Rect::from_center_size(
+        Pos2::new(rect.left() + 8.0, rect.center().y),
+        Vec2::splat(12.0),
+    );
+    theme::draw_glyph(
+        ui.painter(),
+        chev,
+        if expanded { "chevron_down" } else { "chevron_right" },
+        TEXT_DIM,
+    );
+    ui.painter().text(
+        Pos2::new(rect.left() + 19.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(10.5),
+        TEXT_DIM,
+    );
+    if count > 0 {
+        ui.painter().text(
+            Pos2::new(rect.right() - 8.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            format!("{count}"),
+            FontId::proportional(10.0),
+            TEXT_FAINT,
+        );
+    }
+    resp.clicked()
+}
+
+/// A muted line where a group has no rows: the original's own emptiness
+/// wording, so an empty group never looks like a broken one.
+fn quiet_row(ui: &mut egui::Ui, text: &str) {
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
+    ui.painter().text(
+        Pos2::new(rect.left() + 32.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(11.0),
+        TEXT_FAINT,
+    );
 }
 
 fn place_row(
@@ -4061,6 +4263,8 @@ fn main() -> eframe::Result<()> {
     let mut start_pictures = false;
     let mut start_find: Option<String> = None;
     let mut start_deep = false;
+    // `--below`: the picture wall looking inside the folders below.
+    let mut start_below = false;
     let mut start_guide = false;
     let mut start_menu = false;
     let mut open_with_file: Option<PathBuf> = None;
@@ -4157,6 +4361,7 @@ fn main() -> eframe::Result<()> {
                 keep_settings = true;
             }
             "--pictures" | "--gallery" => start_pictures = true,
+            "--below" => start_below = true,
             "--dims" => start_dims = true,
             "--details" => start_details = true,
             "--play" | "--slideshow" => play = true,
@@ -4254,6 +4459,7 @@ fn main() -> eframe::Result<()> {
                 start_guide,
                 start_menu,
                 start_details,
+                start_below,
             );
             app.pending_trash_demo = trash_demo.clone();
             app.pending_open_with = open_with_file.clone();

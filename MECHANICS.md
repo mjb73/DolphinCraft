@@ -528,10 +528,11 @@ selects the file", "a file:// link and a home shortcut both resolve",
 Two things that came out of testing the bar in a running window and are now fixed
 in the code:
 
-* A remembered split view (config `split: true`) used to come back as a single
-  pane with the toolbar bar suppressed — the location bar disappeared entirely
-  after restarting with split view on. `App::new` now rebuilds the second pane,
-  so split view restores with one bar per pane, as the original does.
+* A start is **one view**. Split is a choice made in the window (F3, the menu
+  switch, or *In the other pane*) and is neither restored nor written back to the
+  settings file, so the app never opens as two folders and never asks the person
+  to undo a choice they did not make this run. An older file that says
+  `split: true` opens single, and the next save clears the flag.
 * A captured picture used to write the factory config back over the person's
   settings (pinned folders included). Saving is now skipped in `--screenshot`
   mode, which also keeps the check image identical from run to run.
@@ -903,7 +904,7 @@ that gives way when the window narrows. That is the rule the rebuild now keeps.
 | sort control, wide window | label `Sort: Name` | rebuild |
 | sort control, narrow window | icon only | rebuild |
 | sort control, narrowest | hidden; sorting stays in the app menu's *Sort by* | rebuild |
-| the three words (`Find`, `Open in`, `Menu`) | kept to the last; they go only when even a worded row with no sort button will not fit (about 500 px of window) | rebuild rule, changed this round: a row of bare glyphs is what the person could not read |
+| the two words (`Find`, `Menu`) | kept to the last; they go only when even a worded row with no sort button will not fit (about 460 px of window) | rebuild rule, changed this round: a row of bare glyphs is what the person could not read |
 | long paths | segments drop from the left behind `…`; the current folder stays | rebuild, **estimated** (the original's elision lives in the KIO breadcrumb code) |
 
 `toolbar_metrics(avail, label_w, show_bar)` in `app/src/main.rs` now owns that
@@ -919,18 +920,23 @@ x=647, cluster 316.8 px starting at x=663, sort button 663–740, no overlap; at
 and 620 px (`app/shots/toolbar-*.png`) show the label clear of the bar, then the
 icon-only sort at 620 px, and the menu opening below the button, entirely under
 the toolbar. Split view (F3) keeps its per-pane location bars and the sort
-control in the toolbar with no bar to collide with.
+control in the toolbar with no bar to collide with. In a window that is not
+maximised the app menu is capped to the window's own height and scrolls (its bar
+always drawn), because the rows below the fold — Help, About, Quit — were once
+simply unreachable: the popup ran off the bottom of the screen and could not move.
 
-### The three buttons at the right end: what each one owns
+### The buttons at the right end: what each one owns
 
 The person sent a 163 x 60 crop of three unlabeled glyphs — a small triangle, a
 magnifier and three lines — and asked what each one uniquely should do. The
+triangle and its list have since been removed at his request, so the row now
+carries the magnifier and the three lines. The
 original's own strings and its settings constructor say what the trio is there:
 
 | glyph | the original's string | what it does there | evidence |
 | --- | --- | --- | --- |
 | magnifier | `Toggle Search Bar` | opens a **search bar**: the tooltip promises to "find files and folders", and Enter looks below the folder | string at file offset `0x12d7de`, action built at `0x67fc8` |
-| small triangle | `Open in New Tab` / `Open in New Window` / `Open in Split View` | a split button's destination list — where the picked item opens | strings at `0x12da05`, `0x12da26`, `0x12da39`, built at `0x6bf86`, `0x6c286`, `0x6c40a` |
+| small triangle | `Open in New Tab` / `Open in New Window` / `Open in Split View` | a split button's destination list — where the picked item opens; the rebuild dropped that toolbar control altogether and keeps the destinations on the folder's right-click menu | strings at `0x12da05`, `0x12da26`, `0x12da39`, built at `0x6bf86`, `0x6c286`, `0x6c40a` |
 | three lines | the application menu | the app's own switches, tools and settings | the toolbar's control button |
 
 The confusion is the original's, and it is earned: the same window also carries
@@ -942,12 +948,14 @@ at `0x2b8853` and `0x2b8886`), with `Remove Filter` (string `0x12e119`, used at
 what I am looking at" and "search below this folder" are two controls in the
 original, and the magnifier is the second one.
 
-The rebuild gives each button **one job and the word for it**:
+The rebuild gives each button **one job and the word for it** — two buttons, because
+the person asked for the toolbar's `Open` (formerly `Open in` with its arrow) to go
+as well, and opening a file or folder is what a double-click and the right-click
+menu already do:
 
 | button | word | the one job | what it must not do |
 | --- | --- | --- | --- |
 | Find | `Find` | narrows the list in place as you type; two chips, *This folder* / *In subfolders*, say how far the looking goes | never opens anything, never changes a setting |
-| Open in | `Open in` + arrow | the button opens the picked item; **only the arrow** lists places — new tab, new window, the other pane, a terminal | the arrow never narrows the list |
 | Menu | `Menu` | the app's own settings and tools, grouped New / Tools / View / Help | never touches the person's files |
 
 Three faults were fixed to make that true:

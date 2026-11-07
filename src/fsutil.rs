@@ -842,6 +842,99 @@ pub fn open_terminal(path: &Path) {
     }
 }
 
+/// Where the desktop keeps its list of recently used files: the freedesktop
+/// `recently-used.xbel`. KIO's `recentlyused:` worker reads the same file
+/// through `KRecentDocument`, which is why the original's recently-used view
+/// and this section agree on what counts as recent.
+pub fn recent_list_path() -> PathBuf {
+    home_dir().join(".local/share/recently-used.xbel")
+}
+
+/// Added feature: the entries for the navigation panel's *Recent Files* group.
+/// Newest first, at most `limit` rows, and only files that are still there —
+/// the desktop's list keeps bookmarks for things that have since been moved or
+/// deleted, and a row that opens nothing is worse than no row.
+pub fn recent_files(limit: usize) -> Vec<Entry> {
+    let Ok(text) = fs::read_to_string(recent_list_path()) else {
+        return Vec::new();
+    };
+    parse_recent_xbel(&text, limit)
+}
+
+/// Read `recently-used.xbel` itself, so the same parse can be checked without
+/// touching the person's own list. Each bookmark carries the file's address
+/// (`href`), when it was last modified and when it was last visited; the
+/// visit time is what "recently used" means, and the file's own modification
+/// time is drawn from the file, not from the bookmark.
+pub fn parse_recent_xbel(text: &str, limit: usize) -> Vec<Entry> {
+    let mut found: Vec<(SystemTime, PathBuf)> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<bookmark") {
+        let after = &rest[start..];
+        let Some(end) = after.find('>') else { break };
+        let tag = &after[..end];
+        rest = &after[end..];
+        let Some(href) = attr(tag, "href") else { continue };
+        let Some(path) = path_from_href(&href) else { continue };
+        let when = attr(tag, "visited")
+            .or_else(|| attr(tag, "modified"))
+            .or_else(|| attr(tag, "added"))
+            .and_then(|v| xbel_time(&v))
+            .unwrap_or(UNIX_EPOCH);
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        found.push((when, path));
+    }
+    // A bookmark for a folder is still useful — it is a place the person was
+    // working in — but the panel's Recent Files group is about files, so a
+    // folder stays out of it and reaches the panel as a Recent Location.
+    let mut out: Vec<Entry> = found
+        .into_iter()
+        .filter(|(_, p)| p.is_file())
+        .map(|(when, p)| {
+            let mut e = Entry::from_path(&p);
+            e.modified = e.modified.or(Some(when));
+            e
+        })
+        .collect();
+    out.sort_by(|a, b| b.modified.cmp(&a.modified));
+    out.truncate(limit);
+    out
+}
+
+/// One attribute out of an XML tag, `name="value"`. The list is small and
+/// flat, so a scan beats pulling in a parser for it.
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let needle = format!("{name}=\"");
+    let at = tag.find(&needle)? + needle.len();
+    let tail = &tag[at..];
+    let end = tail.find('"')?;
+    Some(tail[..end].to_string())
+}
+
+/// `file:///home/me/a%20b.txt` -> `/home/me/a b.txt`. Anything that is not a
+/// local file (`smb://`, `trash:/`) is refused, because the panel cannot open
+/// it and a dead row helps nobody.
+pub fn path_from_href(href: &str) -> Option<PathBuf> {
+    let rest = href.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !rest.starts_with('/') {
+        return None;
+    }
+    Some(PathBuf::from(percent_decode(rest)))
+}
+
+/// The bookmark's `visited` / `modified` stamp, as an instant. The list writes
+/// `2026-11-06T18:41:00Z`; a stamp that will not parse is treated as old
+/// rather than dropping the row.
+pub fn xbel_time(value: &str) -> Option<SystemTime> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|d| d.with_timezone(&chrono::Utc).into())
+}
+
 pub fn local_from_ymd(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> Option<SystemTime> {
     Local
         .with_ymd_and_hms(y, m, d, hh, mm, 0)

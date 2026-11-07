@@ -74,7 +74,9 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   separate.
 - **Sorting** by name, size, type or date, with folders-first and reverse options.
 - **Split view** for two folders side by side, with the information panel
-  showing size, type, date and a preview for the current selection.
+  showing size, type, date and a preview for the current selection. The window
+  always starts as one view; **F3** (or the menu switch) splits it, and the
+  next start is one view again.
 - **Search** inside the current folder, with the results in place of the list.
 - **Added tools**
   - **Find Duplicates** — groups identical files by content hash.
@@ -140,7 +142,7 @@ Options:
 --keep-settings           use the saved layout instead of factory settings
 --find <text>             open the find bar with these words already narrowing the list
 --deep                   with --find, look through every folder below as well
---guide                   open the card that explains Find, Open in and Menu
+--guide                   open the card that explains Find and Menu
 --menu                    open the app's own menu (used to photograph it)
 --open-with <file>        open the Open With chooser on that file at once
                           (used to photograph it)

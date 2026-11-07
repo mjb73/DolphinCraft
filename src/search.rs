@@ -466,6 +466,11 @@ pub struct SearchFilters {
     pub min_size: Option<u64>,
     pub max_age_hours: Option<u64>,
     pub folders_only: bool,
+    /// Added feature: keep pictures only. The picture wall's "Sub-folders"
+    /// switch starts a walk with this on, so the wall can show the pictures of
+    /// a whole tree — a folder of year or month folders — with every other file
+    /// and folder left out of the result.
+    pub pictures_only: bool,
 }
 
 pub enum SearchEvent {
@@ -482,6 +487,11 @@ pub struct SearchSession {
     pub results: Vec<Entry>,
     pub done: bool,
     pub error: Option<String>,
+    /// Added feature: this walk is not the find bar's search but the picture
+    /// wall looking below the folder. The difference matters in three places:
+    /// the wall's own wording, the status bar's, and the fact that the find bar
+    /// stays shut, because nothing was typed.
+    pub pictures_below: bool,
 }
 
 impl SearchSession {
@@ -516,6 +526,11 @@ impl SearchSession {
                 if f.folders_only && !entry.is_dir {
                     continue;
                 }
+                // A wall of pictures is what asked for this walk, so folders
+                // and every non-picture file stay out of the result.
+                if f.pictures_only && (entry.is_dir || !entry.is_image()) {
+                    continue;
+                }
                 if let Some(min) = f.min_size {
                     if entry.size < min {
                         continue;
@@ -547,6 +562,7 @@ impl SearchSession {
             results: Vec::new(),
             done: false,
             error: None,
+            pictures_below: false,
         }
     }
 

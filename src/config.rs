@@ -121,6 +121,23 @@ pub struct Config {
     /// The Shortcuts section of the navigation panel can be folded away.
     #[serde(default = "yes")]
     pub shortcuts_expanded: bool,
+    /// Added feature: the two groups the original's panel shows under Places
+    /// and leaves empty on a fresh profile — *Recent Files* and *Recent
+    /// Locations*. Each holds rows here: the files the desktop's own recently
+    /// used list names, and the folders this window walked through. The two
+    /// fold away like the Shortcuts group and are remembered folded.
+    #[serde(default = "yes")]
+    pub recent_files_expanded: bool,
+    #[serde(default = "yes")]
+    pub recent_locations_expanded: bool,
+    /// How many rows *Recent Files* asks the list for. The panel is narrow and
+    /// a group taller than the window is not a shortcut, so it stops at eight.
+    #[serde(default = "recent_rows")]
+    pub recent_files_shown: usize,
+    /// The folders walked through, newest first, kept between runs so the group
+    /// has something in it on the first frame of a new window.
+    #[serde(default)]
+    pub recent_locations: Vec<PathBuf>,
     /// Show the keyboard hint next to each shortcut row.
     #[serde(default = "yes")]
     pub shortcut_keys: bool,
@@ -206,6 +223,10 @@ fn yes() -> bool {
     true
 }
 
+fn recent_rows() -> usize {
+    8
+}
+
 fn half() -> f32 {
     0.5
 }
@@ -252,6 +273,11 @@ impl Default for Config {
             window_px: None,
             window_pos: None,
             shortcuts_expanded: true,
+            recent_files_expanded: true,
+            recent_locations_expanded: true,
+            recent_files_shown: 8,
+            recent_locations: Vec::new(),
+
             shortcut_keys: true,
             shortcut_colors: Vec::new(),
             pictures: false,

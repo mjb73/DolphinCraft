@@ -570,6 +570,22 @@ impl Pane {
                 self.gallery_round = round;
                 vctx.reqs.push(Request::GalleryChanged);
             }
+            // Added feature: the wall can reach into the folders below, so a
+            // photo library sorted into year or month folders shows as one wall.
+            let mut below = self.gallery_below;
+            if ui
+                .add(egui::Checkbox::new(
+                    &mut below,
+                    egui::RichText::new("Sub-folders").size(11.5),
+                ))
+                .on_hover_text(
+                    "Show the pictures in the folders below this one too — every \
+                     folder on the way down, pictures only",
+                )
+                .changed()
+            {
+                self.set_pictures_below(below);
+            }
 
             let pictures = self.gallery_images();
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -615,14 +631,32 @@ impl Pane {
                         )));
                     }
                 });
-                ui.label(
-                    egui::RichText::new(format!(
+                let scanning = self
+                    .search
+                    .as_ref()
+                    .map(|s| s.pictures_below && !s.done)
+                    .unwrap_or(false);
+                let count_text = if self.gallery_below {
+                    if scanning {
+                        format!("Looking… {} pictures so far", pictures.len())
+                    } else {
+                        format!(
+                            "{} picture{} below",
+                            pictures.len(),
+                            if pictures.len() == 1 { "" } else { "s" }
+                        )
+                    }
+                } else {
+                    format!(
                         "{} picture{}",
                         pictures.len(),
                         if pictures.len() == 1 { "" } else { "s" }
-                    ))
-                    .size(11.0)
-                    .color(TEXT_FAINT),
+                    )
+                };
+                ui.label(
+                    egui::RichText::new(count_text)
+                        .size(11.0)
+                        .color(TEXT_FAINT),
                 );
             });
         });
@@ -650,17 +684,38 @@ impl Pane {
             .collect();
         if entries.is_empty() {
             let rect = ui.available_rect_before_wrap();
+            let scanning = self
+                .search
+                .as_ref()
+                .map(|s| s.pictures_below && !s.done)
+                .unwrap_or(false);
+            let (title, hint) = if scanning {
+                (
+                    "Looking through the folders below…",
+                    "The pictures appear as they are found.",
+                )
+            } else if self.gallery_below {
+                (
+                    "No pictures in this folder or below it",
+                    "Sub-folders is on; untick it to go back to this folder alone.",
+                )
+            } else {
+                (
+                    "No pictures in this folder",
+                    "The wall shows pictures only; the list views show every file.",
+                )
+            };
             ui.painter().text(
                 Pos2::new(rect.center().x, rect.top() + 90.0),
                 Align2::CENTER_CENTER,
-                "No pictures in this folder",
+                title,
                 FontId::proportional(14.0),
                 TEXT_DIM,
             );
             ui.painter().text(
                 Pos2::new(rect.center().x, rect.top() + 112.0),
                 Align2::CENTER_CENTER,
-                "The wall shows pictures only; the list views show every file.",
+                hint,
                 FontId::proportional(12.0),
                 TEXT_FAINT,
             );
