@@ -271,6 +271,49 @@ pub fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
     s
 }
 
+/// File names are cut in the **middle**, not at the end. The original's own
+/// switch for this is `[ContentDisplay] ElidingMode`, registered by
+/// `ContentDisplaySettings::ContentDisplaySettings` @0x2b29b0 in
+/// `libdolphinprivate.so.6` with exactly two choices, `Right` = 0 and
+/// `Middle` = 1, and the default passed to `ItemEnum` is **1** — so a fresh
+/// profile elides in the middle and keeps both the start of the name and the
+/// extension visible. Only the file names follow this; menu rows and the
+/// location bar keep the right-hand cut Qt gives them.
+pub fn elide_name(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
+    let width = |s: &str, ui: &egui::Ui| {
+        ui.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), TEXT))
+            .size()
+            .x
+    };
+    if width(text, ui) <= max_w {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    // Keep 5/9 of the room for the head and 4/9 for the tail: the extension at
+    // the end is short, the folder-ish start of a name is what tells files
+    // apart.
+    let mut best = "…".to_string();
+    let mut lo = 2usize;
+    let mut hi = chars.len().saturating_sub(1);
+    while lo <= hi {
+        let keep = (lo + hi) / 2;
+        let head = ((keep * 5 + 4) / 9).max(1);
+        let tail = keep.saturating_sub(head);
+        let mut s: String = chars[..head].iter().collect();
+        s.push('…');
+        if tail > 0 {
+            s.extend(chars[chars.len() - tail..].iter());
+        }
+        if width(&s, ui) <= max_w {
+            best = s;
+            lo = keep + 1;
+        } else {
+            hi = keep - 1;
+        }
+    }
+    best
+}
+
 // ---------------------------------------------------------------------------
 // File icons
 // ---------------------------------------------------------------------------

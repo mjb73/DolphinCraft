@@ -77,6 +77,24 @@ pub struct Config {
     pub zoom_plain: [u8; 3],
     #[serde(default = "yes")]
     pub folders_first: bool,
+    /// Whether the navigation panel keeps the current folder's row in view
+    /// (`[FoldersPanel] AutoScrolling`, default true — the `ItemBool` in
+    /// `FoldersPanelSettings::FoldersPanelSettings` @0x1f9a00 in
+    /// `/usr/bin/dolphin`, and the toggle `FUN_00217320` @0x217320 applies from
+    /// the panel's own menu). With it on, walking into a folder elsewhere
+    /// scrolls the panel to the row that folder owns instead of leaving the row
+    /// off the top or bottom edge.
+    #[serde(default = "yes")]
+    pub places_autoscroll: bool,
+    /// `[InformationPanel] dateFormat`, index into the original's two choices:
+    /// 0 `LongFormat` (the factory default) and 1 `ShortFormat`. The
+    /// `ItemEnum` is built in `InformationPanelSettings::InformationPanelSettings`
+    /// @0x1fe410 in `/usr/bin/dolphin`; the two names sit at 0x22cfa4 and
+    /// 0x22cfba. Relative wording stays on either way, because
+    /// `[ContentDisplay] UseShortRelativeDates` (@0x2b29b0, default true) is a
+    /// separate switch.
+    #[serde(default)]
+    pub date_format: usize,
     /// Which name comparison the Sort menu uses, as the index of the three rows
     /// the original's Sort page offers (`FUN_001e5750` @0x1e5750):
     /// 0 Natural, 1 Alphabetical case insensitive, 2 Alphabetical case sensitive.
@@ -279,6 +297,8 @@ impl Default for Config {
             zoom: crate::theme::default_zoom(true),
             zoom_plain: crate::theme::default_zoom(false),
             folders_first: true,
+            places_autoscroll: true,
+            date_format: 0,
             name_sort: 0,
             sort_key: 0,
             sort_desc: false,

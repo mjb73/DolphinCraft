@@ -369,6 +369,16 @@ pub enum Request {
     },
     /// Added feature: the chooser behind "Other Application…".
     OpenWithChoose(Vec<PathBuf>),
+    /// Added feature: *Manage Disk Space Usage* — add up everything below this
+    /// folder and show what takes the room.
+    SpaceUsage(PathBuf),
+    /// Added feature: *Compress* — turn these items into one ZIP in that folder.
+    Compress(Vec<PathBuf>, PathBuf),
+    /// Added feature: *Extract* — unpack this archive next to itself.
+    Extract(PathBuf),
+    /// Added feature: show a file in its folder (the space window's shortlist,
+    /// and the same thing the navigation panel's recent rows do).
+    Reveal(PathBuf),
     /// Added feature: bring back the tab that was closed, by its place in the
     /// list of closed tabs (0 is the newest).
     ReopenClosedTab(usize),

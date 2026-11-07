@@ -132,6 +132,13 @@ impl Entry {
     }
 }
 
+/// The icon a path gets, worked out from its name and mode alone. The space
+/// window classifies a file once while it walks, so the list can be drawn on
+/// every frame without asking the disk again.
+pub fn kind_of(path: &Path, is_dir: bool, mode: u32) -> Kind {
+    kind_for(path, is_dir, mode)
+}
+
 fn kind_for(path: &Path, is_dir: bool, mode: u32) -> Kind {
     if is_dir {
         return Kind::Folder;
@@ -240,13 +247,28 @@ pub fn short_date(t: Option<SystemTime>) -> String {
 
 /// Date wording used by the Information panel, where the capture shows
 /// "14 minute(s) ago" for something just touched, and a plain date otherwise.
+///
+/// Two settings from the original decide this line, both read out of the
+/// installed files: `ContentDisplaySettings::ContentDisplaySettings` @0x2b29b0
+/// in `libdolphinprivate.so.6` registers `UseShortRelativeDates` with a default
+/// of **true**, and `InformationPanelSettings::InformationPanelSettings`
+/// @0x1fe410 in `/usr/bin/dolphin` registers `dateFormat` as an `ItemEnum` over
+/// exactly two choices, `LongFormat` = 0 (the default) and `ShortFormat` = 1.
+/// So recent times read "N minute(s) ago" and older ones take the long date
+/// unless the person switches to short.
 pub fn human_date(t: Option<SystemTime>) -> String {
+    info_date(t, true)
+}
+
+/// The same line with the `dateFormat` choice: `long` is `LongFormat` (index
+/// 0, the factory setting), otherwise `ShortFormat`.
+pub fn info_date(t: Option<SystemTime>, long: bool) -> String {
     let Some(t) = t else { return String::new() };
     let dt: chrono::DateTime<Local> = t.into();
     let now = Local::now();
     let mins = (now - dt).num_minutes();
     if mins < 0 {
-        return short_date(Some(t));
+        return if long { long_date(Some(t)) } else { short_date(Some(t)) };
     }
     if mins < 1 {
         return "less than a minute ago".to_string();
@@ -261,7 +283,11 @@ pub fn human_date(t: Option<SystemTime>) -> String {
     if same_day(dt, now - chrono::Duration::days(1)) && hours < 36 {
         return format!("{} hour(s) ago", hours);
     }
-    short_date(Some(t))
+    if long {
+        long_date(Some(t))
+    } else {
+        short_date(Some(t))
+    }
 }
 
 /// Long date, as in the Information panel: "Friday, 1 May 2026 at 13:00".

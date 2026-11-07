@@ -11,6 +11,7 @@ use eframe::egui::{
 
 use crate::fsutil::{self, Entry};
 use crate::state::Request;
+use crate::space;
 use crate::theme;
 use crate::theme::*;
 use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewFolder, Props, Quick, ShortcutEdit};
@@ -93,6 +94,38 @@ impl App {
         }
         ui.separator();
         menu_group(ui, "Tools");
+        // The original's own row, first in its Tools menu: a `manage_disk_space`
+        // action labelled "Manage Disk Space Usage" (string 0x22d931, icon
+        // `filelight`) whose submenu only launches Filelight. Here it opens the
+        // window this build carries (see `space.rs`), so the sentence in the
+        // free-space tooltip — "Press to manage disk space usage." — is true
+        // without anything to install.
+        if crate::menu_row(ui, "Manage Disk Space Usage…", "").clicked() {
+            self.reqs.push(Request::SpaceUsage(dir.clone()));
+            ui.close();
+        }
+        // Added feature: the two archive rows. They act on what is marked, and
+        // fall back to the folder on show when nothing is — a person who has
+        // not marked anything usually means "this folder".
+        if crate::menu_row(ui, "Compress…", "").clicked() {
+            let paths = self.pane().selected_paths();
+            self.reqs.push(Request::Compress(paths, dir.clone()));
+            ui.close();
+        }
+        // The first marked archive, if any is marked: Extract acts on one file.
+        let archive: Option<PathBuf> = self
+            .pane()
+            .selected_paths()
+            .into_iter()
+            .find(|p| crate::archive::is_archive(p));
+        ui.add_enabled_ui(archive.is_some(), |ui| {
+            if crate::menu_row(ui, "Extract…", "").clicked() {
+                if let Some(path) = archive.clone() {
+                    self.reqs.push(Request::Extract(path));
+                }
+                ui.close();
+            }
+        });
         if crate::menu_row(ui, "Find Duplicates…", "Ctrl+Shift+D").clicked() {
             self.dups = Some(Dups {
                 scan: crate::search::DupScan::start(dir.clone()),
@@ -797,8 +830,695 @@ impl App {
         self.quick_dialog(ctx);
         self.new_folder_dialog(ctx);
         self.open_with_dialog(ctx);
+        self.space_dialog(ctx);
+        self.compress_dialog(ctx);
+        self.extract_dialog(ctx);
         self.shortcut_dialog(ctx);
         self.guide_dialog(ctx);
+    }
+
+    /// Added feature: *Manage Disk Space Usage*.
+    ///
+    /// The original's answer to "what is filling this disk?" is a Tools-menu
+    /// action that launches Filelight (`manage_disk_space` → a submenu built by
+    /// `FUN_001e8430` @0x1e8430, which looks for `org.kde.filelight` and offers
+    /// to install it when it is missing). This window adds that missing piece
+    /// itself: one walk of the folder, every child summed, largest first, with
+    /// the biggest files below it listed so something can be done about them.
+    fn space_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut sp) = self.space.take() else {
+            return;
+        };
+        sp.poll();
+        if sp.scanning {
+            ctx.request_repaint_after(Duration::from_millis(150));
+        }
+        let mut win_open = true;
+        let mut descend: Option<PathBuf> = None;
+        let mut up = false;
+        let mut rescan = false;
+        let mut reveal: Option<PathBuf> = None;
+        let mut pick: Option<PathBuf> = None;
+        // The volume's own figures, from the same call the status bar uses.
+        let volume = fsutil::free_space(&sp.root);
+        let rows = sp.rows();
+        let total = sp.shown_total();
+        let biggest: Vec<(PathBuf, u64)> = sp
+            .biggest_here()
+            .into_iter()
+            .take(14)
+            .map(|b| (b.path.clone(), b.size))
+            .collect();
+
+        egui::Window::new("Manage Disk Space Usage")
+            .open(&mut win_open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size(Vec2::new(720.0, 590.0))
+            .min_width(640.0)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .frame(
+                egui::Frame::window(&egui::Style::default())
+                    .fill(Color32::from_rgb(43, 47, 51))
+                    .inner_margin(Margin::same(14))
+                    .corner_radius(CornerRadius::same(6))
+                    .stroke(Stroke::new(1.0, BORDER)),
+            )
+            .show(ctx, |ui| {
+                ui.set_min_width(680.0);
+                // The volume line. The original's menu carries its own row for
+                // this ("Disk Usage Statistics - current device", literal
+                // 0x2374xx in the submenu builder); the same sentence heads the
+                // numbers here.
+                if let Some((free, whole)) = volume {
+                    if whole > 0 {
+                        let pct = fsutil::used_percent(free, whole);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("Disk Usage Statistics - current device")
+                                    .size(11.5)
+                                    .color(TEXT_DIM),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} free out of {} ({}% used)",
+                                        fsutil::format_size(free),
+                                        fsutil::format_size(whole),
+                                        pct
+                                    ))
+                                    .size(11.0)
+                                    .color(TEXT_FAINT),
+                                );
+                                let (bar, _) = ui.allocate_exact_size(
+                                    Vec2::new(150.0, 6.0),
+                                    Sense::hover(),
+                                );
+                                ui.painter().rect_filled(
+                                    bar,
+                                    CornerRadius::same(2),
+                                    Color32::from_rgb(48, 53, 58),
+                                );
+                                let filled = bar.width() * (pct as f32 / 100.0);
+                                if filled > 0.5 {
+                                    ui.painter().rect_filled(
+                                        Rect::from_min_size(
+                                            bar.min,
+                                            Vec2::new(filled, bar.height()),
+                                        ),
+                                        CornerRadius::same(2),
+                                        ACCENT,
+                                    );
+                                }
+                            });
+                        });
+                    }
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(sp.summary())
+                        .size(12.0)
+                        .color(TEXT),
+                );
+                if sp.cancelled {
+                    ui.label(
+                        egui::RichText::new(
+                            "The walk was stopped, so this is only what had been added up.",
+                        )
+                        .size(11.0)
+                        .color(TEXT_FAINT),
+                    );
+                }
+                ui.add_space(6.0);
+                // Where the list is looking, then the controls that move it.
+                let here = sp
+                    .show
+                    .strip_prefix(&sp.root)
+                    .ok()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                let name = sp
+                    .root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| sp.root.display().to_string());
+                let label = if here.is_empty() {
+                    name
+                } else {
+                    format!("{name} / {here}")
+                };
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(theme::elide(
+                            ui,
+                            &label,
+                            380.0,
+                            FontId::proportional(12.0),
+                        ))
+                        .size(12.0)
+                        .color(TEXT_DIM),
+                    )
+                    .on_hover_text(sp.show.display().to_string());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if sp.scanning {
+                            ui.spinner();
+                            if ui.small_button("Stop").clicked() {
+                                sp.stop();
+                            }
+                        }
+                        if sp.trail.is_empty() {
+                            if ui.small_button("Scan again").clicked() {
+                                rescan = true;
+                            }
+                        } else {
+                            if ui.small_button("Top folder").clicked() {
+                                sp.trail.clear();
+                                sp.show = sp.root.clone();
+                                sp.picked = None;
+                            }
+                            if ui.small_button("Up").clicked() {
+                                up = true;
+                            }
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                // Column headings, so the numbers have a place.
+                ui.horizontal(|ui| {
+                    let width = ui.available_width();
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 16.0), Sense::hover());
+                    let p = ui.painter();
+                    p.text(
+                        Pos2::new(rect.left() + 30.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        "Name",
+                        FontId::proportional(10.5),
+                        TEXT_FAINT,
+                    );
+                    p.text(
+                        Pos2::new(rect.right() - 78.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        "Size",
+                        FontId::proportional(10.5),
+                        TEXT_FAINT,
+                    );
+                    p.text(
+                        Pos2::new(rect.right() - 8.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        "Share",
+                        FontId::proportional(10.5),
+                        TEXT_FAINT,
+                    );
+                });
+                egui::ScrollArea::vertical()
+                    .max_height(236.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(660.0);
+                        if rows.is_empty() {
+                            ui.add_space(10.0);
+                            if sp.scanning {
+                                ui.horizontal(|ui| {
+                                    ui.spinner();
+                                    ui.label(
+                                        egui::RichText::new("Adding up the folders…")
+                                            .size(12.0)
+                                            .color(TEXT_DIM),
+                                    );
+                                });
+                            } else {
+                                ui.label(
+                                    egui::RichText::new("Nothing in this folder to add up.")
+                                        .size(12.0)
+                                        .color(TEXT_DIM),
+                                );
+                            }
+                        }
+                        for row in rows.iter() {
+                            // The scroll bar takes the last few pixels of the
+                            // list, so the figures stop short of the edge
+                            // instead of being drawn under it.
+                            let width = ui.available_width() - 14.0;
+                            let (rect, resp) = ui.allocate_exact_size(
+                                Vec2::new(width, 26.0),
+                                Sense::click(),
+                            );
+                            let share = space::share_percent(row.size, total);
+                            let picked_here = sp.picked.as_deref() == Some(row.path.as_path());
+                            if resp.hovered() || picked_here {
+                                ui.painter().rect_filled(
+                                    rect.shrink2(Vec2::new(2.0, 1.0)),
+                                    CornerRadius::same(3),
+                                    if picked_here { ROW_SEL_ACTIVE } else { ROW_HOVER },
+                                );
+                            } else if share > 0 {
+                                // A thin band under the row, as wide as the
+                                // entry's share: a bar chart that needs no
+                                // second column and cannot be mistaken for the
+                                // hovered row.
+                                let band = Rect::from_min_size(
+                                    Pos2::new(rect.left() + 2.0, rect.bottom() - 4.0),
+                                    Vec2::new(
+                                        (rect.width() - 4.0) * (share as f32 / 100.0),
+                                        2.0,
+                                    ),
+                                );
+                                ui.painter().rect_filled(
+                                    band,
+                                    CornerRadius::same(1),
+                                    ACCENT.gamma_multiply(0.55),
+                                );
+                            }
+                            let icon = Rect::from_center_size(
+                                Pos2::new(rect.left() + 16.0, rect.center().y),
+                                Vec2::splat(15.0),
+                            );
+                            theme::draw_kind_icon(ui.painter(), icon, row.kind, false);
+                            let name = theme::elide(
+                                ui,
+                                &row.name,
+                                rect.width() - 120.0,
+                                FontId::proportional(12.5),
+                            );
+                            ui.painter().text(
+                                Pos2::new(rect.left() + 30.0, rect.center().y),
+                                Align2::LEFT_CENTER,
+                                name,
+                                FontId::proportional(12.5),
+                                TEXT,
+                            );
+                            ui.painter().text(
+                                Pos2::new(rect.right() - 78.0, rect.center().y),
+                                Align2::RIGHT_CENTER,
+                                fsutil::format_size(row.size),
+                                FontId::monospace(11.0),
+                                TEXT_DIM,
+                            );
+                            ui.painter().text(
+                                Pos2::new(rect.right() - 8.0, rect.center().y),
+                                Align2::RIGHT_CENTER,
+                                format!("{share}%"),
+                                FontId::monospace(11.0),
+                                TEXT_FAINT,
+                            );
+                            if resp.clicked() {
+                                pick = Some(row.path.clone());
+                            }
+                            if resp.double_clicked() && row.is_dir {
+                                descend = Some(row.path.clone());
+                            }
+                            resp.on_hover_text(format!(
+                                "{}\n{}",
+                                row.path.display(),
+                                fsutil::format_size(row.size)
+                            ));
+                        }
+                    });
+                // What the list is looking at, and the ways out of the window.
+                if let Some(picked) = sp.picked.clone() {
+                    let is_dir = picked.is_dir();
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(theme::elide(
+                                ui,
+                                &picked.display().to_string(),
+                                360.0,
+                                FontId::proportional(11.0),
+                            ))
+                            .size(11.0)
+                            .color(TEXT_FAINT),
+                        )
+                        .on_hover_text(picked.display().to_string());
+                        if is_dir {
+                            if ui.small_button("Walk into").clicked() {
+                                descend = Some(picked.clone());
+                            }
+                        } else if ui.small_button("Show in folder").clicked() {
+                            reveal = Some(picked.clone());
+                        }
+                    });
+                } else {
+                    ui.add_space(4.0);
+                }
+                ui.separator();
+                // The shortlist. "Free Up Disk Space" is the original's own row
+                // name from the same disk-space menu (string 0x22ec97).
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Free Up Disk Space")
+                            .size(11.5)
+                            .strong()
+                            .color(TEXT),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "the largest files below this folder ({} kept)",
+                            space::BIGGEST_KEPT
+                        ))
+                        .size(10.5)
+                        .color(TEXT_FAINT),
+                    );
+                });
+                ui.add_space(2.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("space-biggest")
+                    .max_height(150.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(660.0);
+                        if biggest.is_empty() {
+                            ui.label(
+                                egui::RichText::new(if sp.scanning {
+                                    "Still walking the folders…"
+                                } else {
+                                    "No files below this folder."
+                                })
+                                .size(11.5)
+                                .color(TEXT_DIM),
+                            );
+                        }
+                        for (path, size) in biggest.iter() {
+                            let short = path
+                                .strip_prefix(&sp.root)
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_else(|_| path.display().to_string());
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(fsutil::format_size(*size))
+                                        .monospace()
+                                        .size(10.5)
+                                        .color(TEXT_DIM),
+                                );
+                                let width = (ui.available_width() - 46.0).max(80.0);
+                                ui.label(
+                                    egui::RichText::new(theme::elide(
+                                        ui,
+                                        &short,
+                                        width,
+                                        FontId::proportional(11.0),
+                                    ))
+                                    .size(11.0)
+                                    .color(TEXT),
+                                )
+                                .on_hover_text(path.display().to_string());
+                                if ui.small_button("Show").clicked() {
+                                    reveal = Some(path.clone());
+                                }
+                            });
+                        }
+                    });
+            });
+
+        // A window closed by its own cross-button stops the walk it started:
+        // there is nobody left to show the total to.
+        if !win_open {
+            sp.stop();
+            return;
+        }
+        if let Some(path) = pick {
+            sp.picked = Some(path);
+        }
+        if let Some(path) = descend {
+            sp.picked = None;
+            sp.descend(path);
+        }
+        if up {
+            sp.up();
+            sp.picked = None;
+        }
+        if rescan {
+            self.space = Some(space::Space::start(sp.root.clone()));
+        } else {
+            self.space = Some(sp);
+        }
+        if let Some(path) = reveal {
+            self.reqs.push(Request::Reveal(path));
+        }
+    }
+
+    /// Added feature: *Compress to ZIP*.
+    ///
+    /// Nothing in `/usr/bin/dolphin` compresses anything — its right-click
+    /// *Compress* submenu is installed by Ark's file-item-action plugin, and the
+    /// program itself carries only the settings row `Browse compressed files as
+    /// folders`. This window does the job in place: one name, one button, and
+    /// the archive lands in the folder the items came from.
+    fn compress_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut c) = self.compress.take() else {
+            return;
+        };
+        if c.running() {
+            ctx.request_repaint_after(Duration::from_millis(120));
+        }
+        // The archive program's answer, once it has one.
+        let mut finished: Option<PathBuf> = None;
+        if let Some(answer) = c.poll() {
+            if answer.is_ok() {
+                finished = c.last_dest.clone();
+            }
+        }
+        if let Some(dest) = finished {
+            if let Some(msg) = c.done_message() {
+                self.toast(&msg);
+            }
+            // Show the new archive when it landed in the folder on show; when
+            // the folder itself was compressed the archive sits beside it, and
+            // jumping the person out of the folder they were reading would be
+            // rude — the toast is enough there.
+            let here = self.pane().current_dir();
+            if dest.parent() == Some(here.as_path()) {
+                self.reqs.push(Request::Reveal(dest));
+            }
+            return;
+        }
+        let total = c.total();
+        let count = c.paths.len();
+        let mut win_open = true;
+        let mut go = false;
+        let mut close = false;
+        window_style("Compress to ZIP")
+            .open(&mut win_open)
+            .show(ctx, |ui| {
+                ui.set_min_width(500.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} item{} ({})",
+                        count,
+                        if count == 1 { "" } else { "s" },
+                        fsutil::format_size(total)
+                    ))
+                    .size(12.0)
+                    .color(TEXT),
+                );
+                ui.add_space(4.0);
+                for p in c.paths.iter().take(6) {
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| p.display().to_string());
+                    ui.label(
+                        egui::RichText::new(theme::elide(
+                            ui,
+                            &name,
+                            440.0,
+                            FontId::proportional(11.5),
+                        ))
+                        .size(11.5)
+                        .color(TEXT_DIM),
+                    );
+                }
+                if count > 6 {
+                    ui.label(
+                        egui::RichText::new(format!("and {} more", count - 6))
+                            .size(11.0)
+                            .color(TEXT_FAINT),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Name")
+                            .size(11.5)
+                            .color(TEXT_DIM),
+                    );
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut c.name)
+                            .desired_width(320.0)
+                            .font(FontId::proportional(12.5)),
+                    );
+                    if c.focus {
+                        edit.request_focus();
+                        c.focus = false;
+                    }
+                });
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Will be written to {}",
+                        theme::elide(
+                            ui,
+                            &c.dir.display().to_string(),
+                            (ui.available_width() - 24.0).max(180.0),
+                            FontId::proportional(10.5)
+                        )
+                    ))
+                    .size(10.5)
+                    .color(TEXT_FAINT),
+                )
+                .on_hover_text(c.dir.display().to_string());
+                if let Some(err) = c.error.clone() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(11.0)
+                            .color(Color32::from_rgb(224, 122, 95)),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if c.running() {
+                        ui.spinner();
+                        ui.label(
+                            egui::RichText::new("Compressing…")
+                                .size(11.5)
+                                .color(TEXT_DIM),
+                        );
+                    } else {
+                        if ui.button("Compress").clicked() {
+                            go = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    }
+                });
+            });
+        if go {
+            c.begin();
+        }
+        if close || !win_open {
+            // A walk already handed to `zip` is left to finish: stopping it
+            // halfway would leave a broken archive behind.
+            if c.running() {
+                self.compress = Some(c);
+            }
+            return;
+        }
+        self.compress = Some(c);
+    }
+
+    /// Added feature: *Extract*.
+    ///
+    /// The original hands an archive to Ark as well, so this window is an
+    /// addition: it unpacks a ZIP with `unzip` and a tar archive with `tar` into
+    /// a folder named after the file, or into the folder on show.
+    fn extract_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut x) = self.extract.take() else {
+            return;
+        };
+        if x.running() {
+            ctx.request_repaint_after(Duration::from_millis(120));
+        }
+        let mut finished: Option<PathBuf> = None;
+        if let Some(answer) = x.poll() {
+            if answer.is_ok() {
+                finished = x.last_dest.clone();
+            }
+        }
+        if let Some(dest) = finished {
+            if let Some(msg) = x.done_message() {
+                self.toast(&msg);
+            }
+            if x.own_folder {
+                self.reqs.push(Request::Reveal(dest));
+            } else {
+                self.reqs.push(Request::Navigate(dest));
+            }
+            return;
+        }
+        let name = x
+            .archive
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let size = std::fs::metadata(&x.archive)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let dest = x.dest();
+        let mut win_open = true;
+        let mut go = false;
+        let mut close = false;
+        window_style("Extract Archive")
+            .open(&mut win_open)
+            .show(ctx, |ui| {
+                ui.set_min_width(480.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{}  ·  {}  ·  {}",
+                        theme::elide(ui, &name, 300.0, FontId::proportional(12.0)),
+                        x.kind.label(),
+                        fsutil::format_size(size)
+                    ))
+                    .size(12.0)
+                    .color(TEXT),
+                );
+                ui.add_space(8.0);
+                ui.checkbox(&mut x.own_folder, "Into a folder of its own");
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Will be unpacked into {}",
+                        theme::elide(
+                            ui,
+                            &dest.display().to_string(),
+                            (ui.available_width() - 24.0).max(180.0),
+                            FontId::proportional(10.5)
+                        )
+                    ))
+                    .size(10.5)
+                    .color(TEXT_FAINT),
+                )
+                .on_hover_text(dest.display().to_string());
+                if let Some(err) = x.error.clone() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(11.0)
+                            .color(Color32::from_rgb(224, 122, 95)),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if x.running() {
+                        ui.spinner();
+                        ui.label(
+                            egui::RichText::new("Unpacking…")
+                                .size(11.5)
+                                .color(TEXT_DIM),
+                        );
+                    } else {
+                        if ui.button("Extract").clicked() {
+                            go = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    }
+                });
+            });
+        if go {
+            x.begin();
+        }
+        if close || !win_open {
+            if x.running() {
+                self.extract = Some(x);
+            }
+            return;
+        }
+        self.extract = Some(x);
     }
 
     /// Added feature: "Other Application…" — the chooser the original opens

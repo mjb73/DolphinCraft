@@ -17,6 +17,7 @@ pub fn about_line() -> String {
 }
 
 mod apps;
+mod archive;
 mod config;
 mod foldercolor;
 mod fsutil;
@@ -26,6 +27,7 @@ mod panels;
 mod search;
 mod selectable;
 mod selftest;
+mod space;
 mod state;
 mod theme;
 mod views;
@@ -294,6 +296,20 @@ pub struct App {
     pub props: Option<Props>,
     pub bulk: Option<Bulk>,
     pub dups: Option<Dups>,
+    /// Added feature: *Manage Disk Space Usage* — the built-in answer to the
+    /// question the original's free-space button only ever handed to Filelight.
+    pub space: Option<space::Space>,
+    /// `--space`: open that window on the first frame, so it can be
+    /// photographed without a mouse.
+    pub pending_space: Option<PathBuf>,
+    /// Added feature: *Compress* — the marked items become one ZIP.
+    pub compress: Option<archive::Compress>,
+    /// Added feature: *Extract* — a ZIP or tar archive unpacked in the window.
+    pub extract: Option<archive::Extract>,
+    /// `--compress` / `--extract <archive>`: open those windows on the first
+    /// frame, so they can be photographed without a mouse.
+    pub pending_compress: Option<PathBuf>,
+    pub pending_extract: Option<PathBuf>,
     pub quick: Option<Quick>,
     pub new_folder: Option<NewFolder>,
     /// Added feature, as asked for this round: the chooser behind "Open With…",
@@ -310,6 +326,10 @@ pub struct App {
     pub size_rx: Receiver<(PathBuf, u64)>,
     pub size_tx: Sender<(PathBuf, u64)>,
     pub shot: Option<Shot>,
+    /// How many frames a capture waits for before it asks for the picture.
+    /// 120 is the default; `--frames` asks for more, which is how a long walk
+    /// (the disk-usage window on a big folder) can be photographed finished.
+    pub shot_frames: u64,
     /// Added feature: the picture viewer, when one is open, and the loader that
     /// feeds it full-size pictures.
     pub viewer: Option<gallery::Viewer>,
@@ -359,6 +379,12 @@ pub struct App {
     /// for that list on every frame.
     pub recent_files: Vec<fsutil::Entry>,
     pub recent_files_at: Option<Instant>,
+    /// The folder the navigation panel last scrolled to. `[FoldersPanel]
+    /// AutoScrolling` is on in a fresh profile (`FoldersPanelSettings` ctor
+    /// @0x1f9a00 in /usr/bin/dolphin), so when the window walks into a folder
+    /// the panel brings that folder's row into view — once per folder, not on
+    /// every frame, so the person can still scroll the panel by hand.
+    pub places_follow: Option<PathBuf>,
 }
 
 /// The settings as one comparable string. Two snapshots that differ mean the
@@ -594,6 +620,12 @@ impl App {
             props: None,
             bulk: None,
             dups: None,
+            space: None,
+            pending_space: None,
+            compress: None,
+            extract: None,
+            pending_compress: None,
+            pending_extract: None,
             quick: None,
             new_folder: None,
             open_with: None,
@@ -616,6 +648,7 @@ impl App {
             image_meta: HashMap::new(),
             pending_compare: start_compare,
             frames: 0,
+            shot_frames: 120,
             open_details_at_start,
             config_dirty: false,
             next_pane_id: next_id,
@@ -624,6 +657,7 @@ impl App {
             settings_sig: String::new(),
             recent_files: Vec::new(),
             recent_files_at: None,
+            places_follow: None,
             filter_focus: false,
             shortcut_drag: None,
         };
@@ -868,8 +902,15 @@ impl App {
                         // below the button or flips it above.
                         popup.show(|ui| {
                             let limit = (ui.ctx().content_rect().height() - 96.0).max(120.0);
-                            egui::ScrollArea::vertical()
+                            let sa = egui::ScrollArea::vertical()
                                 .max_height(limit)
+                                // A popup is sized from the frame before it, so a
+                                // scroll area that only asks for the room it is
+                                // given settles at the height of its first few
+                                // rows and stays there. Asking for the whole
+                                // window's worth of room makes the popup grow to
+                                // it on the following frame.
+                                .min_scrolled_height(limit)
                                 .auto_shrink([false, true])
                                 // Shown even when the pointer is elsewhere: a menu
                                 // that is quietly cut at the bottom is the fault
@@ -1298,6 +1339,10 @@ impl App {
         let mut open_dups = false;
         let mut open_bulk = false;
         let mut open_quick = false;
+        // The two archive/disk rows in the Added tools group: one asks the
+        // question, the other answers it in the same window.
+        let mut open_space_row = false;
+        let mut open_compress_row = false;
         // Drag-and-drop state for the shortcut rows. `start_drag` and
         // `finish_drag` are this frame's edges; `drop_slot` is the gap the
         // pointer is over right now, counted among the person's own shortcuts.
@@ -1314,6 +1359,11 @@ impl App {
         let keys = self.config.shortcut_keys;
         let expanded = self.config.shortcuts_expanded;
         let carrying = self.shortcut_drag;
+        // `[FoldersPanel] AutoScrolling` (default true, `FoldersPanelSettings`
+        // ctor @0x1f9a00): one scroll per folder change, so the panel shows the
+        // row the window just walked into without fighting a hand scroll.
+        let follow = self.config.places_autoscroll
+            && self.places_follow.as_deref() != Some(current.as_path());
 
         egui::SidePanel::left("places")
             .resizable(true)
@@ -1359,6 +1409,9 @@ impl App {
                         let colour = self.config.shortcut_color(path);
                         let mut resp =
                             shortcut_row(ui, name, *icon, selected, hint.as_deref(), colour);
+                        if follow && selected {
+                            resp.scroll_to_me(Some(egui::Align::Center));
+                        }
                         let tip = match &hint {
                             Some(k) => format!("{}\n{k}", path.display()),
                             None => path.display().to_string(),
@@ -1669,11 +1722,33 @@ impl App {
                 if tool_row(ui, "Quick Look", "Preview the selected file (Space)", Some("Space")) {
                     open_quick = true;
                 }
+                if tool_row(
+                    ui,
+                    "Disk Space",
+                    "See what is taking the room in this folder (Tools → Manage Disk Space Usage…)",
+                    None,
+                ) {
+                    open_space_row = true;
+                }
+                if tool_row(
+                    ui,
+                    "Compress",
+                    "Turn the marked items, or this folder, into one ZIP",
+                    None,
+                ) {
+                    open_compress_row = true;
+                }
                 // A little air under the last row, so a section that only just
                 // fits is not cut in half by the panel's own bottom edge.
                 ui.add_space(10.0);
                     });
             });
+
+        // The scroll above happens once for the folder that was just entered;
+        // remembering it here is what stops it repeating every frame.
+        if follow {
+            self.places_follow = Some(current.clone());
+        }
 
         if let Some(p) = navigate {
             self.pane_mut().navigate(p);
@@ -1782,6 +1857,15 @@ impl App {
             if let Some(entry) = self.pane().primary_selection().cloned() {
                 self.reqs.push(Request::QuickLook(entry.path));
             }
+        }
+        if open_space_row {
+            let dir = self.pane().current_dir();
+            self.reqs.push(Request::SpaceUsage(dir));
+        }
+        if open_compress_row {
+            let paths = self.pane().selected_paths();
+            let dir = self.pane().current_dir();
+            self.reqs.push(Request::Compress(paths, dir));
         }
     }
 
@@ -1961,24 +2045,24 @@ impl App {
                         );
                         ui.add_space(14.0);
                         if let Some((f, t)) = fsutil::free_space(&self.pane().current_dir()) {
-                            // `FUN_001e6a40` @0x1e6a40 draws the free-disk-space
-                            // button: its text is `%1 free` (string 0x12ec43,
-                            // KIO::convertSize of the free bytes) and the whole
-                            // sentence `%1 free out of %2 (%3% used)`
-                            // (0x12ec68 / 0x137448) is only the tooltip. The
-                            // widget is hidden when the volume does not report a
-                            // size, so a zero total shows nothing at all.
+                            // `FUN_001e6a00` @0x1e6a00 draws the free-disk-space
+                            // button: its text is `%1 free` (KIO::convertSize of
+                            // the free bytes) and the whole sentence `%1 free out
+                            // of %2 (%3% used)` is only the tooltip. The widget is
+                            // hidden when the volume does not report a size, so a
+                            // zero total shows nothing at all.
                             if t > 0 {
                                 let pct = fsutil::used_percent(f, t);
-                                // `FUN_001e6a40` @0x1e6a40 also drives a
-                                // `KCapacityBar` that sits next to the free-space
-                                // button: `KCapacityBar::setValue(iVar4)` with the
-                                // same rounded used percentage the tooltip prints,
-                                // inside the same `total != 0` test that hides the
-                                // whole widget on a volume of unknown size.
-                                let (bar, _) = ui.allocate_exact_size(
+                                // The same function also drives a `KCapacityBar`
+                                // next to the button, filled to that same rounded
+                                // used share. Both are one control here, and it
+                                // presses: the original's full tooltip promises
+                                // "Press to manage disk space usage." (0x237458),
+                                // which this build can keep by opening its own
+                                // usage window instead of launching Filelight.
+                                let (bar, bar_resp) = ui.allocate_exact_size(
                                     Vec2::new(34.0, 6.0),
-                                    Sense::hover(),
+                                    Sense::click(),
                                 );
                                 ui.painter().rect_filled(
                                     bar,
@@ -1997,20 +2081,34 @@ impl App {
                                         ACCENT,
                                     );
                                 }
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} free",
-                                        fsutil::format_size(f)
-                                    ))
-                                    .size(11.0)
-                                    .color(TEXT_FAINT),
-                                )
-                                .on_hover_text(format!(
-                                    "{} free out of {} ({}% used)",
+                                let tip = format!(
+                                    "{} free out of {} ({}% used)\nPress to manage disk space usage.",
                                     fsutil::format_size(f),
                                     fsutil::format_size(t),
                                     pct
-                                ));
+                                );
+                                let label = ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!(
+                                            "{} free",
+                                            fsutil::format_size(f)
+                                        ))
+                                        .size(11.0)
+                                        .color(TEXT_FAINT),
+                                    )
+                                    .sense(Sense::click()),
+                                );
+                                let hovered = bar_resp.hovered() || label.hovered();
+                                if hovered {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                let bar_resp = bar_resp.on_hover_text(tip.clone());
+                                let label = label.on_hover_text(tip);
+                                if bar_resp.clicked() || label.clicked() {
+                                    self.reqs.push(Request::SpaceUsage(
+                                        self.pane().current_dir(),
+                                    ));
+                                }
                             }
                         }
                     });
@@ -2428,6 +2526,60 @@ impl App {
                             focus: false,
                         });
                     }
+                }
+                Request::SpaceUsage(dir) => {
+                    // One window at a time: asking again for the folder already
+                    // on show keeps the walk that is running rather than
+                    // starting a second one.
+                    let already = self
+                        .space
+                        .as_ref()
+                        .map(|s| s.root == dir && s.scanning)
+                        .unwrap_or(false);
+                    if !already {
+                        self.space = Some(space::Space::start(dir));
+                    }
+                }
+                Request::Compress(paths, dir) => {
+                    // Real paths, so the folder the archive lands in can be
+                    // named in the window and `zip` can be run there — a pane
+                    // started with `--dir testdata` has no parent to speak of.
+                    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+                    let paths: Vec<PathBuf> = paths
+                        .into_iter()
+                        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                        .collect();
+                    // Nothing marked means "compress this folder". Its archive
+                    // belongs beside the folder, not inside it.
+                    let folder_itself = paths.is_empty() || (paths.len() == 1 && paths[0] == dir);
+                    let (paths, out) = if folder_itself {
+                        let parent = dir
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| dir.clone());
+                        (vec![dir.clone()], parent)
+                    } else {
+                        (paths, dir)
+                    };
+                    self.compress = Some(archive::Compress::new(paths, out));
+                }
+                Request::Extract(path) => {
+                    let path = std::fs::canonicalize(&path).unwrap_or(path);
+                    self.extract = Some(archive::Extract::new(path));
+                }
+                Request::Reveal(path) => {
+                    let parent = path
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(fsutil::home_dir);
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let pane = self.pane_mut();
+                    pane.pending_select = Some(name);
+                    pane.navigate(parent);
+                    self.space = None;
                 }
                 Request::ReopenClosedTab(back) => {
                     let n = back.min(self.closed_tabs.len().saturating_sub(1));
@@ -3587,7 +3739,7 @@ impl App {
             std::process::exit(if ok { 0 } else { 1 });
         }
         let requested = self.shot.as_ref().unwrap().requested;
-        if !requested && self.frames >= 120 {
+        if !requested && self.frames >= self.shot_frames {
             ctx.send_viewport_cmd(ViewportCommand::Screenshot(egui::UserData::default()));
             if let Some(shot) = self.shot.as_mut() {
                 shot.requested = true;
@@ -3643,6 +3795,25 @@ impl eframe::App for App {
             if self.frames > 2 {
                 self.pending_open_with = None;
                 self.reqs.push(Request::OpenWithChoose(vec![file]));
+            }
+        }
+        // `--space`: open the usage window on the folder the app started in, as
+        // soon as the listing is there.
+        if self.pending_space.is_some() && self.frames > 1 {
+            let dir = self.pending_space.take().unwrap_or_else(|| self.pane().current_dir());
+            self.reqs.push(Request::SpaceUsage(dir));
+        }
+        // `--compress`: open the new archive window on the marked items, or on
+        // the folder itself when nothing is marked, so it can be photographed.
+        if self.pending_compress.is_some() && self.frames > 1 {
+            let dir = self.pending_compress.take().unwrap_or_else(|| self.pane().current_dir());
+            let marked = self.pane().selected_paths();
+            self.reqs.push(Request::Compress(marked, dir));
+        }
+        // `--extract <archive>`: the same for the Extract window.
+        if self.pending_extract.is_some() && self.frames > 1 {
+            if let Some(archive) = self.pending_extract.take() {
+                self.reqs.push(Request::Extract(archive));
             }
         }
         // `--trash-demo <folder>`: mark everything in that folder and take it to
@@ -4316,6 +4487,12 @@ fn main() -> eframe::Result<()> {
     // Added feature: start in the picture gallery, or straight in the viewer on
     // a named picture (with `--play` running its slideshow).
     let mut start_pictures = false;
+    // `--space`: open the disk-usage window on the first frame.
+    let mut start_space = false;
+    // Added feature captures: `--compress` opens the new archive window on the
+    // folder; `--extract <archive>` opens the unpack window on that file.
+    let mut start_compress = false;
+    let mut start_extract: Option<PathBuf> = None;
     let mut start_find: Option<String> = None;
     let mut start_deep = false;
     // `--below`: the picture wall looking inside the folders below.
@@ -4416,6 +4593,18 @@ fn main() -> eframe::Result<()> {
                 keep_settings = true;
             }
             "--pictures" | "--gallery" => start_pictures = true,
+            // Added feature: open *Manage Disk Space Usage* on the first frame,
+            // so the window can be photographed without a mouse.
+            "--space" => start_space = true,
+            // The two added archive windows, for photographs and for anyone
+            // who wants to open them straight away.
+            "--compress" => start_compress = true,
+            "--extract" => {
+                if i + 1 < args.len() {
+                    start_extract = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
             "--below" => start_below = true,
             "--dims" => start_dims = true,
             "--details" => start_details = true,
@@ -4487,6 +4676,29 @@ fn main() -> eframe::Result<()> {
     if let Some(pos) = startup_pos {
         viewport = viewport.with_position(egui::Pos2::new(pos[0], pos[1]));
     }
+    // A capture has to finish on its own, without anyone watching the window.
+    // Wayland only hands a program a new frame when the compositor says the
+    // surface is on screen, so a capture started from a service, a script or a
+    // window that is not the one in front stops dead after the first frames and
+    // never saves anything. X11 draws on request, so when a capture is asked for
+    // and the desktop also offers X (XWayland on a Wayland session), the window
+    // is opened as an X11 one. An ordinary run keeps the compositor's own path.
+    if screenshot.is_some() && std::env::var_os("DISPLAY").is_some() {
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
+    // Nothing may wait forever for a picture: if the window never presents, the
+    // run says so and leaves instead of hanging. 120 frames take about a second
+    // even at the largest window size, so a minute is generous.
+    if let Some(path) = screenshot.clone() {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            eprintln!(
+                "screenshot: the window never finished drawing, so no picture was saved to {}",
+                path.display()
+            );
+            std::process::exit(3);
+        });
+    }
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
@@ -4518,6 +4730,13 @@ fn main() -> eframe::Result<()> {
             );
             app.pending_trash_demo = trash_demo.clone();
             app.pending_open_with = open_with_file.clone();
+            if start_space {
+                app.pending_space = Some(app.pane().current_dir());
+            }
+            if start_compress {
+                app.pending_compress = Some(app.pane().current_dir());
+            }
+            app.pending_extract = start_extract.clone();
             Ok(Box::new(app))
         }),
     )

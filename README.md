@@ -83,6 +83,22 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   - **Bulk Rename** — renames many files at once from a pattern.
   - **Quick Look** — a fast preview window for a single file (Space).
   - **Open Terminal Here** — a shell in the folder you are looking at.
+  - **Manage Disk Space Usage** — adds up everything below the folder and lists
+    what takes the room, largest first, with a *Free Up Disk Space* shortlist of
+    the biggest files and a **Show** button for each. The original hands this
+    question to Filelight and offers to install it; this window answers it
+    itself, so nothing has to be installed. Hidden files count, a symbolic link
+    is never followed, and a folder you cannot read is reported instead of being
+    quietly left out.
+  - **Compress…** — marks items (or the folder on show) and turns them into one
+    ZIP in the folder they came from, with the name filled in and editable
+    first. It writes `photos.zip` for one folder, `Archive.zip` for several
+    items, and steps aside to `photos (1).zip` rather than overwrite anything.
+  - **Extract…** — unpacks a ZIP or a tar archive into a folder named after the
+    file (or into this folder, if you untick *Into a folder of its own*) and
+    takes you there afterwards. Both archive tools use the `zip`, `unzip` and
+    `tar` programs your computer already has, and say so plainly when one is
+    missing.
 - **Open With**, the way the original does it: right-click a file and the first
   row opens it in the program your desktop already prefers, *Open With ▸* lists
   the other programs that claim that kind of file, and **Other Application…**
@@ -160,6 +176,9 @@ Options:
                           (used to photograph it)
 --trash-demo <folder>     move that folder's contents to the Trash once, so the
                           Undo toast can be photographed; nothing is deleted for good
+--space                   open the disk-usage window at once
+--compress                open the archive window on the folder at once
+--extract <archive>       open the unpack window on that archive at once
 --size <WxH>              open the window at a given size
 --selftest                run the built-in checks and exit
 ```

@@ -3456,6 +3456,411 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
         })(),
     );
 
+    // ---- file names elide in the middle, as the original's default does ----
+    // `[ContentDisplay] ElidingMode` is an `ItemEnum` over `Right` = 0 and
+    // `Middle` = 1, built by `ContentDisplaySettings::ContentDisplaySettings`
+    // @0x2b29b0 in libdolphinprivate.so.6, and the default passed to it is 1.
+    r.check(
+        "a file name too long for its column keeps its start and its extension",
+        (|| {
+            use egui::{Context, Pos2, RawInput, Rect, Vec2};
+            let ctx = Context::default();
+            let long = "a-very-long-report-name-that-will-not-fit-anywhere.pdf";
+            let mut shown = String::new();
+            let mut tight = String::new();
+            ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, 200.0))),
+                    time: Some(0.0),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let font = egui::FontId::proportional(12.5);
+                        shown = crate::theme::elide_name(ui, long, 140.0, font.clone());
+                        tight = crate::theme::elide_name(ui, long, 26.0, font);
+                    });
+                },
+            );
+            if !shown.contains('…') {
+                return Err(format!("nothing was cut: {shown:?}"));
+            }
+            if !shown.ends_with(".pdf") {
+                return Err(format!("the extension was lost: {shown:?}"));
+            }
+            if !long.starts_with(shown.chars().next().unwrap_or(' ')) || shown.chars().count() < 6 {
+                return Err(format!("the start of the name was lost: {shown:?}"));
+            }
+            if tight.chars().count() > shown.chars().count() {
+                return Err(format!("a tighter column drew more: {tight:?}"));
+            }
+            Ok(format!("{shown:?} in 140 px, {tight:?} in 26 px"))
+        })(),
+    );
+
+    // ---- the date switch touches only the absolute dates ------------------
+    // `InformationPanelSettings::InformationPanelSettings` @0x1fe410 in
+    // /usr/bin/dolphin registers `dateFormat` over LongFormat = 0 (default) and
+    // ShortFormat = 1; the relative wording is the separate
+    // `[ContentDisplay] UseShortRelativeDates` switch, true by default.
+    r.check(
+        "the date switch keeps \"minutes ago\" and changes the older dates",
+        (|| {
+            let now = std::time::SystemTime::now();
+            let fresh = now - std::time::Duration::from_secs(120);
+            let old = now - std::time::Duration::from_secs(60 * 60 * 24 * 400);
+            let fresh_long = fsutil::info_date(Some(fresh), true);
+            let fresh_short = fsutil::info_date(Some(fresh), false);
+            if fresh_long != fresh_short || !fresh_long.contains("minute(s) ago") {
+                return Err(format!(
+                    "a recent time read {fresh_long:?} and {fresh_short:?}"
+                ));
+            }
+            let old_long = fsutil::info_date(Some(old), true);
+            let old_short = fsutil::info_date(Some(old), false);
+            if old_long == old_short {
+                return Err(format!("both settings gave {old_long:?}"));
+            }
+            if !old_long.contains(" at ") {
+                return Err(format!("the long date was {old_long:?}"));
+            }
+            let dt: chrono::DateTime<chrono::Local> = old.into();
+            if old_short != dt.format("%d/%m/%Y %H:%M").to_string() {
+                return Err(format!("the short date was {old_short:?}"));
+            }
+            Ok(format!(
+                "recent {fresh_long:?}, long {old_long:?}, short {old_short:?}"
+            ))
+        })(),
+    );
+
+    // ---- the two switches start where the original's do -------------------
+    r.check(
+        "a fresh profile uses the original's dates and follows the folder",
+        (|| {
+            let cfg = crate::config::Config::default();
+            if cfg.date_format != 0 {
+                return Err(format!("dates start at index {}", cfg.date_format));
+            }
+            if !cfg.places_autoscroll {
+                return Err("the panel does not follow the folder".into());
+            }
+            // A settings file written before these keys existed still lands on
+            // the same two values, because both are serde defaults.
+            let old: crate::config::Config = serde_json::from_str("{}").map_err(|e| e.to_string())?;
+            if old.date_format != 0 || !old.places_autoscroll {
+                return Err("an empty settings file did not take the defaults".into());
+            }
+            let written = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            if !written.contains("\"date_format\"") || !written.contains("\"places_autoscroll\"") {
+                return Err("the two choices are not kept in the file".into());
+            }
+            Ok("LongFormat, AutoScrolling on, both written".into())
+        })(),
+    );
+
+    // ---- added feature: the disk-usage window ----------------------------
+    // The window itself is drawn, not tested; what it adds up is. Every rule in
+    // `space.rs` is checked here against real files: what counts, what is left
+    // alone, and how the figures are rounded.
+    let walk_root = base.join("space-walk");
+    let _ = write(&walk_root.join("a.txt"), b"aaaa");
+    let _ = write(&walk_root.join("b.bin"), b"0123456789");
+    let _ = write(&walk_root.join(".cache/c.txt"), b"ccc");
+    let _ = write(&walk_root.join("deep/d.txt"), b"ddddd");
+    let _ = std::os::unix::fs::symlink(&base, walk_root.join("link"));
+    r.check(
+        "the disk-usage walk counts hidden files, never follows a link, and sums the rest",
+        (|| {
+            use std::collections::HashMap;
+            use std::sync::atomic::AtomicBool;
+            use std::sync::Arc;
+            let cancel = Arc::new(AtomicBool::new(false));
+            let mut tree: HashMap<PathBuf, Vec<crate::space::Row>> = HashMap::new();
+            let mut biggest = crate::space::Biggest::new(40);
+            let mut totals = crate::space::Totals::default();
+            let mut children = 0usize;
+            let mut on_child = |_r: crate::space::Row| children += 1;
+            let mut on_progress = |_t: crate::space::Totals| {};
+            crate::space::scan(
+                &walk_root,
+                &cancel,
+                &mut tree,
+                &mut biggest,
+                &mut totals,
+                &mut on_child,
+                &mut on_progress,
+            );
+            // The link is counted at its own entry size (the length of the path
+            // it points at), never as the tree behind it.
+            let link_len = base.to_string_lossy().len() as u64;
+            let want = 4 + 10 + 3 + 5 + link_len;
+            if totals.bytes != want {
+                return Err(format!("the walk added up {} bytes, wanted {}", totals.bytes, want));
+            }
+            if totals.dirs != 3 || totals.files != 5 {
+                return Err(format!(
+                    "the walk found {} folder(s) and {} file(s), wanted 3 and 5",
+                    totals.dirs, totals.files
+                ));
+            }
+            if children != 5 {
+                return Err(format!("{children} row(s) reached the list, wanted 5"));
+            }
+            let rows = tree.get(&walk_root).cloned().unwrap_or_default();
+            let sizes: Vec<u64> = rows.iter().map(|r| r.size).collect();
+            if sizes.windows(2).any(|w| w[0] < w[1]) {
+                let names: Vec<String> = rows.iter().map(|r| r.name.clone()).collect();
+                return Err(format!("the rows are not largest first: {names:?}"));
+            }
+            Ok(format!(
+                "{} bytes over {} folder(s) and {} file(s), link not followed",
+                totals.bytes, totals.dirs, totals.files
+            ))
+        })(),
+    );
+    r.check(
+        "a share of a whole is rounded half up, and an empty whole is nought",
+        (|| {
+            let cases = [
+                (1u64, 3u64, 33u64),
+                (2, 3, 67),
+                (5, 10, 50),
+                (999, 1000, 100),
+                (0, 0, 0),
+            ];
+            for (part, whole, want) in cases {
+                let got = crate::space::share_percent(part, whole);
+                if got != want {
+                    return Err(format!("{part}/{whole} read {got}%, wanted {want}%"));
+                }
+            }
+            Ok("1/3 → 33%, 2/3 → 67%, 999/1000 → 100%, 0/0 → 0%".into())
+        })(),
+    );
+    r.check(
+        "the free-up shortlist keeps the largest files, biggest first, and stops at forty",
+        (|| {
+            let mut b = crate::space::Biggest::new(crate::space::BIGGEST_KEPT);
+            for size in 1..=50u64 {
+                b.push(size, PathBuf::from(format!("/x/{size}")));
+            }
+            if b.items.len() != 40 {
+                return Err(format!("the list kept {} file(s), wanted 40", b.items.len()));
+            }
+            if b.items.first().map(|i| i.size) != Some(50) {
+                return Err("the largest file is not first".into());
+            }
+            if b.items.last().map(|i| i.size) != Some(11) {
+                return Err(format!(
+                    "the smallest kept file is {:?}, wanted 11",
+                    b.items.last().map(|i| i.size)
+                ));
+            }
+            b.push(3, PathBuf::from("/x/small"));
+            if b.items.len() != 40 || b.items.iter().any(|i| i.path.ends_with("small")) {
+                return Err("a file smaller than the shortlist changed it".into());
+            }
+            Ok("40 kept, 50 first, 11 last, a smaller file turned away".into())
+        })(),
+    );
+    r.check(
+        "the usage window walks into a folder it already summed up, and back out",
+        (|| {
+            let dir = base.join("space-desc");
+            write(&dir.join("one/x.txt"), b"xxxxxx")?;
+            write(&dir.join("two/y.txt"), b"yy")?;
+            let mut sp = crate::space::Space::start(dir.clone());
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while sp.scanning && Instant::now() < deadline {
+                sp.poll();
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            sp.poll();
+            if sp.scanning {
+                return Err("the walk did not finish in 15 seconds".into());
+            }
+            if sp.rows().len() != 2 || sp.shown_total() != 8 {
+                return Err(format!(
+                    "the first list has {} row(s) and {} bytes, wanted 2 and 8",
+                    sp.rows().len(),
+                    sp.shown_total()
+                ));
+            }
+            let one = dir.join("one");
+            sp.descend(one);
+            if sp.shown_total() != 6 || sp.rows().len() != 1 {
+                return Err(format!(
+                    "inside one: {} row(s), {} bytes, wanted 1 and 6",
+                    sp.rows().len(),
+                    sp.shown_total()
+                ));
+            }
+            sp.up();
+            if sp.show != dir || sp.shown_total() != 8 {
+                return Err("going back up did not restore the first list".into());
+            }
+            Ok("8 bytes at the top, 6 inside one, 8 again after up".into())
+        })(),
+    );
+
+    // ---- added feature: Compress and Extract ----------------------------
+    let arc = base.join("arch-name");
+    let _ = fs::create_dir_all(arc.join("photos"));
+    let _ = write(&arc.join("report.pdf"), b"pdf");
+    r.check(
+        "the archive is named after the item, and never overwrites what is there",
+        (|| {
+            let folder = arc.join("photos");
+            let file = arc.join("report.pdf");
+            let one = crate::archive::default_name(&[folder.clone()], &arc);
+            if one != "photos.zip" {
+                return Err(format!("a folder gave {one:?}"));
+            }
+            let two = crate::archive::default_name(&[file.clone()], &arc);
+            if two != "report.zip" {
+                return Err(format!("a file gave {two:?}"));
+            }
+            let several = crate::archive::default_name(&[folder, file], &arc);
+            if several != "Archive.zip" {
+                return Err(format!("a pair gave {several:?}"));
+            }
+            write(&arc.join("photos.zip"), b"already here")?;
+            let next = crate::archive::unique_path(&arc.join("photos.zip"));
+            if next != arc.join("photos (1).zip") {
+                return Err(format!("the second archive would be {}", next.display()));
+            }
+            Ok("photos.zip, report.zip, Archive.zip, then photos (1).zip".into())
+        })(),
+    );
+    r.check(
+        "an archive name is checked, and zip is asked to keep folders and links",
+        (|| {
+            if crate::archive::clean_name("  ").is_ok() {
+                return Err("an empty name was accepted".into());
+            }
+            if crate::archive::clean_name("a/b").is_ok() {
+                return Err("a name with a slash was accepted".into());
+            }
+            if crate::archive::clean_name("-rf").is_ok() {
+                return Err("a name starting with a dash was accepted".into());
+            }
+            if crate::archive::clean_name(" shots ").ok().as_deref() != Some("shots.zip") {
+                return Err("a plain name did not gain .zip".into());
+            }
+            let args = crate::archive::zip_args("shots.zip", &["a.txt".into(), "pics".into()]);
+            let wanted = ["-r", "-q", "-y", "shots.zip", "a.txt", "pics"];
+            if args != wanted.iter().map(|s| s.to_string()).collect::<Vec<_>>() {
+                return Err(format!("zip was asked for {args:?}"));
+            }
+            Ok("empty, slash and dash refused; folders, quiet and links asked for".into())
+        })(),
+    );
+    r.check(
+        "a folder whose name ends in .zip is a folder, not an archive",
+        (|| {
+            let fake = arc.join("not-really.zip");
+            fs::create_dir_all(&fake).map_err(|e| e.to_string())?;
+            if crate::archive::is_archive(&fake) {
+                return Err("a folder called .zip was taken for an archive".into());
+            }
+            let real = arc.join("shots.ZIP");
+            write(&real, b"PK")?;
+            if !crate::archive::is_archive(&real) {
+                return Err("a real .ZIP was not recognised".into());
+            }
+            if crate::archive::folder_name(Path::new("/x/holiday.tar.gz")) != "holiday" {
+                return Err("a .tar.gz did not give its own name".into());
+            }
+            let x = crate::archive::Extract::new(real);
+            if x.dest() != arc.join("shots") {
+                return Err(format!("it would unpack into {}", x.dest().display()));
+            }
+            Ok("folder ignored, .ZIP recognised, holiday.tar.gz → holiday".into())
+        })(),
+    );
+    r.check(
+        "a ZIP made here unpacks again with the same bytes, hidden file and sub-folder included",
+        (|| {
+            let dir = base.join("arch-round");
+            write(&dir.join("tree/one.txt"), b"hello archive")?;
+            write(&dir.join("tree/.hidden"), b"secret")?;
+            write(&dir.join("tree/sub/two.txt"), b"world")?;
+            let mut c = crate::archive::Compress::new(vec![dir.join("tree")], dir.clone());
+            if !c.begin() {
+                return Err(c.error.clone().unwrap_or_else(|| "compress refused".into()));
+            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut answer = None;
+            while answer.is_none() && Instant::now() < deadline {
+                answer = c.poll();
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            match answer {
+                None => return Err("zip did not answer in 30 seconds".into()),
+                Some(Err(e)) if e.contains("not installed") => {
+                    return Ok("zip is not installed here, so the round trip was skipped".into())
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(_)) => {}
+            }
+            let made = c.last_dest.clone().ok_or("no archive path was kept")?;
+            if !made.is_file() {
+                return Err(format!("{} was not written", made.display()));
+            }
+            let mut x = crate::archive::Extract::new(made.clone());
+            if !x.begin() {
+                return Err(x.error.clone().unwrap_or_else(|| "extract refused".into()));
+            }
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut answer = None;
+            while answer.is_none() && Instant::now() < deadline {
+                answer = x.poll();
+                std::thread::sleep(Duration::from_millis(30));
+            }
+            match answer {
+                None => return Err("unzip did not answer in 30 seconds".into()),
+                Some(Err(e)) if e.contains("not installed") => {
+                    return Ok("unzip is not installed here, so the round trip was skipped".into())
+                }
+                Some(Err(e)) => return Err(e),
+                Some(Ok(_)) => {}
+            }
+            let into = x.last_dest.clone().ok_or("no folder path was kept")?;
+            for (name, want) in [
+                ("tree/one.txt", &b"hello archive"[..]),
+                ("tree/.hidden", &b"secret"[..]),
+                ("tree/sub/two.txt", &b"world"[..]),
+            ] {
+                let got = fs::read(into.join(name))
+                    .map_err(|e| format!("{name} did not come back: {e}"))?;
+                if got != want {
+                    return Err(format!("{name} came back changed"));
+                }
+            }
+            Ok(format!(
+                "{} bytes written, three files back unchanged",
+                fs::metadata(&made).map(|m| m.len()).unwrap_or(0)
+            ))
+        })(),
+    );
+    r.check(
+        "a tar archive is unpacked by tar, a zip by unzip",
+        (|| {
+            let t = crate::archive::tar_args(Path::new("/x/h.tar.gz"), Path::new("/x/h"));
+            if t.first().map(|s| s.as_str()) != Some("-xf") || t.len() != 4 {
+                return Err(format!("tar was asked for {t:?}"));
+            }
+            let z = crate::archive::unzip_args(Path::new("/x/a.zip"), Path::new("/x/a"));
+            if z.first().map(|s| s.as_str()) != Some("-q")
+                || z.iter().filter(|s| s.as_str() == "-d").count() != 1
+            {
+                return Err(format!("unzip was asked for {z:?}"));
+            }
+            Ok("tar -xf, unzip -q -o … -d".into())
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

@@ -1740,6 +1740,109 @@
    "value": 14.2,
    "unit": "px",
    "source": "egui 0.33 Slider::handle_radius = rect.height() / 2.5, with the 18 px row strip_slider gives it"
+  },
+  {
+   "name": "disk usage window title",
+   "group": "disk usage",
+   "value": "Manage Disk Space Usage",
+   "source": "action label 0x22d931 in /usr/bin/dolphin (manage_disk_space, icon filelight)"
+  },
+  {
+   "name": "disk space submenu builder",
+   "group": "disk usage",
+   "value": "FUN_001e8430 @0x1e8430",
+   "source": "DiskSpaceUsageMenu::aboutToShow in /usr/bin/dolphin: launches org.kde.filelight or offers to install it"
+  },
+  {
+   "name": "free up disk space row",
+   "group": "disk usage",
+   "value": "Free Up Disk Space",
+   "source": "string 0x22ec97 in /usr/bin/dolphin"
+  },
+  {
+   "name": "free space tooltip second line",
+   "group": "disk usage",
+   "value": "Press to manage disk space usage.",
+   "source": "string 0x237458 (0x137465) in /usr/bin/dolphin"
+  },
+  {
+   "name": "disk usage counts hidden files",
+   "group": "disk usage",
+   "value": true,
+   "source": "added: a total that skipped .cache would be wrong"
+  },
+  {
+   "name": "disk usage follows symbolic links",
+   "group": "disk usage",
+   "value": false,
+   "source": "added: a link is counted at its own entry size, never followed"
+  },
+  {
+   "name": "disk usage share rounding",
+   "group": "disk usage",
+   "value": "half up",
+   "source": "FUN_001e6a40 @0x1e6a40, the formula fsutil::used_percent also uses"
+  },
+  {
+   "name": "disk usage largest files kept",
+   "group": "disk usage",
+   "value": 40,
+   "estimated": true,
+   "source": "estimated: a free-up shortlist, not an inventory"
+  },
+  {
+   "name": "disk usage window size",
+   "group": "disk usage",
+   "value": "720x590",
+   "estimated": true
+  },
+  {
+   "name": "archive format written",
+   "group": "archives",
+   "value": "ZIP",
+   "source": "added: the zip program the desktop already has"
+  },
+  {
+   "name": "archive name for several items",
+   "group": "archives",
+   "value": "Archive.zip",
+   "source": "default name of a multi-file archive, compressfileitemaction.so (Ark plugin)"
+  },
+  {
+   "name": "archive name for one folder",
+   "group": "archives",
+   "value": "folder name + .zip",
+   "source": "Ark's Compress to \"%1\" wording (compressfileitemaction.so); added here"
+  },
+  {
+   "name": "archive name when already there",
+   "group": "archives",
+   "value": "photos (1).zip",
+   "source": "added: a second archive of the same name steps aside"
+  },
+  {
+   "name": "zip switches",
+   "group": "archives",
+   "value": "-r -q -y",
+   "source": "added: folders, quiet, and links stored as links"
+  },
+  {
+   "name": "extract folder name",
+   "group": "archives",
+   "value": "archive name without its extension",
+   "source": "added: holiday.tar.gz unpacks into holiday"
+  },
+  {
+   "name": "archives this build opens",
+   "group": "archives",
+   "value": "ZIP and tar",
+   "source": "added: unzip -q -o ... -d for ZIP, tar -xf ... -C for the tar family"
+  },
+  {
+   "name": "original compress and extract plugins",
+   "group": "archives",
+   "value": "compressfileitemaction.so, extractfileitemaction.so",
+   "source": "ark package, /usr/lib/qt6/plugins/kf6/kfileitemaction/"
   }
  ]
 }

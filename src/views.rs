@@ -724,7 +724,9 @@ impl Pane {
             }
         }
         if draw_label {
-            let label = theme::elide(ui, &entry.name, max_w, font.clone());
+            // `ElidingMode` default `Middle` (`ContentDisplaySettings` ctor
+            // @0x2b29b0): the name keeps its start and its extension.
+            let label = theme::elide_name(ui, &entry.name, max_w, font.clone());
             ui.painter().text(
                 Pos2::new(name_x, rect.center().y),
                 Align2::LEFT_CENTER,
@@ -1217,7 +1219,7 @@ impl Pane {
         let font = FontId::proportional(12.5);
         let label_x = rect.left() + icon + 18.0;
         let max_w = (rect.right() - label_x - 8.0).max(20.0);
-        let label = theme::elide(ui, &entry.name, max_w, font.clone());
+        let label = theme::elide_name(ui, &entry.name, max_w, font.clone());
         ui.painter().text(
             Pos2::new(label_x, rect.center().y),
             Align2::LEFT_CENTER,
@@ -1379,6 +1381,18 @@ impl Pane {
                             ui.close();
                         }
                     });
+                }
+                // Added feature: the archive rows, in the place Ark's plugin puts
+                // its own in the original. Nothing is marked as "compressed" by
+                // the file view, so the row simply opens the window.
+                if ui.button("Compress…").clicked() {
+                    let dir = self.path.clone();
+                    vctx.reqs.push(Request::Compress(selected_paths.clone(), dir));
+                    ui.close();
+                }
+                if !entry.is_dir && crate::archive::is_archive(&entry.path) && ui.button("Extract…").clicked() {
+                    vctx.reqs.push(Request::Extract(entry.path.clone()));
+                    ui.close();
                 }
                 if !entry.is_dir && entry.is_image() && ui.button("Open in Picture Viewer").clicked() {
                     vctx.reqs.push(Request::OpenViewer(entry.path.clone(), false));

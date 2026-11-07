@@ -826,10 +826,12 @@ The same function also settles what the bar *says*:
 | tooltip | `%1 free out of %2 (%3% used)` | `0x12ec68`, and `0x137448` with the extra line `Press to manage disk space usage.` (`0x137465`) |
 
 When the volume reports no size (`total == 0`) the widget is hidden outright
-(`QWidget::hide`), so nothing is printed. The rebuild now shows `355.6 GiB free`
+(`QWidget::hide`), so nothing is printed. The rebuild shows `355.6 GiB free`
 in the bar with the full sentence in the hover text and nothing at all when the
-total is unknown; the "Press to manage disk space usage" second line is left out
-because this rebuild has no disk-usage window to open.
+total is unknown. The second line, "Press to manage disk space usage.", is now
+true as well: since this pass the rebuild carries its own disk-usage window
+(`src/space.rs`, "Manage Disk Space Usage" in the **Tools** menu), so the
+sentence no longer points at something that cannot be opened here.
 
 ### Information panel with several items selected — `FUN_001f76f0` @0x1f76f0
 
@@ -2416,3 +2418,79 @@ person's own `~/.config/kdeglobals` answers it: `[Colors:Window]`
 sits on those values (`theme::VIEW_BG` 35,38,41, `theme::PANEL_BG` 43,47,51,
 `theme::ACCENT` 61,174,233 exactly), so the dark theme is the right one and the
 light handbook captures are simply older marketing shots.
+
+## This pass: a disk-usage window, and two archive windows (added features)
+
+Both windows here are additions, not rebuilds. The original has the *ideas* — a
+free-space button that says "Press to manage disk space usage", a Tools-menu
+action that launches Filelight, a right-click *Compress* submenu — but none of
+the code that answers the question, so what follows separates what was read out
+of the shipped programs from what this rebuild chose.
+
+### What the original promises, and where
+
+| element | text / behaviour | where it was read |
+| --- | --- | --- |
+| free-space tooltip, second line | `Press to manage disk space usage.` | `0x237458` in `/usr/bin/dolphin`, the same block as `0x137465` |
+| Tools-menu action | `manage_disk_space`, label **Manage Disk Space Usage**, icon `filelight` | `0x22d931` in `/usr/bin/dolphin` |
+| what that action does | a submenu, not a window: `DiskSpaceUsageMenu::aboutToShow` looks for `org.kde.filelight`, launches it on the folder, and offers to install it when it is missing | `FUN_001e8430` @`0x1e8430` |
+| the submenu's other row | **Free Up Disk Space** | `0x22ec97` in `/usr/bin/dolphin` |
+
+So the shipped program never adds anything up itself; it hands the question to
+Filelight, which may not be installed. The rebuild answers it in its own window
+(**Tools → Manage Disk Space Usage…**, and a click on the free-space figure),
+runs no other program, and needs nothing installed.
+
+### The rules the window keeps
+
+| rule | value | source |
+| --- | --- | --- |
+| hidden files and folders | always counted | rebuild rule, **added** — a usage figure that skipped `.cache` would be wrong |
+| symbolic links | never followed; counted at their own directory-entry size, like a file | rebuild rule, **added** — a link to `/` inside a home folder would otherwise make the total meaningless |
+| an entry that cannot be read | counted in `skipped`, adds nothing to the total, and the window says how many | rebuild rule, **added** |
+| row order | largest first, equal sizes by the file view's own name order (`fsutil::name_cmp`) | rebuild rule, **added** |
+| the share column | whole percent, rounded half **up** (`space::share_percent`) | the formula in `FUN_001e6a40` @`0x1e6a40`, the same arithmetic `fsutil::used_percent` uses for the button |
+| the shortlist | the 40 largest files below the folder, 14 of them listed | **estimated**: a "free up space" shortlist, not an inventory; 40 keeps a whole-home walk to a few dozen paths |
+| walking into a folder | taken from the walk already done, no second read of the disk | rebuild rule, **added** |
+| window size | 720 × 590, 640 minimum width | **estimated** from the rebuild's own metrics |
+| the folder itself | not counted as one of the folders below it | rebuild rule, **added** — so the summary needs no correction |
+
+`--selftest` checks these against real files: the walk adds up folders, files and
+hidden files but never follows a link (`84 bytes over 3 folders and 5 files`);
+the share rounds half up (`2/3 → 67%`, `999/1000 → 100%`, `0/0 → 0%`); the
+shortlist keeps forty, biggest first, and turns away anything smaller; and the
+window walks into a folder it has already summed and comes back up to the same
+figure.
+
+### Compress and Extract: the original's rows come from Ark, not from Dolphin
+
+The right-click *Compress* and *Extract* rows a person sees in the original are
+installed by two plugins that ship with **Ark**, the archive program:
+
+| plugin | what it adds |
+| --- | --- |
+| `/usr/lib/qt6/plugins/kf6/kfileitemaction/compressfileitemaction.so` | the **Compress** submenu: `Compress to "%1"` for one item, `Compress to` for several, and `Archive` as "default name of a newly-created multi-file archive" |
+| `/usr/lib/qt6/plugins/kf6/kfileitemaction/extractfileitemaction.so` | **Extract here**, **Extract to**, **Extract and trash archive**, with `setExtractToSubfolder` / `setExtractSingleFolder` behind them |
+
+`/usr/bin/dolphin` itself carries nothing but the settings row `Browse
+compressed files as folders`; a search of its strings for `compress` and
+`extract` finds no other text. So both windows in the rebuild are additions, and
+they keep the plugin's own naming where it exists.
+
+| rule | value | source |
+| --- | --- | --- |
+| format written | one ZIP | **added**: the rebuild uses the `zip` program the desktop already has rather than shipping a compressor |
+| name for one folder | that folder's name plus `.zip` | Ark's `Compress to "%1"` wording, **added** |
+| name for one file | the file's stem plus `.zip` | **added** |
+| name for several items | `Archive.zip` | the plugin's own default name for a multi-file archive |
+| a name already taken | `photos (1).zip`, then `photos (2).zip` | **added**, and checked |
+| what `zip` is asked for | `-r -q -y` — folders, quiet, and symbolic links stored as links instead of copied | **added**; the `-y` is the rule that stops an archive of a home folder swallowing another disk |
+| name rules | no empty name, no slash, no leading dash (the archive program would read it as a switch) | **added**, and checked |
+| where an archive unpacks | a folder named after the archive (`holiday.tar.gz` → `holiday`), or the folder on show when the tick box is cleared | the plugin's extract-to-subfolder behaviour, **added** here |
+| which archives open | ZIP through `unzip -q -o … -d`, the tar family through `tar -xf … -C` | **added**; a missing program is reported as "… is not installed on this computer." |
+| a folder named `.zip` | a folder, never an archive | **added**, and checked |
+
+`--selftest` runs the real round trip: a folder with a hidden file and a
+sub-folder is compressed with the code the window uses, the archive is unpacked
+again, and the three files are compared byte for byte — which is what makes the
+pair of windows trustworthy rather than merely drawn.
