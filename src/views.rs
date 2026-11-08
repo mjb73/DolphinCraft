@@ -1274,6 +1274,38 @@ impl Pane {
                 vctx.reqs.push(Request::OpenInNewTab(entry.path));
             }
         }
+        // Added feature, asked for: a file carried out of the window and into
+        // another program. The press that marked the item becomes the drag once
+        // the pointer has travelled far enough — so a click is still a click.
+        // The press has to be remembered by *where it began*, not by the row's
+        // own "held" flag: a row with a click sense lets that flag go as soon as
+        // the pointer leaves it, which is exactly what a drag does.
+        let carried = ui.input(|i| {
+            match (i.pointer.press_origin(), i.pointer.latest_pos()) {
+                (Some(from), Some(to)) if _rect.contains(from) && i.pointer.any_down() => {
+                    crate::dragout::far_enough(from, to)
+                }
+                _ => false,
+            }
+        });
+        if std::env::var_os("DOLPHINCRAFT_DRAG_TRACE").is_some() && carried {
+            eprintln!("drag trace: row {idx} carried away, handing the files over");
+        }
+        {
+            if carried {
+                let files: Vec<std::path::PathBuf> = if self.sel.contains(&idx) && self.sel.len() > 1 {
+                    self.selected_paths()
+                } else {
+                    self.display_entries()
+                        .get(idx)
+                        .map(|entry| vec![entry.path.clone()])
+                        .unwrap_or_default()
+                };
+                if !files.is_empty() {
+                    vctx.reqs.push(Request::DragOut(files));
+                }
+            }
+        }
         let current_dir = self.current_dir();
         let entry = self.display_entries().get(idx).cloned();
         if let Some(entry) = entry {

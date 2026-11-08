@@ -27,6 +27,9 @@ walkdir = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Added feature: a picture dragged out of the window is handed to another
+# program over the X11 drag-and-drop protocol (see src/dragout.rs).
+x11rb = "0.13"
 
 [profile.release]
 opt-level = 2

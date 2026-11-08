@@ -379,6 +379,9 @@ pub enum Request {
     /// Added feature, asked for this round: *Resize Image…* — scale these
     /// pictures to a size given in megapixels, keeping each one's shape.
     Resize(Vec<PathBuf>),
+    /// Added feature, asked for: hand these files to another program as a drag
+    /// the person is making — the window follows the pointer until they let go.
+    DragOut(Vec<PathBuf>),
     /// Added feature: *Find in Files* — read every text file below this folder
     /// and count the phrase, with the line it was written on.
     FindInFiles {

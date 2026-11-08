@@ -25,6 +25,7 @@ mod fsutil;
 mod gallery;
 mod imagemeta;
 mod imageresize;
+mod dragout;
 mod panels;
 mod search;
 mod selectable;
@@ -37,7 +38,7 @@ mod views;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align, Align2, Color32, CornerRadius, FontId, Id, Layout, Margin, Modifiers, Pos2, Rect,
@@ -314,6 +315,10 @@ pub struct App {
     /// `--resize <picture>`: open that window on the first frame, so it can be
     /// photographed without a mouse.
     pub pending_resize: Option<PathBuf>,
+    /// Added feature, asked for: drag and drop with other programs. A file
+    /// dragged out of the window is handed over by this handle; one drag at a
+    /// time, and the drag itself runs on its own thread.
+    pub dragout: Option<dragout::Drag>,
     /// Added feature: *Find in Files* — the two content modes the original's
     /// find bar names (`File names and contents`, `File contents`) but hands to
     /// KIO to answer. This window reads the files itself.
@@ -641,6 +646,7 @@ impl App {
             extract: None,
             resize: None,
             pending_resize: None,
+            dragout: None,
             findtext: None,
             pending_findtext: None,
             pending_compress: None,
@@ -2645,6 +2651,17 @@ impl App {
                         self.resize = Some(imageresize::Resize::new(paths));
                     }
                 }
+                Request::DragOut(paths) => {
+                    // The gesture asks again on every frame the button is held
+                    // down and has travelled far enough; only the first ask
+                    // becomes the drag, so one press is one hand-over.
+                    if self.dragout.is_none() {
+                        match dragout::Drag::start(paths) {
+                            Ok(drag) => self.dragout = Some(drag),
+                            Err(why) => self.toast(&why),
+                        }
+                    }
+                }
                 Request::Reveal(path) => {
                     let parent = path
                         .parent()
@@ -2691,24 +2708,9 @@ impl App {
                     let mut problems = Vec::new();
                     let mut done = 0;
                     for src in self.clipboard.paths.clone() {
-                        let name = src
-                            .file_name()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        let mut target = dest.join(&name);
-                        let mut n = 1;
-                        while target.exists() {
-                            let stem = src
-                                .file_stem()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_else(|| name.clone());
-                            let ext = src
-                                .extension()
-                                .map(|s| format!(".{}", s.to_string_lossy()))
-                                .unwrap_or_default();
-                            target = dest.join(format!("{} {}{}", stem, n, ext));
-                            n += 1;
-                        }
+                        // The same name a drop would take: the item's own, then
+                        // `name 1`, `name 2`… so a paste never overwrites.
+                        let target = free_target(&dest, &src);
                         let res = if self.clipboard.cut {
                             std::fs::rename(&src, &target).map_err(|e| e.to_string())
                         } else if src.is_dir() {
@@ -2842,6 +2844,173 @@ impl App {
 
     pub fn toast(&mut self, msg: &str) {
         self.toast = Some((msg.to_string(), Instant::now()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Drag and drop with other programs
+    // -----------------------------------------------------------------------
+
+    /// Added feature, asked for: "both ways need to work". A drag *out* of the
+    /// window hands the marked files to whatever program takes them; this is
+    /// the tick that collects how that ended.
+    fn drag_out_tick(&mut self, ctx: &egui::Context) {
+        if self.dragout.is_none() {
+            return;
+        }
+        // The drag answers the receiving program on its own thread; the window
+        // only has to keep drawing while it does.
+        ctx.request_repaint_after(Duration::from_millis(100));
+        let outcome = self.dragout.as_mut().and_then(|drag| drag.poll());
+        if let Some(outcome) = outcome {
+            self.dragout = None;
+            if let Some(message) = outcome.message() {
+                self.toast(&message);
+            }
+        }
+    }
+
+    /// A drag *into* the window: the files it carries are copied into the folder
+    /// on screen. Copied, not moved — another program's drag does not say which
+    /// it means, and a copy cannot lose the original.
+    fn drag_in_tick(&mut self, ctx: &egui::Context) {
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if std::env::var_os("DOLPHINCRAFT_DRAG_TRACE").is_some() {
+            let hovered = ctx.input(|i| i.raw.hovered_files.len());
+            if hovered > 0 || !dropped.is_empty() {
+                eprintln!("drag trace: hovered={hovered} dropped={}", dropped.len());
+                for file in &dropped {
+                    eprintln!("drag trace:   dropped path={:?} bytes={}", file.path, file.bytes.is_some());
+                }
+            }
+        }
+        if dropped.is_empty() {
+            return;
+        }
+        let files: Vec<PathBuf> = dropped
+            .iter()
+            .filter_map(|file| file.path.clone())
+            .filter(|path| path.is_file() || path.is_dir())
+            .collect();
+        // A drag that carried text or a picture with no file behind it has no
+        // path to copy; say so rather than doing nothing at all.
+        if files.is_empty() {
+            if dropped.iter().any(|f| f.bytes.is_some()) {
+                self.toast("That drop carried no file, so there is nothing to copy in.");
+            }
+            return;
+        }
+        self.copy_dropped(files);
+    }
+
+    /// The wash the window shows while files are being carried over it, naming
+    /// the folder they will land in — so the drop is never a guess.
+    fn drop_hover_ui(&self, ctx: &egui::Context) {
+        let carrying = ctx.input(|i| i.raw.hovered_files.len());
+        if carrying == 0 {
+            return;
+        }
+        let here = self.pane().current_dir();
+        let refuse = self.pane().is_trash();
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("drop-wash"),
+        ));
+        let screen = ctx.content_rect();
+        painter.rect_filled(screen, 0.0, egui::Color32::from_rgba_unmultiplied(16, 18, 22, 110));
+        let edge = if refuse {
+            egui::Color32::from_rgb(224, 122, 95)
+        } else {
+            theme::ACCENT
+        };
+        painter.rect_stroke(
+            screen.shrink(6.0),
+            CornerRadius::same(8),
+            egui::Stroke::new(2.0, edge),
+            egui::StrokeKind::Inside,
+        );
+        let text = if refuse {
+            "The Trash takes no drops".to_string()
+        } else if carrying == 1 {
+            format!("Drop to copy it into {}", here.display())
+        } else {
+            format!("Drop to copy {carrying} items into {}", here.display())
+        };
+        let galley = painter.layout_no_wrap(
+            text,
+            FontId::proportional(14.0),
+            if refuse { edge } else { theme::TEXT },
+        );
+        let chip = Rect::from_center_size(
+            screen.center(),
+            galley.size() + Vec2::new(26.0, 16.0),
+        );
+        painter.rect_filled(chip, CornerRadius::same(8), egui::Color32::from_rgb(26, 29, 34));
+        painter.rect_stroke(
+            chip,
+            CornerRadius::same(8),
+            egui::Stroke::new(1.0, edge),
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(
+            chip.center() - galley.size() / 2.0,
+            galley,
+            egui::Color32::PLACEHOLDER,
+        );
+    }
+
+    /// Copy the dragged-in files into the folder on screen. The name a copy
+    /// takes is the same one a paste takes (`name`, then `name 1`, `name 2`…),
+    /// so a drop can never overwrite anything.
+    fn copy_dropped(&mut self, files: Vec<PathBuf>) {
+        if self.pane().is_trash() {
+            self.toast("The Trash takes no drops — open a folder first.");
+            return;
+        }
+        let dest = self.pane().current_dir();
+        let mut done = 0usize;
+        let mut already = 0usize;
+        let mut problems: Vec<String> = Vec::new();
+        for src in files {
+            if src.parent() == Some(dest.as_path()) {
+                already += 1;
+                continue;
+            }
+            if dest.starts_with(&src) {
+                problems.push(format!(
+                    "{} is inside the folder it was dropped on.",
+                    display_name(&src)
+                ));
+                continue;
+            }
+            let target = free_target(&dest, &src);
+            let name = target
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let copied = if src.is_dir() {
+                copy_dir(&src, &target)
+            } else {
+                std::fs::copy(&src, &target)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            };
+            match copied {
+                Ok(()) => done += 1,
+                Err(e) => problems.push(format!("{name}: {e}")),
+            }
+        }
+        self.pane_mut().reload();
+        if !problems.is_empty() {
+            self.toast(&problems.join("; "));
+        } else if done > 0 {
+            self.toast(&format!(
+                "{done} item{} copied into {}",
+                if done == 1 { "" } else { "s" },
+                dest.display()
+            ));
+        } else if already > 0 {
+            self.toast("Those items are already in this folder.");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3951,7 +4120,12 @@ impl eframe::App for App {
         self.info_panel_ui(ctx);
         self.status_bar(ctx);
         self.central(ctx);
+        // Added feature, asked for: drag and drop with other programs, both
+        // ways — files carried out of the window, and files carried into it.
+        self.drag_out_tick(ctx);
+        self.drag_in_tick(ctx);
         self.handle_requests(ctx);
+        self.drop_hover_ui(ctx);
         self.toast_ui(ctx);
         self.dialogs(ctx);
         // The viewer is drawn last, over everything, the way the browser's
@@ -4591,6 +4765,34 @@ fn sort_search_results(entries: &mut [fsutil::Entry], key: state::SortKey, asc: 
     });
 }
 
+/// The name a copy takes in `dest`: the item's own name, then `name (1)`,
+/// `name (2)`… when that is taken. Pasting and dropping both go through this,
+/// so neither can overwrite anything and neither can surprise the other.
+fn free_target(dest: &Path, src: &Path) -> PathBuf {
+    let name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "item".to_string());
+    let mut target = dest.join(&name);
+    if !target.exists() {
+        return target;
+    }
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| name.clone());
+    let ext = src
+        .extension()
+        .map(|s| format!(".{}", s.to_string_lossy()))
+        .unwrap_or_default();
+    let mut n = 1;
+    while target.exists() {
+        target = dest.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    target
+}
+
 fn main() -> eframe::Result<()> {
     let mut screenshot: Option<PathBuf> = None;
     let mut start_dir: Option<PathBuf> = None;
@@ -4610,6 +4812,9 @@ fn main() -> eframe::Result<()> {
     let mut start_compress = false;
     let mut start_extract: Option<PathBuf> = None;
     let mut start_resize: Option<PathBuf> = None;
+    // Added feature: `--drag-out <file>…` starts the drag that hands those files
+    // to another program without a mouse — how the hand-over is checked.
+    let mut start_dragout: Vec<PathBuf> = Vec::new();
     let mut start_find: Option<String> = None;
     let mut start_deep = false;
     // `--below`: the picture wall looking inside the folders below.
@@ -4637,6 +4842,21 @@ fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--selftest") {
         std::process::exit(selftest::run());
+    }
+    // Added feature, asked for: drag and drop in both directions. Both need the
+    // X11 side of the toolkit — winit has no drag code at all on Wayland, as a
+    // destination or as a source — so on a Wayland session that also offers X
+    // (XWayland) the window is opened as an X11 one. KWin bridges drags in both
+    // directions between its X11 and Wayland programs, so a Wayland-native
+    // program on the other end still works. `DOLPHINCRAFT_BACKEND=wayland` keeps
+    // the compositor's own path, at the cost of the two drags.
+    if std::env::var_os("DISPLAY").is_some() {
+        let keep_wayland = std::env::var("DOLPHINCRAFT_BACKEND")
+            .map(|choice| choice.eq_ignore_ascii_case("wayland"))
+            .unwrap_or(false);
+        if !keep_wayland {
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
     }
     let mut i = 1;
     while i < args.len() {
@@ -4745,6 +4965,17 @@ fn main() -> eframe::Result<()> {
                     i += 1;
                 }
             }
+            // Added feature: `--drag-out <file>…` takes the files that follow
+            // and starts the hand-over at once. It is how the drag is checked
+            // without a mouse, and it is there for a script that wants it too.
+            "--drag-out" => {
+                i += 1;
+                while i < args.len() && !args[i].starts_with("--") {
+                    start_dragout.push(PathBuf::from(&args[i]));
+                    i += 1;
+                }
+                continue;
+            }
             "--below" => start_below = true,
             "--dims" => start_dims = true,
             "--details" => start_details = true,
@@ -4785,6 +5016,32 @@ fn main() -> eframe::Result<()> {
             }
         }
         i += 1;
+    }
+
+    // `--drag-out`: hand the files over, say how it went, and leave. This is the
+    // route the check takes, since a drag cannot be driven from a script in any
+    // other way.
+    if !start_dragout.is_empty() {
+        match dragout::Drag::start(start_dragout) {
+            Ok(mut drag) => loop {
+                if let Some(outcome) = drag.poll() {
+                    println!(
+                        "drag: {} file(s) offered, {} transfer(s) served, took_drop={}, acknowledged={}",
+                        outcome.files, outcome.delivered, outcome.took_drop, outcome.acknowledged
+                    );
+                    if let Some(why) = outcome.reason {
+                        eprintln!("drag: {why}");
+                        std::process::exit(2);
+                    }
+                    std::process::exit(if outcome.delivered > 0 { 0 } else { 1 });
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            },
+            Err(why) => {
+                eprintln!("drag: {why}");
+                std::process::exit(2);
+            }
+        }
     }
 
     // The window opens the size it was left, as the original's saved window state

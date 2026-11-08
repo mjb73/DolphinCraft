@@ -2853,3 +2853,34 @@ silently.
 
 `mechanics.json` gains nine values for the same table, each with its source or
 marked *added*.
+
+## Drag and drop with other programs
+
+The original gets both directions from its toolkit; this build has to speak the
+protocol itself. What is *added*, and what was measured:
+
+* **Drag out** — a press on an item becomes a drag once the pointer has
+  travelled **8 px** (`dragout::THRESHOLD`), and the drag then offers
+  `text/uri-list`, `UTF8_STRING` and `text/plain` (three types, so they fit in
+  the `XdndEnter` message without a type list). The list is `file://` addresses,
+  percent-escaped, each line ending `\r\n`; above **96 KB** it is sent with
+  `INCR` in **64 KB** chunks, and the transfer is closed by a zero-length
+  property *after* the receiver has taken the last piece.
+* **Drag in** — the files a drag carries are copied into the folder on screen,
+  never overwritten: a taken name steps aside by the same rule pasting uses
+  (`name (1).ext`). The Trash refuses drops.
+* **No grab.** The window being dragged from already holds the pointer for the
+  duration of the button press, so a second X connection cannot take a grab; the
+  drag polls `QueryPointer` (`pointer.mask`, buttons 1–3) instead. That is also
+  how the release is noticed.
+* **X11 only.** winit has no drag code on Wayland at all — neither as a
+  destination nor as a source — so on a Wayland session with XWayland the window
+  opens as an X11 one; KWin bridges drags in both directions between its X11 and
+  Wayland programs. `DOLPHINCRAFT_BACKEND=wayland` opts out.
+* The original's own right-click rows and its `strings` (see the Resize Image
+  section) hold nothing for this: Dolphin's drags come from Qt, so there is no
+  interface text to copy and no measured offset to match. What *is* taken from
+  the original is the shape of the data — `text/uri-list`, the format a file
+  manager puts on the selection — and the `name (1)` convention for a copy.
+
+`mechanics.json` gains five values for the same table, each marked *added*.

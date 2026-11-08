@@ -4435,6 +4435,89 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
         })(),
     );
 
+    // -----------------------------------------------------------------------
+    // Drag and drop with other programs
+    // -----------------------------------------------------------------------
+    r.check(
+        "a file's address in a drag is percent-escaped and ends CRLF",
+        (|| {
+            let list = crate::dragout::uri_list(&[
+                PathBuf::from("/tmp/a b.png"),
+                PathBuf::from("/tmp/photo #1 é.jpg"),
+            ]);
+            let want_one = "file:///tmp/a%20b.png\r\n";
+            let want_two = "file:///tmp/photo%20%231%20%C3%A9.jpg\r\n";
+            if !list.starts_with(want_one) || !list.contains(want_two) {
+                return Err(format!("{list:?}"));
+            }
+            if !list.ends_with("\r\n") {
+                return Err("the list does not end with CRLF".into());
+            }
+            Ok(format!("{list:?}"))
+        })(),
+    );
+    r.check(
+        "the text form of a drag is the plain paths, one per line",
+        (|| {
+            let list = crate::dragout::plain_list(&[PathBuf::from("/tmp/a b.png")]);
+            if list != "/tmp/a b.png\n" {
+                return Err(format!("{list:?}"));
+            }
+            Ok(format!("{list:?}"))
+        })(),
+    );
+    r.check(
+        "a press becomes a drag only after the pointer has travelled far enough",
+        (|| {
+            let from = egui::Pos2::new(100.0, 100.0);
+            if crate::dragout::far_enough(from, egui::Pos2::new(104.0, 104.0)) {
+                return Err("4 px counted as a drag".into());
+            }
+            if !crate::dragout::far_enough(from, egui::Pos2::new(110.0, 100.0)) {
+                return Err("10 px did not count as a drag".into());
+            }
+            Ok(format!("{} px", crate::dragout::THRESHOLD))
+        })(),
+    );
+    r.check(
+        "a dropped file never overwrites one already in the folder",
+        (|| {
+            let room = base.join("drop-in");
+            fs::create_dir_all(&room).map_err(|e| e.to_string())?;
+            let src = base.join("elsewhere");
+            fs::create_dir_all(&src).map_err(|e| e.to_string())?;
+            let picture = src.join("shot.png");
+            write(&picture, b"new")?;
+            write(&room.join("shot.png"), b"old")?;
+            let target = crate::free_target(&room, &picture);
+            let name = target
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            // The spelling of the free name is paste's rule, shared with the
+            // copy windows; what matters here is that it is a *different* name.
+            if name == "shot.png" || !name.starts_with("shot") || !name.ends_with(".png") {
+                return Err(format!("the copy would be called {name}"));
+            }
+            if fs::read(room.join("shot.png")).map_err(|e| e.to_string())? != b"old" {
+                return Err("the file already there was changed".into());
+            }
+            // A folder with no extension takes the same rule.
+            let dir = src.join("album");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            fs::create_dir_all(room.join("album")).map_err(|e| e.to_string())?;
+            let second = crate::free_target(&room, &dir);
+            let second_name = second
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if second_name == "album" || !second_name.starts_with("album") {
+                return Err(format!("a folder copy would be called {second_name}"));
+            }
+            Ok(format!("{name}, {second_name}"))
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

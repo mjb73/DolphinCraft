@@ -116,6 +116,17 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
     WebP, BMP and TIFF are written; JPEG gets a quality slider. It works from the
     right-click menu, from *Tools → Resize Image…*, and from the side panel's
     *Added tools* group.
+  - **Drag and drop, both ways** — a file or a picture dragged out of the window
+    is handed to whatever program takes it (a chat window, a browser, an image
+    editor, another file manager): the drop carries the usual `text/uri-list`,
+    so the other program gets the file itself, not a copy of its contents. A
+    selection goes in one drag, and a long list — hundreds of pictures — is
+    transferred in chunks rather than cut short. Dragging *into* the window
+    copies the files into the folder on screen: a wash names that folder while
+    the drag is held over it, a name already taken steps aside, and nothing is
+    ever overwritten. On a Wayland session the window opens as an X11 one so both
+    drags can reach the desktop (`DOLPHINCRAFT_BACKEND=wayland` keeps the
+    compositor's own path at the cost of them).
 - **Open With**, the way the original does it: right-click a file and the first
   row opens it in the program your desktop already prefers, *Open With ▸* lists
   the other programs that claim that kind of file, and **Other Application…**
@@ -198,6 +209,8 @@ Options:
 --extract <archive>       open the unpack window on that archive at once
 --resize <picture>        open the Resize Image window on that picture at once
                           (used to photograph it)
+--drag-out <file>...       hand those files to another program as a drag, for
+                          checking the hand-over without a mouse
 --size <WxH>              open the window at a given size
 --selftest                run the built-in checks and exit
 ```
@@ -220,6 +233,7 @@ marked as estimated, and the reason is written next to it.
 | `src/theme.rs` | colours, icons drawn in code, fonts |
 | `src/panels.rs` | sidebar, information panel, menus, Quick Look, Bulk Rename, duplicates |
 | `src/imageresize.rs` | the Resize Image window's engine: megapixels in, same shape out |
+| `src/dragout.rs` | the drag out of the window: XDND spoken to the X server directly |
 | `src/search.rs` | searching a folder and filtering the results |
 | `src/fsutil.rs` | file operations, sizes, dates, thumbnails, trash |
 | `src/config.rs` | reading and writing the settings file |

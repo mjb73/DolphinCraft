@@ -2004,6 +2004,40 @@
    "group": "resize",
    "value": "PNG, JPEG, WebP, BMP, TIFF",
    "source": "added: SUPPORTED in imageresize.rs (GIF, SVG, ICO, HEIC and AVIF are refused with a sentence)"
+  },
+  {
+   "name": "drag threshold",
+   "group": "drag",
+   "value": 8,
+   "unit": "logical pixels",
+   "source": "added: THRESHOLD in dragout.rs (how far the pointer travels before a press becomes a drag)"
+  },
+  {
+   "name": "drag types offered",
+   "group": "drag",
+   "value": "text/uri-list, UTF8_STRING, text/plain",
+   "source": "added: send_enter in dragout.rs (three, so all three fit in the XdndEnter message)"
+  },
+  {
+   "name": "chunked transfer threshold",
+   "group": "drag",
+   "value": 98304,
+   "unit": "bytes",
+   "source": "added: INLINE_LIMIT in dragout.rs (96 KB; above it the list goes with INCR)"
+  },
+  {
+   "name": "INCR chunk size",
+   "group": "drag",
+   "value": 65536,
+   "unit": "bytes",
+   "source": "added: write_chunk in dragout.rs"
+  },
+  {
+   "name": "drag poll interval",
+   "group": "drag",
+   "value": 12,
+   "unit": "milliseconds",
+   "source": "added: the follow loop in dragout.rs (a position is sent at most every 20 ms)"
   }
  ]
 }

@@ -491,6 +491,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "walkdir",
+ "x11rb",
 ]
 
 [[package]]
