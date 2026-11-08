@@ -106,6 +106,16 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
     takes you there afterwards. Both archive tools use the `zip`, `unzip` and
     `tar` programs your computer already has, and say so plainly when one is
     missing.
+  - **Resize Image…** — right-click one picture, or a whole selection of them,
+    and give a size in **megapixels** (1, 2, 4, 8, 12, 24 with one click, or any
+    number typed in). The width and the height are scaled by the same factor, so
+    each picture keeps its own shape; the window shows the size it will come out
+    at while you type. A copy is written beside the original as
+    `name-2MP.jpg` (stepping aside to `name-2MP (1).jpg` rather than overwriting
+    anything), or the picture itself is replaced if you tick that box. PNG, JPEG,
+    WebP, BMP and TIFF are written; JPEG gets a quality slider. It works from the
+    right-click menu, from *Tools → Resize Image…*, and from the side panel's
+    *Added tools* group.
 - **Open With**, the way the original does it: right-click a file and the first
   row opens it in the program your desktop already prefers, *Open With ▸* lists
   the other programs that claim that kind of file, and **Other Application…**
@@ -186,6 +196,8 @@ Options:
 --space                   open the disk-usage window at once
 --compress                open the archive window on the folder at once
 --extract <archive>       open the unpack window on that archive at once
+--resize <picture>        open the Resize Image window on that picture at once
+                          (used to photograph it)
 --size <WxH>              open the window at a given size
 --selftest                run the built-in checks and exit
 ```
@@ -207,6 +219,7 @@ marked as estimated, and the reason is written next to it.
 | `src/views.rs` | drawing the file views (icons, details, columns) |
 | `src/theme.rs` | colours, icons drawn in code, fonts |
 | `src/panels.rs` | sidebar, information panel, menus, Quick Look, Bulk Rename, duplicates |
+| `src/imageresize.rs` | the Resize Image window's engine: megapixels in, same shape out |
 | `src/search.rs` | searching a folder and filtering the results |
 | `src/fsutil.rs` | file operations, sizes, dates, thumbnails, trash |
 | `src/config.rs` | reading and writing the settings file |

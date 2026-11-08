@@ -24,6 +24,7 @@ mod foldercolor;
 mod fsutil;
 mod gallery;
 mod imagemeta;
+mod imageresize;
 mod panels;
 mod search;
 mod selectable;
@@ -307,6 +308,12 @@ pub struct App {
     pub compress: Option<archive::Compress>,
     /// Added feature: *Extract* — a ZIP or tar archive unpacked in the window.
     pub extract: Option<archive::Extract>,
+    /// Added feature, asked for this round: *Resize Image…* — the marked
+    /// pictures scaled to a size given in megapixels, shape kept.
+    pub resize: Option<imageresize::Resize>,
+    /// `--resize <picture>`: open that window on the first frame, so it can be
+    /// photographed without a mouse.
+    pub pending_resize: Option<PathBuf>,
     /// Added feature: *Find in Files* — the two content modes the original's
     /// find bar names (`File names and contents`, `File contents`) but hands to
     /// KIO to answer. This window reads the files itself.
@@ -632,6 +639,8 @@ impl App {
             pending_space: None,
             compress: None,
             extract: None,
+            resize: None,
+            pending_resize: None,
             findtext: None,
             pending_findtext: None,
             pending_compress: None,
@@ -1354,6 +1363,7 @@ impl App {
         // question, the other answers it in the same window.
         let mut open_space_row = false;
         let mut open_compress_row = false;
+        let mut open_resize_row = false;
         // Drag-and-drop state for the shortcut rows. `start_drag` and
         // `finish_drag` are this frame's edges; `drop_slot` is the gap the
         // pointer is over right now, counted among the person's own shortcuts.
@@ -1757,6 +1767,14 @@ impl App {
                 ) {
                     open_compress_row = true;
                 }
+                if tool_row(
+                    ui,
+                    "Resize Image",
+                    "Scale the marked pictures to a size in megapixels, keeping their shape",
+                    None,
+                ) {
+                    open_resize_row = true;
+                }
                 // A little air under the last row, so a section that only just
                 // fits is not cut in half by the panel's own bottom edge.
                 ui.add_space(10.0);
@@ -1892,6 +1910,19 @@ impl App {
             let paths = self.pane().selected_paths();
             let dir = self.pane().current_dir();
             self.reqs.push(Request::Compress(paths, dir));
+        }
+        if open_resize_row {
+            let pictures: Vec<PathBuf> = self
+                .pane()
+                .selected_paths()
+                .into_iter()
+                .filter(|p| !p.is_dir() && imageresize::supported(p))
+                .collect();
+            if pictures.is_empty() {
+                self.toast("Mark the pictures to resize first.");
+            } else {
+                self.reqs.push(Request::Resize(pictures));
+            }
         }
     }
 
@@ -2599,6 +2630,20 @@ impl App {
                 Request::Extract(path) => {
                     let path = std::fs::canonicalize(&path).unwrap_or(path);
                     self.extract = Some(archive::Extract::new(path));
+                }
+                Request::Resize(paths) => {
+                    // Real paths, so the new file's name can be worked out
+                    // beside the picture even when the window was started with
+                    // a short address.
+                    let paths: Vec<PathBuf> = paths
+                        .into_iter()
+                        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+                        .collect();
+                    if paths.is_empty() {
+                        self.toast("Mark the pictures to resize first.");
+                    } else {
+                        self.resize = Some(imageresize::Resize::new(paths));
+                    }
                 }
                 Request::Reveal(path) => {
                     let parent = path
@@ -3874,6 +3919,18 @@ impl eframe::App for App {
                 self.reqs.push(Request::Extract(archive));
             }
         }
+        // `--resize <picture>`: mark the picture and open the resize window on
+        // it, so the window can be photographed without a mouse.
+        if let Some(picture) = self.pending_resize.clone() {
+            if self.frames > 2 {
+                self.pending_resize = None;
+                if let Some(name) = picture.file_name() {
+                    self.pane_mut().pending_select = Some(name.to_string_lossy().to_string());
+                    self.pane_mut().apply_pending_select();
+                }
+                self.reqs.push(Request::Resize(vec![picture]));
+            }
+        }
         // `--trash-demo <folder>`: mark everything in that folder and take it to
         // the Trash once the listing is there, so the toast and its Undo button
         // can be photographed. It never deletes anything for good.
@@ -4552,6 +4609,7 @@ fn main() -> eframe::Result<()> {
     // folder; `--extract <archive>` opens the unpack window on that file.
     let mut start_compress = false;
     let mut start_extract: Option<PathBuf> = None;
+    let mut start_resize: Option<PathBuf> = None;
     let mut start_find: Option<String> = None;
     let mut start_deep = false;
     // `--below`: the picture wall looking inside the folders below.
@@ -4669,6 +4727,21 @@ fn main() -> eframe::Result<()> {
             "--extract" => {
                 if i + 1 < args.len() {
                     start_extract = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
+            // Added this round: open the resize window on this picture (the
+            // folder it sits in is shown behind it), for photographs and for
+            // anyone who wants it straight away.
+            "--resize" => {
+                if i + 1 < args.len() {
+                    let picture = PathBuf::from(&args[i + 1]);
+                    if start_dir.is_none() {
+                        if let Some(parent) = picture.parent() {
+                            start_dir = Some(parent.to_path_buf());
+                        }
+                    }
+                    start_resize = Some(picture);
                     i += 1;
                 }
             }
@@ -4805,6 +4878,7 @@ fn main() -> eframe::Result<()> {
                 app.pending_compress = Some(app.pane().current_dir());
             }
             app.pending_extract = start_extract.clone();
+            app.pending_resize = start_resize.clone();
             Ok(Box::new(app))
         }),
     )

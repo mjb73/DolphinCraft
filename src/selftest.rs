@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::fsutil;
 use crate::findtext;
+use crate::imageresize;
 use crate::search::{self, DupScan, SearchFilters, SearchSession};
 
 struct Report {
@@ -4095,6 +4096,342 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
                 return Err(format!("the summary read {summary:?}"));
             }
             Ok(summary)
+        })(),
+    );
+
+    // ---- the resize window: megapixels in, same shape out -------------------
+    r.check(
+        "a size in megapixels comes out at the picture's own shape",
+        (|| {
+            let (w, h) = imageresize::target_dims(4000, 3000, 2.0);
+            if (w, h) != (1633, 1225) {
+                return Err(format!("4000×3000 at 2 MP came out {w}×{h}"));
+            }
+            let ratio_before = 4000.0 / 3000.0;
+            let ratio_after = w as f64 / h as f64;
+            if (ratio_before - ratio_after).abs() > 0.001 {
+                return Err(format!(
+                    "the shape moved from {ratio_before:.4} to {ratio_after:.4}"
+                ));
+            }
+            let mp = imageresize::megapixels(w, h);
+            if (mp - 2.0).abs() > 0.02 {
+                return Err(format!("2 MP became {mp:.3} MP"));
+            }
+            // A tall picture keeps its shape too, an even panorama lands exactly,
+            // and a 1:1 stays 1:1.
+            let tall = imageresize::target_dims(1080, 1920, 2.0);
+            if (tall.0 as f64 / tall.1 as f64 - 1080.0 / 1920.0).abs() > 0.001 {
+                return Err(format!("1080×1920 came out {}×{}", tall.0, tall.1));
+            }
+            if imageresize::target_dims(8000, 500, 1.0) != (4000, 250) {
+                return Err("the panorama did not land on 4000×250".into());
+            }
+            let square = imageresize::target_dims(2048, 2048, 1.0);
+            if square.0 != square.1 || (imageresize::megapixels(square.0, square.1) - 1.0).abs() > 0.01 {
+                return Err(format!("the square came out {}×{}", square.0, square.1));
+            }
+            Ok(format!(
+                "4000×3000 → {w}×{h} ({mp:.2} MP, {ratio_after:.4}), 1080×1920 → {}×{}, 8000×500 → 4000×250",
+                tall.0, tall.1
+            ))
+        })(),
+    );
+    r.check(
+        "the megapixel field accepts what a person types and refuses nothing useful",
+        (|| {
+            if imageresize::parse_mp("2").unwrap() != 2.0 {
+                return Err("\"2\" did not read as 2".into());
+            }
+            if imageresize::parse_mp("2.5").unwrap() != 2.5 {
+                return Err("\"2.5\" did not read as 2.5".into());
+            }
+            if imageresize::parse_mp("2,5").unwrap() != 2.5 {
+                return Err("a comma decimal was not read".into());
+            }
+            if imageresize::parse_mp(" 8 MP ").unwrap() != 8.0 {
+                return Err("\"8 MP\" was not read".into());
+            }
+            for bad in ["", "abc", "-3", "0", "0.001", "9999"] {
+                if imageresize::parse_mp(bad).is_ok() {
+                    return Err(format!("{bad:?} was accepted"));
+                }
+            }
+            // The floor and the ceiling are the ones the window states.
+            if imageresize::target_dims(4000, 3000, imageresize::MIN_MP).0 < 1 {
+                return Err("the smallest target collapsed to nothing".into());
+            }
+            Ok(format!(
+                "2, 2.5, 2,5 and \"8 MP\" read; empty, words, negative, 0 and 9999 refused; smallest target {}×{}",
+                imageresize::target_dims(4000, 3000, imageresize::MIN_MP).0,
+                imageresize::target_dims(4000, 3000, imageresize::MIN_MP).1
+            ))
+        })(),
+    );
+
+    // A real picture, made here so the check needs nothing from the person.
+    fn make_picture(path: &Path, w: u32, h: u32) {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let mut img = image::RgbaImage::new(w, h);
+        for (x, y, px) in img.enumerate_pixels_mut() {
+            let r = (x * 255 / w.max(1)) as u8;
+            let g = (y * 255 / h.max(1)) as u8;
+            *px = image::Rgba([r, g, 128, 255]);
+        }
+        let _ = img.save(path);
+    }
+
+    fn wait_resize(d: &mut imageresize::Resize) -> Result<imageresize::Outcome, String> {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if let Some(out) = d.poll() {
+                return Ok(out);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Err("the resize did not finish in 20 seconds".into())
+    }
+
+    let resize_root = base.join("resize");
+    let photo = resize_root.join("photo.png");
+    make_picture(&photo, 400, 300);
+    r.check(
+        "a real picture is scaled to the megapixels asked for, beside the original",
+        (|| {
+            let before = fs::metadata(&photo).map_err(|e| e.to_string())?.len();
+            let mut d = imageresize::Resize::new(vec![photo.clone()]);
+            d.mp_text = "0.03".to_string();
+            let plan = d.plan()?;
+            if plan.len() != 1 {
+                return Err(format!("{} plans for one picture", plan.len()));
+            }
+            if plan[0].to != (200, 150) {
+                return Err(format!(
+                    "400×300 at 0.03 MP planned {}×{}",
+                    plan[0].to.0, plan[0].to.1
+                ));
+            }
+            let want = resize_root.join("photo-0.03MP.png");
+            if plan[0].out != want {
+                return Err(format!("the copy was to be named {}", plan[0].out.display()));
+            }
+            if !d.begin() {
+                return Err("the resize did not start".into());
+            }
+            let out = wait_resize(&mut d)?;
+            if out.written.len() != 1 || !out.failures.is_empty() {
+                return Err(format!(
+                    "{} written, {} failed: {:?}",
+                    out.written.len(),
+                    out.failures.len(),
+                    out.failures
+                ));
+            }
+            let made = image::open(&want).map_err(|e| format!("the copy does not open: {e}"))?;
+            if (made.width(), made.height()) != (200, 150) {
+                return Err(format!(
+                    "the copy is {}×{}",
+                    made.width(),
+                    made.height()
+                ));
+            }
+            let after = fs::metadata(&photo).map_err(|e| e.to_string())?.len();
+            if after != before {
+                return Err("the original changed when it should not have".into());
+            }
+            let leftover = fs::read_dir(&resize_root)
+                .map_err(|e| e.to_string())?
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains(".part"));
+            if leftover {
+                return Err("a part file was left behind".into());
+            }
+            Ok(format!("400×300 → 200×150, {} bytes, original untouched", before))
+        })(),
+    );
+    r.check(
+        "a second resize steps aside instead of overwriting the first",
+        (|| {
+            let mut d = imageresize::Resize::new(vec![photo.clone()]);
+            d.mp_text = "0.03".to_string();
+            let plan = d.plan()?;
+            let want = resize_root.join("photo-0.03MP (1).png");
+            if plan[0].out != want {
+                return Err(format!("the second copy was to be {}", plan[0].out.display()));
+            }
+            d.begin();
+            let out = wait_resize(&mut d)?;
+            if out.written.len() != 1 {
+                return Err(format!("{} written: {:?}", out.written.len(), out.failures));
+            }
+            let first = image::open(resize_root.join("photo-0.03MP.png")).map_err(|e| e.to_string())?;
+            let second = image::open(&want).map_err(|e| e.to_string())?;
+            if (first.width(), first.height()) != (second.width(), second.height()) {
+                return Err("the two copies differ in size".into());
+            }
+            Ok("photo-0.03MP (1).png, both copies kept".to_string())
+        })(),
+    );
+    r.check(
+        "replacing the original leaves one good picture and no part file",
+        (|| {
+            let victim = resize_root.join("replace-me.png");
+            make_picture(&victim, 320, 240);
+            let mut d = imageresize::Resize::new(vec![victim.clone()]);
+            d.mp_text = "0.02".to_string();
+            d.replace = true;
+            let plan = d.plan()?;
+            if plan[0].out != victim {
+                return Err("replace did not aim at the original".into());
+            }
+            d.begin();
+            let out = wait_resize(&mut d)?;
+            if out.written.len() != 1 || !out.failures.is_empty() {
+                return Err(format!("{:?} / {:?}", out.written, out.failures));
+            }
+            let made = image::open(&victim).map_err(|e| format!("the original no longer opens: {e}"))?;
+            let mp = imageresize::megapixels(made.width(), made.height());
+            if (mp - 0.02).abs() > 0.002 {
+                return Err(format!(
+                    "the replaced picture is {}×{} = {mp:.3} MP",
+                    made.width(),
+                    made.height()
+                ));
+            }
+            let stray = fs::read_dir(&resize_root)
+                .map_err(|e| e.to_string())?
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains(".part"));
+            if stray {
+                return Err("a part file was left behind".into());
+            }
+            Ok(format!("320×240 → {}×{} ({mp:.2} MP)", made.width(), made.height()))
+        })(),
+    );
+    r.check(
+        "a JPEG copy is written as a JPEG at the size asked for",
+        (|| {
+            let jpg = resize_root.join("shot.jpg");
+            make_picture(&jpg.with_extension("png"), 300, 200);
+            let rgba = image::open(jpg.with_extension("png")).map_err(|e| e.to_string())?;
+            rgba.to_rgb8()
+                .save(&jpg)
+                .map_err(|e| format!("could not make the JPEG: {e}"))?;
+            let mut d = imageresize::Resize::new(vec![jpg.clone()]);
+            d.mp_text = "0.02".to_string();
+            d.quality = 75;
+            d.begin();
+            let out = wait_resize(&mut d)?;
+            if out.written.len() != 1 {
+                return Err(format!("{:?}", out.failures));
+            }
+            let written = out.written[0].clone();
+            let bytes = fs::read(&written).map_err(|e| e.to_string())?;
+            if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
+                return Err("the copy is not a JPEG".into());
+            }
+            let made = image::open(&written).map_err(|e| e.to_string())?;
+            let mp = imageresize::megapixels(made.width(), made.height());
+            if (mp - 0.02).abs() > 0.002 {
+                return Err(format!("the copy is {}×{} = {mp:.3} MP", made.width(), made.height()));
+            }
+            Ok(format!("{}×{} JPEG, {} bytes", made.width(), made.height(), bytes.len()))
+        })(),
+    );
+    r.check(
+        "a file that is not a picture is named instead of quietly dropped",
+        (|| {
+            let not_picture = resize_root.join("notes.txt");
+            write(&not_picture, b"just text")?;
+            let d = imageresize::Resize::new(vec![not_picture.clone(), photo.clone()]);
+            let noted = d
+                .items
+                .iter()
+                .find(|i| i.src == not_picture)
+                .and_then(|i| i.note.clone());
+            if noted.is_none() {
+                return Err("the text file carried no note".into());
+            }
+            let ready = d.ready().count();
+            if ready != 1 {
+                return Err(format!("{ready} pictures ready instead of 1"));
+            }
+            let plan = d.plan()?;
+            if plan.len() != 1 {
+                return Err(format!("{} plans instead of 1", plan.len()));
+            }
+            Ok(format!("{} left as it is; 1 picture planned", noted.unwrap_or_default()))
+        })(),
+    );
+
+    r.check(
+        "a batch of different shapes is scaled picture by picture",
+        (|| {
+            let batch = base.join("resize-batch");
+            let a = batch.join("wide.png");
+            let b = batch.join("tall.png");
+            let c = batch.join("square.png");
+            make_picture(&a, 400, 300);
+            make_picture(&b, 300, 400);
+            make_picture(&c, 500, 500);
+            let mut d = imageresize::Resize::new(vec![a.clone(), b.clone(), c.clone()]);
+            // A picture this small must not open with a default that blows it up.
+            if d.mp_text != "0.1" {
+                return Err(format!(
+                    "the field started at {:?} for a 0.12 MP picture",
+                    d.mp_text
+                ));
+            }
+            d.mp_text = "0.02".to_string();
+            let plan = d.plan()?;
+            if plan.len() != 3 {
+                return Err(format!("{} plans for three pictures", plan.len()));
+            }
+            d.begin();
+            let out = wait_resize(&mut d)?;
+            if out.written.len() != 3 || !out.failures.is_empty() {
+                return Err(format!(
+                    "{} written, {} failed: {:?}",
+                    out.written.len(),
+                    out.failures.len(),
+                    out.failures
+                ));
+            }
+            // The file each picture was *planned* to land on is what gets read
+            // back — asking `output_path` again after the run would step aside
+            // past the copy that was just written and name a file that is not
+            // there.
+            let mut report = Vec::new();
+            for item in [&a, &b, &c] {
+                let entry = plan
+                    .iter()
+                    .find(|p| &p.src == item)
+                    .ok_or_else(|| format!("{} was never planned", item.display()))?;
+                let made = image::open(&entry.out)
+                    .map_err(|e| format!("{}: {e}", entry.out.display()))?;
+                if (made.width(), made.height()) != entry.to {
+                    return Err(format!(
+                        "{} was {}×{} → {}×{}, wanted {}×{}",
+                        item.display(),
+                        entry.from.0,
+                        entry.from.1,
+                        made.width(),
+                        made.height(),
+                        entry.to.0,
+                        entry.to.1
+                    ));
+                }
+                report.push(format!(
+                    "{}×{}→{}×{}",
+                    entry.from.0,
+                    entry.from.1,
+                    made.width(),
+                    made.height()
+                ));
+            }
+            Ok(report.join(", "))
         })(),
     );
 

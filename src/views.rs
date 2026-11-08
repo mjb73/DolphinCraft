@@ -1402,6 +1402,33 @@ impl Pane {
                     vctx.reqs.push(Request::OpenViewer(entry.path.clone(), true));
                     ui.close();
                 }
+                // Added this round, as asked: *Resize Image…* — the one number
+                // the window asks for is a size in megapixels, and the picture's
+                // shape is kept while it is scaled to it. It acts on every
+                // picture in the selection, so a batch of photographs goes in
+                // one go.
+                {
+                    let pictures: Vec<std::path::PathBuf> = selected_paths
+                        .iter()
+                        .filter(|p| !p.is_dir() && crate::imageresize::supported(p))
+                        .cloned()
+                        .collect();
+                    if !pictures.is_empty() {
+                        let label = if pictures.len() > 1 {
+                            "Resize Images…"
+                        } else {
+                            "Resize Image…"
+                        };
+                        if ui
+                            .button(label)
+                            .on_hover_text("Scale to a size in megapixels, keeping the picture's shape")
+                            .clicked()
+                        {
+                            vctx.reqs.push(Request::Resize(pictures));
+                            ui.close();
+                        }
+                    }
+                }
                 if entry.is_dir {
                     if ui.button("Open in New Tab").clicked() {
                         vctx.reqs.push(Request::OpenInNewTab(entry.path.clone()));

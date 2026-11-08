@@ -1945,6 +1945,65 @@
    "value": 120,
    "unit": "characters",
    "source": "added: SNIPPET_CHARS in findtext.rs (one ellipsis added when cut)"
+  },
+  {
+   "name": "megapixel unit",
+   "group": "resize",
+   "value": 1000000,
+   "unit": "pixels",
+   "source": "imageresize::PIXELS_PER_MP, the same reading as gallery::megapixels (the size caption prints MP = width × height ÷ 1 000 000)"
+  },
+  {
+   "name": "resize target, first value",
+   "group": "resize",
+   "value": 2.0,
+   "unit": "MP",
+   "source": "added: DEFAULT_MP in imageresize.rs (lowered to the picture's own size, floored to 0.1 MP, when that is smaller)"
+  },
+  {
+   "name": "resize target, smallest",
+   "group": "resize",
+   "value": 0.01,
+   "unit": "MP",
+   "source": "added: MIN_MP in imageresize.rs"
+  },
+  {
+   "name": "resize target, largest",
+   "group": "resize",
+   "value": 200,
+   "unit": "MP",
+   "source": "added: MAX_MP in imageresize.rs (also the ceiling on the decoded target)"
+  },
+  {
+   "name": "resize resampler",
+   "group": "resize",
+   "value": "Lanczos3",
+   "source": "added: FILTER in imageresize.rs"
+  },
+  {
+   "name": "JPEG quality on save",
+   "group": "resize",
+   "value": 90,
+   "unit": "%",
+   "source": "added: DEFAULT_QUALITY in imageresize.rs (the window's slider runs 40–100)"
+  },
+  {
+   "name": "resized copy name",
+   "group": "resize",
+   "value": "<stem>-<n>MP.<ext>",
+   "source": "added: imageresize::output_path — steps aside to \"<stem>-<n>MP (1).<ext>\" rather than overwrite"
+  },
+  {
+   "name": "Exif orientation applied before scaling",
+   "group": "resize",
+   "value": true,
+   "source": "added: imageresize::resize_file reads ImageDecoder::orientation and calls DynamicImage::apply_orientation"
+  },
+  {
+   "name": "picture formats written",
+   "group": "resize",
+   "value": "PNG, JPEG, WebP, BMP, TIFF",
+   "source": "added: SUPPORTED in imageresize.rs (GIF, SVG, ICO, HEIC and AVIF are refused with a sentence)"
   }
  ]
 }

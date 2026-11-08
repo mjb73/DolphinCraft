@@ -2729,3 +2729,127 @@ new ones read
     PASS  an empty phrase starts no walk and says there is nothing to search for  (Nothing searched yet  ·  hidden folders left out)
 
 `app/mechanics.json` gains six values for the same rules, each marked *added*.
+
+## This pass: Resize Image, sized in megapixels (asked for by the person)
+
+The person's words: *"add a new feature in the context menu to resize an image
+keeping the aspect ratio but specifying MP"*.
+
+### What the original has, before anything was written
+
+Nothing to copy — and that was checked, not assumed. `strings -n 5` over both
+`/usr/bin/dolphin` and `/usr/lib/libdolphinprivate.so.6`, in the 8-bit pass and
+in the 16-bit pass Qt keeps its interface text in, finds **0** occurrences of
+`Resize Image`, `resize image`, `megapixel`, `Megapixel`, `Rotate Image` and
+`MP)`. The only "resize" text in either file is Qt's own `resizeEvent` symbol
+name (11 lines in the program, 14 in the library): API names, not a row a person
+can click. The probe and its counts are saved as
+`checks/resize/strings-probe.txt`.
+
+What the original's right-click menu on a picture does offer is *Open With* /
+*Open with <program>* (KFileItemActions), the Service-menu/KIPI plugins,
+*Compress…* (Ark's plugin), *Properties* and the file operations. No image
+operation is among them, so there is no Dolphin constant to measure for this
+feature and no function to decompile: the picture work of the original lives in
+other programs.
+
+What *is* taken from the original is the **unit**. Dolphin prints a file size in
+bytes, but this build's size line under a picture already prints
+`W×H:AR a.bc:MP d.dd`, and that `MP` is width × height ÷ 1 000 000 with two
+decimals (`gallery::dims_caption`, adopted from the person's browser template —
+see "The size line is written like the name" above). The new window counts a
+megapixel the same way, so the number it asks for and the number it prints
+afterwards agree with the caption under the thumbnail.
+
+### The one number, and the arithmetic behind it
+
+The window asks for one thing — a size in megapixels — and derives both sides
+from it, so the shape cannot change while the size does:
+
+    scale  = sqrt(target_MP ÷ (width × height ÷ 1 000 000))
+    width' = round(width × scale)              (at least 1)
+    height'= round(width' × height ÷ width)    (at least 1)
+
+The pixel count grows with the square of a side, which is why the factor is a
+square root. The height is then taken from the rounded width at the picture's
+own ratio rather than rounded on its own: that is what keeps a 4:3 picture 4:3
+instead of letting the two sides drift apart by a pixel in opposite directions.
+
+| what | value | where it comes from |
+| --- | --- | --- |
+| megapixel unit | **1 000 000 pixels** | `imageresize::PIXELS_PER_MP`, the same reading as `gallery::megapixels` (the caption's `MP d.dd`) |
+| step | `sqrt(target ÷ now)`, width rounded, height derived from the width | `imageresize::target_dims` |
+| first value in the field | **2 MP**, or the picture's own size floored to 0.1 MP when that is smaller | `DEFAULT_MP`, chosen for this build (a 1920×1080 picture is 2.07 MP) |
+| smallest target | **0.01 MP** (100×100 for a square) | `MIN_MP` |
+| largest target | **200 MP** | `MAX_MP` |
+| resampler | **Lanczos3** | `FILTER` |
+| formats written | **PNG, JPEG, WebP (lossless), BMP, TIFF** | `SUPPORTED` |
+| JPEG quality | **90** first, slider 40…100 | `DEFAULT_QUALITY` |
+| copy name | `<stem>-<n>MP.<ext>`, stepping aside to `<stem>-<n>MP (1).<ext>` | `output_path`, `step_aside` |
+| replace the original | **off**; when on, encoded to `.<name>.part-<pid>` and renamed over it | `write_picture` |
+| Exif orientation | applied before scaling, so a sideways phone photograph comes out upright | `ImageDecoder::orientation` + `DynamicImage::apply_orientation` |
+
+Every row above except the megapixel unit is this build's own choice and is
+marked *added* in `mechanics.json`; none of them pretends to be a Dolphin
+measurement.
+
+**The rounding, stated plainly.** Because both sides are whole pixels, the ratio
+can move by at most half a pixel on the shorter side. The measured round trip:
+900×1200 (1.0800 MP, ratio 0.750000) at *1 MP* came out **866×1155** —
+1.0002 MP, ratio 0.749784, which is 0.03 % away from 0.75, one pixel on the
+short side. Every picture in the checks lands within 0.1 % of the number asked
+for and within a pixel of its own shape.
+
+### Where it sits in the window
+
+| way in | row | acts on |
+| --- | --- | --- |
+| right-click a picture | **Resize Image…** (between *Picture Slideshow* and *Open in New Tab*) | every picture in the selection, so a batch goes in one go |
+| right-click, several marked | **Resize Images…** | the whole selection |
+| app menu | *Tools → Resize Image…*, greyed out with the reason in its tooltip when no picture is marked | the selection |
+| side panel | *Added tools → Resize Image* | the selection, with a toast when none is marked |
+| command line | `--resize <picture>` | that picture's folder is shown and the window opens on it (how `app/shots/resize-dialog.png` was taken) |
+
+The window itself shows the picture's size *now* and the size it will be *after*
+the number is typed, with the shape named between them (`0.75:1 kept`), the
+megapixel field with six one-click presets (1, 2, 4, 8, 12, 24), the name the
+copy will get, a JPEG quality slider that only appears when a JPEG is in the
+batch, and a *Replace the original* box that says in words that there is no
+copy when it is ticked. Anything in the selection that cannot go through — a
+text file, a GIF, an SVG — is named with the reason instead of being dropped
+silently.
+
+### What was verified
+
+* `cargo build --release` succeeds.
+* `--selftest`: **118 of 118** checks pass. The seven new ones read
+
+      PASS  a size in megapixels comes out at the picture's own shape  (4000×3000 → 1633×1225 (2.00 MP, 1.3331), 1080×1920 → 1061×1886, 8000×500 → 4000×250)
+      PASS  the megapixel field accepts what a person types and refuses nothing useful  (2, 2.5, 2,5 and "8 MP" read; empty, words, negative, 0 and 9999 refused; smallest target 115×86)
+      PASS  a real picture is scaled to the megapixels asked for, beside the original  (400×300 → 200×150, 3844 bytes, original untouched)
+      PASS  a second resize steps aside instead of overwriting the first  (photo-0.03MP (1).png, both copies kept)
+      PASS  replacing the original leaves one good picture and no part file  (320×240 → 163×122 (0.02 MP))
+      PASS  a JPEG copy is written as a JPEG at the size asked for  (173×115 JPEG, 2539 bytes)
+      PASS  a file that is not a picture is named instead of quietly dropped  (This is not a picture this window can read (TXT file). left as it is; 1 picture planned)
+
+  The full run is saved as `checks/resize/selftest.txt`.
+* The whole path through the real window, not just the engine: a live run on a
+  private X display, a right-click on `shot.jpg` → *Resize Image…* → *Resize*,
+  produced `shot-1MP.jpg` beside the untouched `shot.jpg`, selected it, and
+  showed the toast `Picture resized to 1 MP.` The dialog before and the window
+  after are `checks/resize/live-dialog.png` and `checks/resize/live-after.png`;
+  the numbers are in `checks/resize/roundtrip.txt`.
+* The capture that Craft Anything takes after a build is unchanged and green:
+  `--screenshot` draws the window and writes a 1400×900 PNG (checked by eye).
+
+### What it deliberately does not do
+
+* Animated GIFs, SVG, ICO, HEIC and AVIF are refused with a sentence rather than
+  flattened to one frame or guessed at.
+* Upscaling is allowed (a person may want it) but the window says in amber that
+  the extra pixels are made up by the scaler, not recovered.
+* The picture is decoded whole into memory; 200 MP is the ceiling the field
+  enforces so a target cannot be asked for that this machine cannot hold.
+
+`mechanics.json` gains nine values for the same table, each with its source or
+marked *added*.

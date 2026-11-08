@@ -127,6 +127,34 @@ impl App {
                 ui.close();
             }
         });
+        // Added this round: *Resize Image…* — one number, in megapixels, and the
+        // picture keeps its shape. It works on the pictures in the selection, so
+        // the row is greyed out with the reason in its tooltip when there are
+        // none.
+        {
+            let pictures: Vec<PathBuf> = self
+                .pane()
+                .selected_paths()
+                .into_iter()
+                .filter(|p| !p.is_dir() && crate::imageresize::supported(p))
+                .collect();
+            let has = !pictures.is_empty();
+            let mut resize_now = false;
+            ui.add_enabled_ui(has, |ui| {
+                let resp = crate::menu_row(ui, "Resize Image…", "");
+                if !has {
+                    resp.clone()
+                        .on_hover_text("Mark the pictures to resize first.");
+                }
+                if resp.clicked() {
+                    resize_now = true;
+                    ui.close();
+                }
+            });
+            if resize_now {
+                self.reqs.push(Request::Resize(pictures));
+            }
+        }
         // Added feature: *Find in Files* — the content modes the original's
         // find bar names but answers elsewhere.
         if crate::menu_row(ui, "Find in Files…", "Ctrl+Shift+F").clicked() {
@@ -844,6 +872,7 @@ impl App {
         self.findtext_dialog(ctx);
         self.compress_dialog(ctx);
         self.extract_dialog(ctx);
+        self.resize_dialog(ctx);
         self.shortcut_dialog(ctx);
         self.guide_dialog(ctx);
     }
@@ -1538,6 +1567,310 @@ impl App {
             return;
         }
         self.extract = Some(x);
+    }
+
+    /// Added feature, asked for this round: *Resize Image…*.
+    ///
+    /// The window asks for one number — a size in **megapixels** — and shows, as
+    /// it is typed, exactly what that number does to the picture: the width and
+    /// height it comes out at and the shape the two keep. Dolphin itself has no
+    /// resize action (its picture rows stop at *Open With* and the plugins), so
+    /// the wording, the defaults and the file naming here are this build's own;
+    /// the unit is the one the original's size caption uses (`MP` =
+    /// width × height ÷ 1 000 000).
+    fn resize_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.resize.take() else {
+            return;
+        };
+        if d.running() {
+            ctx.request_repaint_after(Duration::from_millis(120));
+        }
+        // The worker's answer. Once every picture has been through it, the
+        // window closes and the toast says what happened.
+        if let Some(outcome) = d.poll() {
+            let msg = outcome.message(d.last_mp);
+            if !outcome.written.is_empty() {
+                let here = self.pane().current_dir();
+                let first = outcome.written[0].clone();
+                if first.parent() == Some(here.as_path()) {
+                    self.reqs.push(Request::Reveal(first));
+                }
+            }
+            self.toast(&msg);
+            return;
+        }
+
+        let count = d.items.len();
+        let ready = d.ready().count();
+        let first = d.items.first().map(|i| i.name()).unwrap_or_default();
+        let preview = d.preview();
+        let mp_error = d.mp().err();
+        let any_jpeg = d.any_jpeg();
+        let replace = d.replace;
+        let mut go = false;
+        let mut close = false;
+        let mut win_open = true;
+        let title = if count > 1 { "Resize Images" } else { "Resize Image" };
+        window_style(title)
+            .open(&mut win_open)
+            .show(ctx, |ui| {
+                ui.set_min_width(540.0);
+
+                // What is being resized: one name, or a count and the first name.
+                let heading = if count == 1 {
+                    first.clone()
+                } else {
+                    format!("{} pictures, starting with {}", count, first)
+                };
+                ui.label(
+                    egui::RichText::new(theme::elide(ui, &heading, 500.0, FontId::proportional(12.5)))
+                        .size(12.5)
+                        .color(TEXT),
+                )
+                .on_hover_text(first.clone());
+                if count > 1 {
+                    if let Ok(mp) = d.mp() {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Each of the {count} pictures is scaled to {} MP on its own, keeping its own shape — the numbers below are the first one's.",
+                                crate::imageresize::format_mp(mp)
+                            ))
+                            .size(10.5)
+                            .color(TEXT_FAINT),
+                        );
+                    }
+                }
+
+                if let Some((from, to)) = preview {
+                    // The whole point of the window: now on the left, after on
+                    // the right, with the shape named in between so it is clear
+                    // that the ratio is what is being kept.
+                    ui.add_space(8.0);
+                    let now = format!("{} × {}", from.0, from.1);
+                    let after = format!("{} × {}", to.0, to.1);
+                    let shape = crate::gallery::ratio_label(from.0, from.1);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Now")
+                                .size(10.5)
+                                .color(TEXT_FAINT),
+                        );
+                        ui.label(egui::RichText::new(now).size(12.0).color(TEXT_DIM));
+                        ui.label(
+                            egui::RichText::new(format!("  ·  {:.2} MP", crate::imageresize::megapixels(from.0, from.1)))
+                                .size(10.5)
+                                .color(TEXT_FAINT),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("to")
+                                .size(10.5)
+                                .color(TEXT_FAINT),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(egui::RichText::new(after).size(12.0).color(TEXT));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "  ·  {:.2} MP",
+                                crate::imageresize::megapixels(to.0, to.1)
+                            ))
+                            .size(10.5)
+                            .color(TEXT_FAINT),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("  ·  {shape} kept"))
+                                .size(10.5)
+                                .color(TEXT_FAINT),
+                        );
+                    });
+                }
+
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Megapixels").size(11.5).color(TEXT_DIM));
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut d.mp_text)
+                            .desired_width(74.0)
+                            .font(FontId::proportional(13.0)),
+                    );
+                    if d.focus {
+                        edit.request_focus();
+                        d.focus = false;
+                    }
+                    ui.label(egui::RichText::new("MP").size(11.5).color(TEXT_FAINT));
+                    ui.add_space(10.0);
+                    // The sizes people usually want, one click each.
+                    for preset in [1.0_f64, 2.0, 4.0, 8.0, 12.0, 24.0] {
+                        let label = crate::imageresize::format_mp(preset);
+                        if ui
+                            .small_button(&label)
+                            .on_hover_text(format!("{label} megapixels"))
+                            .clicked()
+                        {
+                            d.mp_text = label.clone();
+                        }
+                    }
+                });
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Only the number of pixels changes: the width and the height are scaled by the same factor, so the picture keeps its shape.",
+                    )
+                    .size(10.5)
+                    .color(TEXT_FAINT),
+                );
+
+                if let Some(err) = mp_error.clone() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(11.0)
+                            .color(Color32::from_rgb(224, 122, 95)),
+                    );
+                }
+                if let Some((from, to)) = preview {
+                    if crate::imageresize::megapixels(to.0, to.1)
+                        > crate::imageresize::megapixels(from.0, from.1) * 1.001
+                    {
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "That is larger than the picture itself — the extra pixels are made up by the scaler, not recovered.",
+                            )
+                            .size(10.5)
+                            .color(Color32::from_rgb(226, 192, 122)),
+                        );
+                    }
+                }
+                // Anything in the selection that cannot go through is named, so
+                // a folder or a raw file in the batch is not silently dropped.
+                let skipped: Vec<&crate::imageresize::Item> = d
+                    .items
+                    .iter()
+                    .filter(|i| i.note.is_some())
+                    .collect();
+                if !skipped.is_empty() {
+                    ui.add_space(6.0);
+                    for item in skipped.iter().take(3) {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} — {}",
+                                theme::elide(ui, &item.name(), 240.0, FontId::proportional(10.5)),
+                                item.note.clone().unwrap_or_default()
+                            ))
+                            .size(10.5)
+                            .color(TEXT_FAINT),
+                        );
+                    }
+                    if skipped.len() > 3 {
+                        ui.label(
+                            egui::RichText::new(format!("and {} more left as they are", skipped.len() - 3))
+                                .size(10.5)
+                                .color(TEXT_FAINT),
+                        );
+                    }
+                }
+
+                ui.add_space(10.0);
+                ui.checkbox(&mut d.replace, "Replace the original")
+                    .on_hover_text(
+                        "Off: a copy is written beside the picture, named after its size. On: the picture itself is overwritten.",
+                    );
+                if replace {
+                    ui.label(
+                        egui::RichText::new("The original is overwritten; there is no separate copy.")
+                            .size(10.5)
+                            .color(Color32::from_rgb(226, 192, 122)),
+                    );
+                }
+                // The name the copy gets, so the result is predictable before
+                // the button is pressed.
+                if let Some(item) = d.items.first() {
+                    if !replace && item.from.is_some() {
+                        let mp = d.mp().unwrap_or(crate::imageresize::DEFAULT_MP);
+                        let out = crate::imageresize::output_path(&item.src, mp, false);
+                        let name = out
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Will be saved as {} beside the original",
+                                theme::elide(ui, &name, 360.0, FontId::proportional(10.5))
+                            ))
+                            .size(10.5)
+                            .color(TEXT_FAINT),
+                        )
+                        .on_hover_text(out.display().to_string());
+                    }
+                }
+                if any_jpeg {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("JPEG quality").size(11.5).color(TEXT_DIM));
+                        ui.spacing_mut().slider_width = 170.0;
+                        ui.add(
+                            egui::Slider::new(&mut d.quality, 40..=100)
+                                .suffix("%")
+                                .show_value(true),
+                        );
+                    });
+                    ui.label(
+                        egui::RichText::new(
+                            "Only JPEG files use this; PNG, WebP, BMP and TIFF are written losslessly.",
+                        )
+                        .size(10.5)
+                        .color(TEXT_FAINT),
+                    );
+                }
+
+                if let Some(err) = d.error.clone() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(err)
+                            .size(11.0)
+                            .color(Color32::from_rgb(224, 122, 95)),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if d.running() {
+                        ui.spinner();
+                        let work = d.work.as_ref();
+                        let (done, total) = work.map(|w| (w.done, w.total)).unwrap_or((0, 0));
+                        ui.label(
+                            egui::RichText::new(format!("Resizing {done} of {total}…"))
+                                .size(11.5)
+                                .color(TEXT_DIM),
+                        );
+                    } else {
+                        ui.add_enabled_ui(ready > 0 && mp_error.is_none(), |ui| {
+                            // Off the replace box the button writes a copy, so it
+                            // says exactly that; on, it overwrites the picture.
+                            let label = if replace { "Resize" } else { "Duplicate" };
+                            if ui.button(label).clicked() {
+                                go = true;
+                            }
+                        });
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    }
+                });
+            });
+        if go {
+            d.begin();
+        }
+        if close || !win_open {
+            // A run already handed to the worker is left to finish: stopping it
+            // halfway would leave a half-written copy behind.
+            if d.running() {
+                self.resize = Some(d);
+            }
+            return;
+        }
+        self.resize = Some(d);
     }
 
     /// Added feature: "Other Application…" — the chooser the original opens

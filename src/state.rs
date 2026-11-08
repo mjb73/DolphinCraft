@@ -376,6 +376,9 @@ pub enum Request {
     Compress(Vec<PathBuf>, PathBuf),
     /// Added feature: *Extract* — unpack this archive next to itself.
     Extract(PathBuf),
+    /// Added feature, asked for this round: *Resize Image…* — scale these
+    /// pictures to a size given in megapixels, keeping each one's shape.
+    Resize(Vec<PathBuf>),
     /// Added feature: *Find in Files* — read every text file below this folder
     /// and count the phrase, with the line it was written on.
     FindInFiles {
