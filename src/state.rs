@@ -343,7 +343,9 @@ pub enum Request {
     ForgetSettings,
     BulkRename(Vec<PathBuf>),
     QuickLook(PathBuf),
-    NewFolder(PathBuf),
+    /// The active directory's *Create New* rows: a folder or an empty text
+    /// file, made in `dir`.
+    NewItem(crate::NewKind, PathBuf),
     Rename(PathBuf, String),
     OpenTerminal(PathBuf),
     CopyToOther(bool),

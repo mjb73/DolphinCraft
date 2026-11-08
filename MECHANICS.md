@@ -3021,3 +3021,51 @@ Added, since Dolphin gets this from its thumbnailers and this build has none:
   the way the archive tools fall back when `zip` is missing.
 * The frame is cached under the same key as a picture thumbnail (path, modified
   time, size), so switching views or coming back to the folder costs nothing.
+
+## Create New: a folder or an empty text file (asked for by the person)
+
+The person's words: *"should have the option in the active directory to create
+a new folder or text file"*. The menu the original answers that with is **Create
+New**, and it belongs to the view, not to an item — a right-click on the folder's
+own space, which is also the only way to make anything in a folder that has
+nothing in it yet.
+
+**What is measured** (strings in `libKF6KIOFileWidgets.so.6`, the library that
+draws KIO's new-file menu; the action names are in `/usr/bin/dolphin`):
+
+| string | meaning |
+| --- | --- |
+| `@item:inmenu Create New` | the submenu's label |
+| `Create New Folder` | the folder window's title |
+| `Create New File` | the file window's title |
+| `Enter file name` | the file field's own hint |
+| `Name=Text File...` | the file row in the menu, from the embedded template |
+| `create_dir`, `create_file` | the two action names, next to each other in the binary |
+
+`create_dir` is already the `F10` row in `mechanics.json`; `create_file` is what
+the second row runs.
+
+**What this build does**
+
+* The empty space of the view is one widget (`Id::new(("dir_background",
+  pane.id))`) that covers everything below the location and find bars and is
+  registered *before* the rows. egui hands a click to the topmost widget of the
+  same kind, so a row keeps its own menu and only a press that lands on nothing
+  reaches the background. It is not offered in the Trash.
+* The menu is the original's shape: **Create New ▸ Folder… / Text File…** —
+  `crate::menu_row`, so the shortcut column works like every other menu here.
+  `Folder…` carries `F10`, the key the app menu's *New Folder…* row already shows.
+* One window serves both kinds (`NewKind`): title, suggested name
+  (`New Folder` / `New Text File.txt`), field hint and the created object all
+  come from the kind. The name is selected on opening, as in the original.
+* A file is created with `create_new(true)`, so a name that is already taken is
+  refused with "An item with that name already exists." rather than emptied —
+  the folder case had the same rule, and it has to hold for a file, where
+  `create` would truncate.
+* A folder still opens for renaming in place after it is made (its suggested
+  name is what is usually being replaced); a file is selected but not renamed,
+  because the name typed *is* the name.
+* The app menu's *New* group gained **New Text File…**, so neither kind is
+  reachable only by right-click; `--selftest` covers the making, the emptiness
+  of the file, and the refusal of a taken name (`Create New makes an empty text
+  file and a folder, and never reuses a name`).

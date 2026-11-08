@@ -326,7 +326,80 @@ pub struct OpenWith {
     pub focus: bool,
 }
 
-pub struct NewFolder {
+/// What the small "make something new here" window makes: a folder, or an
+/// empty text file. The original's own *Create New* menu offers both (plus
+/// whatever template types the desktop has), so the two share one window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NewKind {
+    Folder,
+    TextFile,
+}
+
+impl NewKind {
+    /// The window's title. The original's own strings: `Create New Folder`
+    /// (the folder dialog) and `Create New File` (the file dialog), both in
+    /// `libKF6KIOFileWidgets.so.6`.
+    pub fn title(self) -> &'static str {
+        match self {
+            NewKind::Folder => "Create New Folder",
+            NewKind::TextFile => "Create New File",
+        }
+    }
+
+    /// The name the field opens with, selected, so typing replaces it.
+    pub fn default_name(self) -> &'static str {
+        match self {
+            NewKind::Folder => "New Folder",
+            NewKind::TextFile => "New Text File.txt",
+        }
+    }
+
+    /// The field's greyed-out hint. `Enter file name` is the original's own
+    /// wording for the file dialog's field.
+    pub fn hint(self) -> &'static str {
+        match self {
+            NewKind::Folder => "Folder name",
+            NewKind::TextFile => "Enter file name",
+        }
+    }
+
+    /// Make it, in `dir`. A file is created empty and *new*: `create_new` refuses
+    /// a name that is already taken rather than emptying the file that has it.
+    pub fn create(self, dir: &std::path::Path, name: &str) -> std::io::Result<PathBuf> {
+        let target = dir.join(name);
+        match self {
+            NewKind::Folder => std::fs::create_dir(&target).map(|()| target),
+            NewKind::TextFile => {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                    .map(|_| target)
+            }
+        }
+    }
+
+    /// What to say once it is on disk.
+    pub fn done_message(self) -> &'static str {
+        match self {
+            NewKind::Folder => "Folder created.",
+            NewKind::TextFile => "Text file created.",
+        }
+    }
+
+    /// What to say when it could not be made.
+    pub fn failed_message(self) -> &'static str {
+        match self {
+            NewKind::Folder => "Could not create folder",
+            NewKind::TextFile => "Could not create file",
+        }
+    }
+}
+
+/// The window behind *New Folder…* / *New Text File…*: a name, and what kind of
+/// thing the name is for.
+pub struct NewItem {
+    pub kind: NewKind,
     pub name: String,
     pub focus: bool,
 }
@@ -407,7 +480,8 @@ pub struct App {
     pub pending_compress: Option<PathBuf>,
     pub pending_extract: Option<PathBuf>,
     pub quick: Option<Quick>,
-    pub new_folder: Option<NewFolder>,
+    /// The *New Folder…* / *New Text File…* window, when it is open.
+    pub new_item: Option<NewItem>,
     /// Added feature, as asked for this round: the chooser behind "Open With…",
     /// and the folders of the tabs that were closed, newest last, so a tab
     /// closed by mistake can come back (`Recently Closed Tabs`, 0x12d8ff in
@@ -740,7 +814,7 @@ impl App {
             pending_compress: None,
             pending_extract: None,
             quick: None,
-            new_folder: None,
+            new_item: None,
             open_with: None,
             closed_tabs: Vec::new(),
             shortcut_edit: None,
@@ -2577,9 +2651,14 @@ impl App {
                     };
                     self.quick = Some(Quick { path, text: content });
                 }
-                Request::NewFolder(_dir) => {
-                    self.new_folder = Some(NewFolder {
-                        name: "New Folder".to_string(),
+                // The active directory's own menu: *Create New → Folder…* and
+                // *Create New → Text File…*. The folder is opened in the small
+                // window with its default name already selected, so typing
+                // replaces it (the original preselects the suggestion too).
+                Request::NewItem(kind, _dir) => {
+                    self.new_item = Some(NewItem {
+                        kind,
+                        name: kind.default_name().to_string(),
                         focus: false,
                     });
                 }
@@ -3617,8 +3696,8 @@ impl App {
                 self.bulk = None;
             } else if self.dups.is_some() {
                 self.dups = None;
-            } else if self.new_folder.is_some() {
-                self.new_folder = None;
+            } else if self.new_item.is_some() {
+                self.new_item = None;
             } else if self.open_with.is_some() {
                 self.open_with = None;
             } else if self.props.is_some() {
@@ -4004,8 +4083,16 @@ impl App {
             "__places__" => self.places_visible = !self.places_visible,
             "__info__" => self.info_panel = !self.info_panel,
             "__newfolder__" => {
-                self.new_folder = Some(NewFolder {
-                    name: "New Folder".to_string(),
+                self.new_item = Some(NewItem {
+                    kind: NewKind::Folder,
+                    name: NewKind::Folder.default_name().to_string(),
+                    focus: false,
+                });
+            }
+            "__newtext__" => {
+                self.new_item = Some(NewItem {
+                    kind: NewKind::TextFile,
+                    name: NewKind::TextFile.default_name().to_string(),
                     focus: false,
                 });
             }

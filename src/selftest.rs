@@ -215,6 +215,48 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // ---- Create New: a folder and an empty text file in the open folder --
+    let made = base.join("made");
+    let _ = fs::create_dir_all(&made);
+    r.check(
+        "Create New makes an empty text file and a folder, and never reuses a name",
+        (|| {
+            if crate::NewKind::TextFile.default_name() != "New Text File.txt"
+                || crate::NewKind::Folder.default_name() != "New Folder"
+            {
+                return Err("the suggested names are not the ones the menu promises".into());
+            }
+            let file = crate::NewKind::TextFile
+                .create(&made, crate::NewKind::TextFile.default_name())
+                .map_err(|e| e.to_string())?;
+            if !file.is_file() {
+                return Err("the text file is not on disk".into());
+            }
+            if fs::metadata(&file).map_err(|e| e.to_string())?.len() != 0 {
+                return Err("the new text file is not empty".into());
+            }
+            // It is a text file by name, so the viewer opens it as one.
+            let entry = fsutil::Entry::from_path(&file);
+            if !entry.is_text() {
+                return Err(".txt is not treated as text".into());
+            }
+            let folder = crate::NewKind::Folder
+                .create(&made, crate::NewKind::Folder.default_name())
+                .map_err(|e| e.to_string())?;
+            if !folder.is_dir() {
+                return Err("the folder is not on disk".into());
+            }
+            // The same name twice must not empty the file that already has it.
+            let again = crate::NewKind::TextFile.create(&made, "New Text File.txt");
+            match again {
+                Ok(_) => return Err("an existing name was accepted a second time".into()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(format!("unexpected error {e:?}")),
+            }
+            Ok("2 made, the taken name refused".into())
+        })(),
+    );
+
     // ---- checksums and duplicate grouping -------------------------------
     let dups = base.join("dups");
     let same_a = dups.join("a.bin");

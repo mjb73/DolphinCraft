@@ -181,6 +181,13 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   to a deep folder is one click; either heading folds away when you don't need it.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
   properties, all with the shortcuts you already know from Dolphin.
+- **Create New, on the folder itself**: right-click the empty space in the view
+  — or anywhere in a folder that has nothing in it yet — and the menu offers
+  *Create New → Folder…* and *Create New → Text File…*. Both open one small
+  window with the suggested name already selected, so typing replaces it; the
+  folder can be renamed in place straight after, and the text file is made empty
+  and opens in your editor from there. F10 still makes a folder, and the app
+  menu's *New* group carries *New Text File…* too.
 - **Deleting asks nothing first** (as you asked): mark the pictures — or any
   files — and press Delete; they are in the Trash before you let go of the key.
   Shift+Delete removes them for good the same way. What replaces the question is

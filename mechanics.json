@@ -2137,6 +2137,18 @@
    "group": "colours",
    "value": "Visuals::widgets.active.fg_stroke = text(), because RichText::strong() takes its colour from there",
    "source": "egui 0.33 style.rs strong_text_color() -> widgets.active.text_color()"
+  },
+  {
+   "name": "create new menu",
+   "group": "controls",
+   "value": "a right-click on the folder's own space (not on an item) opens Create New -> Folder… / Text File…; the app menu's New group carries New Folder… (F10) and New Text File…; both kinds share one window whose name is preselected",
+   "source": "libKF6KIOFileWidgets.so.6 strings '@item:inmenu Create New', 'Create New Folder', 'Create New File', 'Enter file name', template 'Name=Text File...'; /usr/bin/dolphin action names 'create_dir' and 'create_file'"
+  },
+  {
+   "name": "new text file",
+   "group": "files",
+   "value": "an empty file made with create_new(true): a name that is already taken is refused, never emptied",
+   "source": "own choice: create_file makes an empty file; create_new keeps a mistyped name from truncating the file that already has it"
   }
  ]
 }

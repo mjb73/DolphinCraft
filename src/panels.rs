@@ -15,7 +15,7 @@ use crate::findtext;
 use crate::copymove;
 use crate::space;
 use crate::theme;
-use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewFolder, Props, Quick, ShortcutEdit};
+use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewItem, NewKind, Props, Quick, ShortcutEdit};
 
 /// A quiet heading inside the app menu, so its rows read as groups ("New",
 /// "Tools", "View", "Help") instead of one long list.
@@ -79,8 +79,20 @@ impl App {
             });
         }
         if crate::menu_row(ui, "New Folder…", "F10").clicked() {
-            self.new_folder = Some(NewFolder {
-                name: "New Folder".to_string(),
+            self.new_item = Some(NewItem {
+                kind: NewKind::Folder,
+                name: NewKind::Folder.default_name().to_string(),
+                focus: false,
+            });
+            ui.close();
+        }
+        // The other half of the original's *Create New* menu: an empty text
+        // file. It is made through the same window, and opens in the editor
+        // like any other file once it is on disk.
+        if crate::menu_row(ui, "New Text File…", "").clicked() {
+            self.new_item = Some(NewItem {
+                kind: NewKind::TextFile,
+                name: NewKind::TextFile.default_name().to_string(),
                 focus: false,
             });
             ui.close();
@@ -961,7 +973,7 @@ impl App {
         self.bulk_dialog(ctx);
         self.dups_dialog(ctx);
         self.quick_dialog(ctx);
-        self.new_folder_dialog(ctx);
+        self.new_item_dialog(ctx);
         self.open_with_dialog(ctx);
         self.space_dialog(ctx);
         self.findtext_dialog(ctx);
@@ -3194,24 +3206,28 @@ impl App {
         self.quick = Some(quick);
     }
 
-    fn new_folder_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut nf) = self.new_folder.take() else { return };
+    /// Added feature, asked for: the window behind *New Folder…* and
+    /// *New Text File…*. One window, two kinds — the original's *Create New*
+    /// menu lists them side by side, so the wording of the title and the field
+    /// is the only thing that changes.
+    fn new_item_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut ni) = self.new_item.take() else { return };
         let mut win_open = true;
         let mut create = false;
         let mut close = false;
-        window_style("Create Folder")
+        window_style(ni.kind.title())
             .open(&mut win_open)
             .show(ctx, |ui| {
                 ui.set_min_width(380.0);
                 let resp = ui.add(
-                    egui::TextEdit::singleline(&mut nf.name)
+                    egui::TextEdit::singleline(&mut ni.name)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Folder name"),
+                        .hint_text(ni.kind.hint()),
                 );
-                if !nf.focus {
+                if !ni.focus {
                     resp.request_focus();
-                    theme::select_all_text(ctx, resp.id, nf.name.chars().count());
-                    nf.focus = true;
+                    theme::select_all_text(ctx, resp.id, ni.name.chars().count());
+                    ni.focus = true;
                 }
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     create = true;
@@ -3230,41 +3246,46 @@ impl App {
             });
         if create {
             let dir = self.pane().current_dir();
-            let name = nf.name.trim().to_string();
+            let name = ni.name.trim().to_string();
             if name.is_empty() {
-                nf.focus = true;
-                self.new_folder = Some(nf);
+                ni.focus = true;
+                self.new_item = Some(ni);
                 return;
             }
-            let target = dir.join(&name);
-            if target.exists() {
-                self.toast("An item with that name already exists.");
-                nf.focus = true;
-                self.new_folder = Some(nf);
-                return;
-            }
-            match std::fs::create_dir(&target) {
-                Ok(()) => {
+            let kind = ni.kind;
+            match kind.create(&dir, &name) {
+                Ok(target) => {
                     self.pane_mut().reload();
                     if let Some(idx) = self.pane().entries.iter().position(|e| e.path == target) {
                         self.pane_mut().select_single(idx);
                         self.pane_mut().scroll_to = Some(idx);
-                        self.pane_mut().rename = Some(crate::state::RenameState {
-                            index: idx,
-                            text: name.clone(),
-                            focus: false,
-                        });
+                        // A folder's own name is what is usually being fixed
+                        // next ("New Folder"), so it opens for renaming. A file
+                        // is left alone: the name is already the one typed.
+                        if kind == NewKind::Folder {
+                            self.pane_mut().rename = Some(crate::state::RenameState {
+                                index: idx,
+                                text: name.clone(),
+                                focus: false,
+                            });
+                        }
                     }
-                    self.toast("Folder created.");
+                    self.toast(kind.done_message());
                 }
-                Err(e) => self.toast(&format!("Could not create folder: {}", e)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    self.toast("An item with that name already exists.");
+                    ni.focus = true;
+                    self.new_item = Some(ni);
+                    return;
+                }
+                Err(e) => self.toast(&format!("{}: {}", kind.failed_message(), e)),
             }
             return;
         }
         if close || !win_open {
             return;
         }
-        self.new_folder = Some(nf);
+        self.new_item = Some(ni);
     }
 
     fn shortcut_dialog(&mut self, ctx: &egui::Context) {

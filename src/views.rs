@@ -10,6 +10,7 @@ use crate::fsutil::{self, Kind};
 use crate::search::ThumbCache;
 use crate::state::{Clipboard, Pane, Request, SortKey, ViewMode};
 use crate::theme;
+use crate::NewKind;
 
 /// Room kept for the "…" that stands in for the elided start of a path.
 const LEADER_W: f32 = 12.0;
@@ -170,6 +171,32 @@ impl Pane {
                 });
         }
         self.find_bar(&mut child, vctx);
+
+        // The active directory itself: a right-click on the space between the
+        // items — or on an empty folder, where there are no items at all —
+        // offers the original's *Create New* menu. The press lands here only
+        // when no row is under it: a row registers its own menu later, and egui
+        // gives a click to the topmost widget that can take it.
+        let in_trash = self.is_trash();
+        let dir = self.current_dir();
+        let bg_rect = child.available_rect_before_wrap();
+        if !in_trash && bg_rect.width() > 8.0 && bg_rect.height() > 8.0 {
+            let bg = child.interact(bg_rect, Id::new(("dir_background", self.id)), Sense::click());
+            bg.context_menu(|ui| {
+                ui.set_min_width(200.0);
+                ui.menu_button("Create New", |ui| {
+                    ui.set_min_width(220.0);
+                    if crate::menu_row(ui, "Folder…", "F10").clicked() {
+                        vctx.reqs.push(Request::NewItem(NewKind::Folder, dir.clone()));
+                        ui.close();
+                    }
+                    if crate::menu_row(ui, "Text File…", "").clicked() {
+                        vctx.reqs.push(Request::NewItem(NewKind::TextFile, dir.clone()));
+                        ui.close();
+                    }
+                });
+            });
+        }
 
         // Ctrl + wheel zooms the view, the same one-step-per-notch change the
         // +/- buttons in the status bar make.
