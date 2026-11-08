@@ -19,6 +19,7 @@ pub fn about_line() -> String {
 mod apps;
 mod archive;
 mod config;
+mod copymove;
 mod findtext;
 mod foldercolor;
 mod fsutil;
@@ -49,13 +50,82 @@ use eframe::egui::{
 use config::{Config, SavedTab};
 use search::{DupScan, ThumbCache};
 use state::{Clipboard, Pane, Request, ViewMode, TRASH_URI};
-use theme::*;
 use views::ViewCtx;
 
 /// How many folders the navigation panel's *Recent Locations* group keeps. The
 /// group is a way back to somewhere the person was, not a history browser; six
 /// rows fit beside the other groups without pushing Devices off the panel.
 pub const RECENT_LOCATIONS_MAX: usize = 6;
+
+/// The rows of the navigation panel's *Added tools* group — the tools this
+/// build adds to the original's, in the order the group shows them. The group's
+/// heading counts its own rows from this table, so a row added or removed here
+/// cannot leave the count behind.
+pub const ADDED_TOOLS: &[AddedTool] = &[
+    AddedTool {
+        label: "Duplicates",
+        tip: "Find identical files in this folder (Ctrl+Shift+D)",
+        key: Some("Ctrl+Shift+D"),
+        what: ToolWhat::Duplicates,
+    },
+    AddedTool {
+        label: "Find in Files",
+        tip: "Search inside the documents of this folder for a phrase (Ctrl+Shift+F)",
+        key: Some("Ctrl+Shift+F"),
+        what: ToolWhat::FindInFiles,
+    },
+    AddedTool {
+        label: "Bulk Rename",
+        tip: "Rename many files with a pattern (Ctrl+Shift+R)",
+        key: Some("Ctrl+Shift+R"),
+        what: ToolWhat::BulkRename,
+    },
+    AddedTool {
+        label: "Quick Look",
+        tip: "Preview the selected file (Space)",
+        key: Some("Space"),
+        what: ToolWhat::QuickLook,
+    },
+    AddedTool {
+        label: "Disk Space",
+        tip: "See what is taking the room in this folder (Tools → Manage Disk Space Usage…)",
+        key: None,
+        what: ToolWhat::DiskSpace,
+    },
+    AddedTool {
+        label: "Compress",
+        tip: "Turn the marked items, or this folder, into one ZIP",
+        key: None,
+        what: ToolWhat::Compress,
+    },
+    AddedTool {
+        label: "Resize Image",
+        tip: "Scale the marked pictures to a size in megapixels, keeping their shape",
+        key: None,
+        what: ToolWhat::ResizeImage,
+    },
+];
+
+/// One row of the *Added tools* group.
+pub struct AddedTool {
+    pub label: &'static str,
+    pub tip: &'static str,
+    pub key: Option<&'static str>,
+    pub what: ToolWhat,
+}
+
+/// Which tool a clicked row asks for. The panel only reports the press; what
+/// each tool opens is decided beside the window's own state.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ToolWhat {
+    Duplicates,
+    FindInFiles,
+    BulkRename,
+    QuickLook,
+    DiskSpace,
+    Compress,
+    ResizeImage,
+}
 
 /// Remember that a tab was closed, so "Recently Closed Tabs" can put it back.
 /// A folder already in the list moves to the newest end rather than appearing
@@ -310,15 +380,20 @@ pub struct App {
     pub compress: Option<archive::Compress>,
     /// Added feature: *Extract* — a ZIP or tar archive unpacked in the window.
     pub extract: Option<archive::Extract>,
+    /// Added feature: *Copy To…* / *Move To…* — the small window that puts the
+    /// marked items into a folder the person names, without overwriting a thing.
+    pub copy_chooser: Option<copymove::Chooser>,
+    /// `--copy-chooser copy|move`: open that window on the first frame, so it
+    /// can be photographed without a mouse.
+    pub pending_copy_chooser: Option<copymove::Mode>,
     /// Added feature, asked for this round: *Resize Image…* — the marked
     /// pictures scaled to a size given in megapixels, shape kept.
     pub resize: Option<imageresize::Resize>,
     /// `--resize <picture>`: open that window on the first frame, so it can be
     /// photographed without a mouse.
     pub pending_resize: Option<PathBuf>,
-    /// Added feature, asked for: drag and drop with other programs. A file
-    /// dragged out of the window is handed over by this handle; one drag at a
-    /// time, and the drag itself runs on its own thread.
+    /// Added feature, asked for: a picture dragged out of the window. One drag
+    /// at a time; the drag itself runs on its own thread and reports back here.
     pub dragout: Option<dragout::Drag>,
     /// Added feature: *Find in Files* — the two content modes the original's
     /// find bar names (`File names and contents`, `File contents`) but hands to
@@ -501,8 +576,29 @@ impl App {
         start_guide: bool,
         start_menu: bool,
         open_details_at_start: bool,
+        light_flag: bool,
         start_below: bool,
     ) -> Self {
+        // A captured picture must look the same every time, so it starts from
+        // factory settings rather than from whatever the last session left
+        // behind (a zoom level, a split view, a panel). `--keep-settings` asks
+        // for the saved settings instead, so the picture shows the person's own
+        // shortcuts, colours and layout.
+        let fresh = shot.is_some() && !keep_settings;
+        let mut cfg = if fresh {
+            Config::default()
+        } else {
+            Config::load()
+        };
+        // `--light` opens the window light for this session; it writes the
+        // setting too, so the menu's tick tells the truth about what is on.
+        if light_flag {
+            cfg.light = true;
+        }
+        // The palette is chosen from the settings *before* anything is styled,
+        // so a light window is light on its first frame rather than opening dark
+        // and repainting.
+        theme::set_light(cfg.light);
         theme::install(&cc.egui_ctx);
         if shot.is_some() {
             // The picture is taken without a pointer of our own, so whatever
@@ -510,17 +606,6 @@ impl App {
             // floating in the middle of the saved window.
             cc.egui_ctx.style_mut(|s| s.interaction.tooltip_delay = 1.0e6);
         }
-        // A captured picture must look the same every time, so it starts from
-        // factory settings rather than from whatever the last session left
-        // behind (a zoom level, a split view, a panel). `--keep-settings` asks
-        // for the saved settings instead, so the picture shows the person's own
-        // shortcuts, colours and layout.
-        let fresh = shot.is_some() && !keep_settings;
-        let cfg = if fresh {
-            Config::default()
-        } else {
-            Config::load()
-        };
         let mut next_id = 1usize;
         // Whether the folder came from the command line: a folder named there
         // wins over the saved session, so `dolphincraft ~/Pictures` opens just
@@ -645,6 +730,8 @@ impl App {
             pending_space: None,
             compress: None,
             extract: None,
+            copy_chooser: None,
+            pending_copy_chooser: None,
             resize: None,
             pending_resize: None,
             dragout: None,
@@ -720,6 +807,94 @@ impl App {
         }
         let idx = 1 - tab.active;
         Some(&mut tab.panes[idx])
+    }
+
+    /// The folder the other view is showing, when the window has two views.
+    pub fn other_dir(&self) -> Option<PathBuf> {
+        if !self.split {
+            return None;
+        }
+        let tab = &self.tabs[self.active_tab];
+        if tab.panes.len() < 2 {
+            return None;
+        }
+        Some(tab.panes[1 - tab.active].path.clone())
+    }
+
+    /// Added feature: *Copy to Other View* / *Move to Other View*.
+    ///
+    /// The four refusals are tested in the original's order and said in its
+    /// words (`copymove::verdict`), so pressing the shortcut with nothing
+    /// marked says what the original says instead of doing nothing.
+    pub fn copy_to_other(&mut self, mode: copymove::Mode) {
+        let Some(dest) = self.other_dir() else {
+            self.toast(&format!(
+                "{} needs two views: press F3 to split the window.",
+                mode.word()
+            ));
+            return;
+        };
+        let paths = self.pane().selected_paths();
+        let facts = copymove::Facts {
+            split: true,
+            selected: paths.len(),
+            already_there: copymove::already_there(&dest, &paths),
+            dest_writable: copymove::writable(&dest),
+            may_move: copymove::may_move(&paths),
+        };
+        match copymove::verdict(mode, &facts) {
+            v if !v.ok => {
+                match v.why {
+                    Some(why) => self.toast(&why),
+                    // Not in split view: the original just disables the row and
+                    // leaves the tooltip to explain.
+                    None => self.toast(mode.whats_this()),
+                }
+            }
+            _ => self.copy_into(mode, paths, dest),
+        }
+    }
+
+    /// Added feature: do the work, say how it went, and refresh the folders that
+    /// changed. Nothing is ever overwritten: an item whose name is taken in the
+    /// destination arrives as `name (1)`.
+    pub fn copy_into(&mut self, mode: copymove::Mode, paths: Vec<PathBuf>, dest: PathBuf) {
+        if paths.is_empty() {
+            self.toast(&format!(
+                "Cannot {} to other view: No files selected.",
+                mode.lower()
+            ));
+            return;
+        }
+        let plan = copymove::plan(&dest, &paths);
+        if plan.steps.is_empty() {
+            let why = plan
+                .skipped
+                .first()
+                .map(|(_, why)| why.clone())
+                .unwrap_or_else(|| "There is nothing to do.".to_string());
+            self.toast(&why);
+            return;
+        }
+        let outcome = copymove::run(&plan, mode);
+        let mut line = outcome.summary(mode, &dest);
+        if !plan.skipped.is_empty() {
+            line.push_str(&format!(
+                " — {} left where {} (it is the folder it would go into)",
+                plan.skipped.len(),
+                if plan.skipped.len() == 1 { "it was" } else { "they were" }
+            ));
+        }
+        self.toast(&line);
+        // The folder the copy left and the one it landed in both need a fresh
+        // listing; any other view showing either of them does too.
+        let from = self.pane().current_dir();
+        let tab = &mut self.tabs[self.active_tab];
+        for pane in tab.panes.iter_mut() {
+            if pane.path == dest || pane.path == from {
+                pane.reload();
+            }
+        }
     }
 
     pub fn ensure_split(&mut self) {
@@ -799,7 +974,7 @@ impl App {
             .exact_height(46.0)
             .frame(
                 egui::Frame::new()
-                    .fill(TOOLBAR_BG)
+                    .fill(theme::toolbar_bg())
                     .inner_margin(Margin::symmetric(8, 5)),
             )
             .show(ctx, |ui| {
@@ -840,7 +1015,7 @@ impl App {
                     let avail = ui.available_width();
                     let sort_label = format!("Sort: {}", self.pane().sort.label());
                     let label_w = ui.fonts_mut(|f| {
-                        f.layout_no_wrap(sort_label.clone(), FontId::proportional(12.0), TEXT)
+                        f.layout_no_wrap(sort_label.clone(), FontId::proportional(12.0), theme::text())
                             .size()
                             .x
                     });
@@ -854,7 +1029,7 @@ impl App {
                                 f.layout_no_wrap(
                                     t.to_string(),
                                     FontId::proportional(12.0),
-                                    TEXT,
+                                    theme::text(),
                                 )
                                 .size()
                                 .x
@@ -875,8 +1050,8 @@ impl App {
                         ui.painter().rect(
                             bar_rect,
                             CornerRadius::same(4),
-                            HEADER_BG,
-                            Stroke::new(1.0, BORDER),
+                            theme::header_bg(),
+                            Stroke::new(1.0, theme::border()),
                             egui::StrokeKind::Inside,
                         );
                         let inner = bar_rect.shrink2(Vec2::new(7.0, 2.0));
@@ -1036,7 +1211,7 @@ impl App {
         };
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, TOOLBAR_ICON_W), Sense::click());
         if resp.hovered() || resp.is_pointer_button_down_on() {
-            ui.painter().rect_filled(rect, CornerRadius::same(3), ROW_HOVER);
+            ui.painter().rect_filled(rect, CornerRadius::same(3), theme::row_hover());
         }
         match label {
             Some((text, _)) => {
@@ -1050,7 +1225,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     text,
                     FontId::proportional(12.0),
-                    TEXT,
+                    theme::text(),
                 );
                 theme::draw_glyph(
                     ui.painter(),
@@ -1059,10 +1234,10 @@ impl App {
                         Vec2::splat(16.0),
                     ),
                     "dropdown",
-                    TEXT_DIM,
+                    theme::text_dim(),
                 );
             }
-            None => theme::draw_glyph(ui.painter(), rect, "sort", TEXT),
+            None => theme::draw_glyph(ui.painter(), rect, "sort", theme::text()),
         }
         let resp = resp.on_hover_text(tip);
         if self.open_sort_once {
@@ -1217,7 +1392,7 @@ impl App {
             .exact_height(33.0)
             .frame(
                 egui::Frame::new()
-                    .fill(PANEL_BG)
+                    .fill(theme::panel_bg())
                     .inner_margin(Margin::symmetric(6, 0)),
             )
             .show(ctx, |ui| {
@@ -1235,7 +1410,7 @@ impl App {
                         };
                         let font = FontId::proportional(12.5);
                         let text_w = ui
-                            .fonts_mut(|f| f.layout_no_wrap(title.clone(), font.clone(), TEXT))
+                            .fonts_mut(|f| f.layout_no_wrap(title.clone(), font.clone(), theme::text()))
                             .size()
                             .x;
                         let w = (text_w + 62.0).clamp(104.0, 230.0);
@@ -1255,7 +1430,7 @@ impl App {
                                     sw: 0,
                                     se: 0,
                                 },
-                                HEADER_BG,
+                                theme::header_bg(),
                             );
                             ui.painter().rect_filled(
                                 Rect::from_min_max(
@@ -1263,7 +1438,7 @@ impl App {
                                     Pos2::new(rect.right(), rect.bottom()),
                                 ),
                                 0.0,
-                                ACCENT,
+                                theme::accent(),
                             );
                         } else if resp.hovered() {
                             ui.painter().rect_filled(
@@ -1274,7 +1449,7 @@ impl App {
                                     sw: 0,
                                     se: 0,
                                 },
-                                Color32::from_rgb(50, 55, 60),
+                                theme::c(50, 55, 60),
                             );
                         }
                         let icon_rect = Rect::from_center_size(
@@ -1288,7 +1463,7 @@ impl App {
                             Align2::LEFT_CENTER,
                             label,
                             font,
-                            if is_active { TEXT } else { TEXT_DIM },
+                            if is_active { theme::text() } else { theme::text_dim() },
                         );
                         let close_rect = Rect::from_center_size(
                             Pos2::new(rect.right() - 14.0, rect.center().y),
@@ -1300,14 +1475,14 @@ impl App {
                             ui.painter().rect_filled(
                                 close_rect,
                                 CornerRadius::same(3),
-                                ROW_HOVER,
+                                theme::row_hover(),
                             );
                         }
                         theme::draw_glyph(
                             ui.painter(),
                             close_rect,
                             "close",
-                            if close_resp.hovered() { TEXT } else { TEXT_DIM },
+                            if close_resp.hovered() { theme::text() } else { theme::text_dim() },
                         );
                         if close_resp.clicked() {
                             to_close = Some(i);
@@ -1322,9 +1497,9 @@ impl App {
                         ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::click());
                     if add_resp.hovered() {
                         ui.painter()
-                            .rect_filled(add_rect, CornerRadius::same(3), ROW_HOVER);
+                            .rect_filled(add_rect, CornerRadius::same(3), theme::row_hover());
                     }
-                    theme::draw_glyph(ui.painter(), add_rect, "plus", TEXT_DIM);
+                    theme::draw_glyph(ui.painter(), add_rect, "plus", theme::text_dim());
                     if add_resp.clicked() {
                         add_tab = true;
                     }
@@ -1362,15 +1537,10 @@ impl App {
         let mut copy_recent_path: Option<PathBuf> = None;
         let mut forget_location: Option<PathBuf> = None;
         let mut fold_section = false;
-        let mut open_dups = false;
-        let mut open_findtext = false;
-        let mut open_bulk = false;
-        let mut open_quick = false;
-        // The two archive/disk rows in the Added tools group: one asks the
-        // question, the other answers it in the same window.
-        let mut open_space_row = false;
-        let mut open_compress_row = false;
-        let mut open_resize_row = false;
+        // The one *Added tools* row that was pressed this frame, if any. The
+        // group is a table (`ADDED_TOOLS`), so its heading can count its own
+        // rows and a press reports which tool rather than setting six flags.
+        let mut opened_tool: Option<ToolWhat> = None;
         // Drag-and-drop state for the shortcut rows. `start_drag` and
         // `finish_drag` are this frame's edges; `drop_slot` is the gap the
         // pointer is over right now, counted among the person's own shortcuts.
@@ -1399,7 +1569,7 @@ impl App {
             .width_range(150.0..=340.0)
             .frame(
                 egui::Frame::new()
-                    .fill(PANEL_BG)
+                    .fill(theme::panel_bg())
                     .inner_margin(Margin::symmetric(6, 8)),
             )
             .show(ctx, |ui| {
@@ -1463,7 +1633,7 @@ impl App {
                                 ui.painter().rect_stroke(
                                     resp.rect.shrink2(Vec2::new(1.0, 1.0)),
                                     CornerRadius::same(3),
-                                    Stroke::new(1.0, ACCENT),
+                                    Stroke::new(1.0, theme::accent()),
                                     egui::StrokeKind::Inside,
                                 );
                             }
@@ -1538,10 +1708,10 @@ impl App {
                                 let x1 = first.right() - 4.0;
                                 ui.painter().line_segment(
                                     [Pos2::new(x0, y), Pos2::new(x1, y)],
-                                    Stroke::new(2.0, ACCENT),
+                                    Stroke::new(2.0, theme::accent()),
                                 );
                                 ui.painter()
-                                    .circle_filled(Pos2::new(x0, y), 3.0, ACCENT);
+                                    .circle_filled(Pos2::new(x0, y), 3.0, theme::accent());
                             }
                         }
                         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -1560,7 +1730,11 @@ impl App {
                 // The original's *Remote* group, above Recent and Devices: the
                 // network folders this desktop already has. It carries what is
                 // mounted rather than a way to mount something, so the row is a
-                // jump, not a connection dialog.
+                // jump, not a connection dialog. Added feature: the app menu can
+                // hide the group altogether (a desktop with no shares would
+                // otherwise show a heading and one row of apology), so the
+                // heading leaves with the rows.
+                if self.config.network_visible {
                 let network = fsutil::network_places();
                 ui.add_space(8.0);
                 if recent_group_header(
@@ -1586,6 +1760,7 @@ impl App {
                             navigate = Some(path.clone());
                         }
                     }
+                }
                 }
                 }
 
@@ -1740,47 +1915,25 @@ impl App {
                 }
 
                 ui.add_space(12.0);
-                section_header(ui, "Added tools");
-                if tool_row(ui, "Duplicates", "Find identical files in this folder (Ctrl+Shift+D)", Some("Ctrl+Shift+D")) {
-                    open_dups = true;
-                }
-                if tool_row(
+                // Added feature: the *Added tools* group folds like the other
+                // groups and starts folded. It is a menu of tools rather than a
+                // place to walk to, so the panel opens on the places; the
+                // heading keeps the count visible while the rows are away.
+                if recent_group_header(
                     ui,
-                    "Find in Files",
-                    "Search inside the documents of this folder for a phrase (Ctrl+Shift+F)",
-                    Some("Ctrl+Shift+F"),
+                    "Added tools",
+                    self.config.tools_expanded,
+                    ADDED_TOOLS.len(),
                 ) {
-                    open_findtext = true;
+                    self.config.tools_expanded = !self.config.tools_expanded;
+                    self.config_dirty = true;
                 }
-                if tool_row(ui, "Bulk Rename", "Rename many files with a pattern (Ctrl+Shift+R)", Some("Ctrl+Shift+R")) {
-                    open_bulk = true;
-                }
-                if tool_row(ui, "Quick Look", "Preview the selected file (Space)", Some("Space")) {
-                    open_quick = true;
-                }
-                if tool_row(
-                    ui,
-                    "Disk Space",
-                    "See what is taking the room in this folder (Tools → Manage Disk Space Usage…)",
-                    None,
-                ) {
-                    open_space_row = true;
-                }
-                if tool_row(
-                    ui,
-                    "Compress",
-                    "Turn the marked items, or this folder, into one ZIP",
-                    None,
-                ) {
-                    open_compress_row = true;
-                }
-                if tool_row(
-                    ui,
-                    "Resize Image",
-                    "Scale the marked pictures to a size in megapixels, keeping their shape",
-                    None,
-                ) {
-                    open_resize_row = true;
+                if self.config.tools_expanded {
+                    for tool in ADDED_TOOLS {
+                        if tool_row(ui, tool.label, tool.tip, tool.key) {
+                            opened_tool = Some(tool.what);
+                        }
+                    }
                 }
                 // A little air under the last row, so a section that only just
                 // fits is not cut in half by the panel's own bottom edge.
@@ -1878,58 +2031,61 @@ impl App {
             self.config_dirty = true;
             self.toast("Shortcut removed");
         }
-        if open_findtext {
-            let root = self.pane().current_dir();
-            self.findtext = Some(findtext::FindText::start(
-                root,
-                findtext::Options::new(String::new()),
-            ));
-        }
-        if open_dups {
-            let root = self.pane().current_dir();
-            self.dups = Some(Dups {
-                scan: DupScan::start(root),
-            });
-        }
-        if open_bulk {
-            let paths = self.pane().selected_paths();
-            if paths.is_empty() {
-                self.toast("Select the files to rename first.");
-            } else {
-                self.bulk = Some(Bulk {
-                    paths,
-                    pattern: "{name}{ext}".to_string(),
-                    start: 1,
-                    error: None,
+        match opened_tool {
+            Some(ToolWhat::FindInFiles) => {
+                let root = self.pane().current_dir();
+                self.findtext = Some(findtext::FindText::start(
+                    root,
+                    findtext::Options::new(String::new()),
+                ));
+            }
+            Some(ToolWhat::Duplicates) => {
+                let root = self.pane().current_dir();
+                self.dups = Some(Dups {
+                    scan: DupScan::start(root),
                 });
             }
-        }
-        if open_quick {
-            if let Some(entry) = self.pane().primary_selection().cloned() {
-                self.reqs.push(Request::QuickLook(entry.path));
+            Some(ToolWhat::BulkRename) => {
+                let paths = self.pane().selected_paths();
+                if paths.is_empty() {
+                    self.toast("Select the files to rename first.");
+                } else {
+                    self.bulk = Some(Bulk {
+                        paths,
+                        pattern: "{name}{ext}".to_string(),
+                        start: 1,
+                        error: None,
+                    });
+                }
             }
-        }
-        if open_space_row {
-            let dir = self.pane().current_dir();
-            self.reqs.push(Request::SpaceUsage(dir));
-        }
-        if open_compress_row {
-            let paths = self.pane().selected_paths();
-            let dir = self.pane().current_dir();
-            self.reqs.push(Request::Compress(paths, dir));
-        }
-        if open_resize_row {
-            let pictures: Vec<PathBuf> = self
-                .pane()
-                .selected_paths()
-                .into_iter()
-                .filter(|p| !p.is_dir() && imageresize::supported(p))
-                .collect();
-            if pictures.is_empty() {
-                self.toast("Mark the pictures to resize first.");
-            } else {
-                self.reqs.push(Request::Resize(pictures));
+            Some(ToolWhat::QuickLook) => {
+                if let Some(entry) = self.pane().primary_selection().cloned() {
+                    self.reqs.push(Request::QuickLook(entry.path));
+                }
             }
+            Some(ToolWhat::DiskSpace) => {
+                let dir = self.pane().current_dir();
+                self.reqs.push(Request::SpaceUsage(dir));
+            }
+            Some(ToolWhat::Compress) => {
+                let paths = self.pane().selected_paths();
+                let dir = self.pane().current_dir();
+                self.reqs.push(Request::Compress(paths, dir));
+            }
+            Some(ToolWhat::ResizeImage) => {
+                let pictures: Vec<PathBuf> = self
+                    .pane()
+                    .selected_paths()
+                    .into_iter()
+                    .filter(|p| !p.is_dir() && imageresize::supported(p))
+                    .collect();
+                if pictures.is_empty() {
+                    self.toast("Mark the pictures to resize first.");
+                } else {
+                    self.reqs.push(Request::Resize(pictures));
+                }
+            }
+            None => {}
         }
     }
 
@@ -1938,7 +2094,7 @@ impl App {
             .exact_height(28.0)
             .frame(
                 egui::Frame::new()
-                    .fill(TOOLBAR_BG)
+                    .fill(theme::toolbar_bg())
                     .inner_margin(Margin::symmetric(10, 3)),
             )
             .show(ctx, |ui| {
@@ -2017,7 +2173,7 @@ impl App {
                             .sum();
                         text = status_selection(folders, files, bytes);
                     }
-                    ui.label(egui::RichText::new(text).size(11.5).color(TEXT_DIM));
+                    ui.label(egui::RichText::new(text).size(11.5).color(theme::text_dim()));
 
                     let mut zoom_value = self.pane().zoom_level() as f32;
                     let icon = self.pane().icon_size() as u32;
@@ -2053,7 +2209,7 @@ impl App {
                                     self.pane().thumb_px.round() as u32
                                 ))
                                 .size(11.0)
-                                .color(TEXT_FAINT),
+                                .color(theme::text_faint()),
                             );
                             ui.add_space(14.0);
                             if let Some((f, t)) = fsutil::free_space(&self.pane().current_dir()) {
@@ -2064,7 +2220,7 @@ impl App {
                                             fsutil::format_size(f)
                                         ))
                                         .size(11.0)
-                                        .color(TEXT_FAINT),
+                                        .color(theme::text_faint()),
                                     )
                                     .on_hover_text(format!(
                                         "{} free out of {} ({}% used)",
@@ -2105,7 +2261,7 @@ impl App {
                         ui.label(
                             egui::RichText::new(format!("{} px", icon))
                                 .size(11.0)
-                                .color(TEXT_FAINT),
+                                .color(theme::text_faint()),
                         );
                         ui.add_space(14.0);
                         if let Some((f, t)) = fsutil::free_space(&self.pane().current_dir()) {
@@ -2131,7 +2287,7 @@ impl App {
                                 ui.painter().rect_filled(
                                     bar,
                                     CornerRadius::same(2),
-                                    Color32::from_rgb(48, 53, 58),
+                                    theme::c(48, 53, 58),
                                 );
                                 let filled = (bar.width() * (pct as f32 / 100.0)).max(0.0);
                                 if filled > 0.5 {
@@ -2142,7 +2298,7 @@ impl App {
                                     ui.painter().rect_filled(
                                         fill,
                                         CornerRadius::same(2),
-                                        ACCENT,
+                                        theme::accent(),
                                     );
                                 }
                                 let tip = format!(
@@ -2158,7 +2314,7 @@ impl App {
                                             fsutil::format_size(f)
                                         ))
                                         .size(11.0)
-                                        .color(TEXT_FAINT),
+                                        .color(theme::text_faint()),
                                     )
                                     .sense(Sense::click()),
                                 );
@@ -2187,7 +2343,7 @@ impl App {
 
     fn central(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(VIEW_BG))
+            .frame(egui::Frame::new().fill(theme::view_bg()))
             .show(ctx, |ui| {
                 if !self.split || self.tabs[self.active_tab].panes.len() < 2 {
                     let mut reqs = std::mem::take(&mut self.reqs);
@@ -2199,6 +2355,7 @@ impl App {
                         split: self.split,
                         active: true,
                         show_location_bar: self.split,
+                        other_dir: None,
                     };
                     tab.panes[0].ui(ui, &mut vctx);
                     tab.active = 0;
@@ -2219,7 +2376,7 @@ impl App {
                     Pos2::new(left_rect.right(), rect.top()),
                     Pos2::new(right_rect.left(), rect.bottom()),
                 );
-                ui.painter().rect_filled(divider, 0.0, BORDER);
+                ui.painter().rect_filled(divider, 0.0, theme::border());
                 let drag = ui.interact(divider, Id::new("split_divider"), Sense::drag());
                 if drag.dragged() {
                     if let Some(pos) = drag.interact_pointer_pos() {
@@ -2237,6 +2394,8 @@ impl App {
                 {
                     let tab = &mut self.tabs[self.active_tab];
                     let (first, rest) = tab.panes.split_at_mut(1);
+                    let right_dir = rest[0].path.clone();
+                    let left_dir = first[0].path.clone();
                     let mut vctx0 = ViewCtx {
                         thumbs: &mut self.thumbs,
                         clipboard: &self.clipboard,
@@ -2244,6 +2403,7 @@ impl App {
                         split: true,
                         active: active == 0,
                         show_location_bar: true,
+                        other_dir: Some(right_dir),
                     };
                     let mut child = ui.new_child(
                         egui::UiBuilder::new()
@@ -2261,6 +2421,7 @@ impl App {
                         split: true,
                         active: active == 1,
                         show_location_bar: true,
+                        other_dir: Some(left_dir),
                     };
                     let mut child2 = ui.new_child(
                         egui::UiBuilder::new()
@@ -2443,7 +2604,28 @@ impl App {
                 }
                 Request::OpenTerminal(dir) => fsutil::open_terminal(&dir),
                 Request::CopyToOther(cut) => {
-                    let _ = cut;
+                    // Added feature: the original's *Copy to Other View* /
+                    // *Move to Other View* (`copyToInactiveSplitView`,
+                    // `moveToInactiveSplitView`), which this build used to stub
+                    // out. The destination is the folder the other view shows.
+                    let mode = if cut {
+                        copymove::Mode::Move
+                    } else {
+                        copymove::Mode::Copy
+                    };
+                    self.copy_to_other(mode);
+                }
+                Request::CopyToChosen { mode, paths, dest } => {
+                    self.copy_into(mode, paths, dest);
+                }
+                Request::OpenCopyChooser(mode) => {
+                    let paths = self.pane().selected_paths();
+                    let start = self.pane().current_dir();
+                    if paths.is_empty() {
+                        self.toast(&format!("Mark the items to {} first.", mode.lower()));
+                    } else {
+                        self.copy_chooser = Some(copymove::Chooser::new(mode, paths, start));
+                    }
                 }
                 Request::Duplicate(paths) => {
                     for src in &paths {
@@ -2919,9 +3101,9 @@ impl App {
         let screen = ctx.content_rect();
         painter.rect_filled(screen, 0.0, egui::Color32::from_rgba_unmultiplied(16, 18, 22, 110));
         let edge = if refuse {
-            egui::Color32::from_rgb(224, 122, 95)
+            theme::c(224, 122, 95)
         } else {
-            theme::ACCENT
+            theme::accent()
         };
         painter.rect_stroke(
             screen.shrink(6.0),
@@ -2939,13 +3121,13 @@ impl App {
         let galley = painter.layout_no_wrap(
             text,
             FontId::proportional(14.0),
-            if refuse { edge } else { theme::TEXT },
+            if refuse { edge } else { theme::text() },
         );
         let chip = Rect::from_center_size(
             screen.center(),
             galley.size() + Vec2::new(26.0, 16.0),
         );
-        painter.rect_filled(chip, CornerRadius::same(8), egui::Color32::from_rgb(26, 29, 34));
+        painter.rect_filled(chip, CornerRadius::same(8), theme::c(26, 29, 34));
         painter.rect_stroke(
             chip,
             CornerRadius::same(8),
@@ -3459,6 +3641,16 @@ impl App {
                 ..Default::default()
             };
             let alt = Modifiers::ALT;
+            let shift = Modifiers::SHIFT;
+            // Added feature: the original's own default shortcuts for the two
+            // Other View actions (`setDefaultShortcut` at 0x67436 / 0x676b5:
+            // QKeySequence 0x03000034 and 0x03000035 = Shift+F5, Shift+F6).
+            if i.consume_key(shift, Key::F5) {
+                reqs.push(Request::CopyToOther(false));
+            }
+            if i.consume_key(shift, Key::F6) {
+                reqs.push(Request::CopyToOther(true));
+            }
             if i.consume_key(ctrl, Key::T) {
                 reqs.push(Request::Toast("__newtab__".into()));
             }
@@ -4089,6 +4281,20 @@ impl eframe::App for App {
                 self.reqs.push(Request::Extract(archive));
             }
         }
+        // `--copy-chooser copy|move`: open the new Copy To… / Move To… window on
+        // the marked items (or on this folder when nothing is marked), so it can
+        // be photographed without a mouse.
+        if self.pending_copy_chooser.is_some() && self.frames > 1 {
+            let mode = self.pending_copy_chooser.take().unwrap();
+            let start = self.pane().current_dir();
+            let mut marked = self.pane().selected_paths();
+            if marked.is_empty() {
+                // Nothing marked in a capture: the folder itself stands in, the
+                // way the window treats "nothing marked" as "this folder".
+                marked.push(start.clone());
+            }
+            self.copy_chooser = Some(copymove::Chooser::new(mode, marked, start));
+        }
         // `--resize <picture>`: mark the picture and open the resize window on
         // it, so the window can be photographed without a mouse.
         if let Some(picture) = self.pending_resize.clone() {
@@ -4245,13 +4451,13 @@ pub(crate) fn status_selection(folders: usize, files: usize, bytes: u64) -> Stri
 fn toolbar_plate(ui: &egui::Ui, rect: Rect, resp: &egui::Response, active: bool, enabled: bool) {
     if active {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(63, 70, 77));
+            .rect_filled(rect, CornerRadius::same(3), theme::c(63, 70, 77));
     } else if resp.hovered() && enabled {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect, CornerRadius::same(3), theme::row_hover());
     } else if resp.is_pointer_button_down_on() && enabled {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(38, 43, 47));
+            .rect_filled(rect, CornerRadius::same(3), theme::c(38, 43, 47));
     }
 }
 
@@ -4268,7 +4474,7 @@ fn toolbar_word_button(
     let text_w = label
         .map(|t| {
             ui.fonts_mut(|f| {
-                f.layout_no_wrap(t.to_string(), FontId::proportional(12.0), TEXT)
+                f.layout_no_wrap(t.to_string(), FontId::proportional(12.0), theme::text())
                     .size()
                     .x
             })
@@ -4282,11 +4488,11 @@ fn toolbar_word_button(
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, TOOLBAR_ICON_W), Sense::click());
     toolbar_plate(ui, rect, &resp, active, enabled);
     let tint = if !enabled {
-        TEXT_FAINT
+        theme::text_faint()
     } else if active {
-        ACCENT
+        theme::accent()
     } else {
-        TEXT
+        theme::text()
     };
     let icon_rect = Rect::from_center_size(
         Pos2::new(rect.left() + TOOLBAR_ICON_W * 0.5, rect.center().y),
@@ -4310,17 +4516,17 @@ fn toolbar_button(ui: &mut egui::Ui, glyph: &str, enabled: bool) -> egui::Respon
     let hovered = resp.hovered() && enabled;
     if hovered {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect, CornerRadius::same(3), theme::row_hover());
     }
     if resp.is_pointer_button_down_on() && enabled {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(38, 43, 47));
+            .rect_filled(rect, CornerRadius::same(3), theme::c(38, 43, 47));
     }
     theme::draw_glyph(
         ui.painter(),
         rect,
         glyph,
-        if enabled { TEXT } else { TEXT_FAINT },
+        if enabled { theme::text() } else { theme::text_faint() },
     );
     resp
 }
@@ -4329,16 +4535,16 @@ fn toolbar_button_active(ui: &mut egui::Ui, glyph: &str, active: bool) -> egui::
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(30.0, 30.0), Sense::click());
     if active {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), Color32::from_rgb(63, 70, 77));
+            .rect_filled(rect, CornerRadius::same(3), theme::c(63, 70, 77));
     } else if resp.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect, CornerRadius::same(3), theme::row_hover());
     }
     theme::draw_glyph(
         ui.painter(),
         rect,
         glyph,
-        if active { ACCENT } else { TEXT },
+        if active { theme::accent() } else { theme::text() },
     );
     resp
 }
@@ -4356,7 +4562,7 @@ fn section_header(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .size(10.5)
-            .color(TEXT_DIM),
+            .color(theme::text_dim()),
     );
     ui.add_space(2.0);
 }
@@ -4370,7 +4576,7 @@ fn recent_group_header(ui: &mut egui::Ui, text: &str, expanded: bool, count: usi
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
     if resp.hovered() {
         ui.painter()
-            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), theme::row_hover());
     }
     let chev = Rect::from_center_size(
         Pos2::new(rect.left() + 8.0, rect.center().y),
@@ -4380,14 +4586,14 @@ fn recent_group_header(ui: &mut egui::Ui, text: &str, expanded: bool, count: usi
         ui.painter(),
         chev,
         if expanded { "chevron_down" } else { "chevron_right" },
-        TEXT_DIM,
+        theme::text_dim(),
     );
     ui.painter().text(
         Pos2::new(rect.left() + 19.0, rect.center().y),
         Align2::LEFT_CENTER,
         text,
         FontId::proportional(10.5),
-        TEXT_DIM,
+        theme::text_dim(),
     );
     if count > 0 {
         ui.painter().text(
@@ -4395,7 +4601,7 @@ fn recent_group_header(ui: &mut egui::Ui, text: &str, expanded: bool, count: usi
             Align2::RIGHT_CENTER,
             format!("{count}"),
             FontId::proportional(10.0),
-            TEXT_FAINT,
+            theme::text_faint(),
         );
     }
     resp.clicked()
@@ -4411,7 +4617,7 @@ fn quiet_row(ui: &mut egui::Ui, text: &str) {
         Align2::LEFT_CENTER,
         text,
         FontId::proportional(11.0),
-        TEXT_FAINT,
+        theme::text_faint(),
     );
 }
 
@@ -4442,7 +4648,7 @@ fn shortcut_row(
     key: Option<&str>,
     colour: Option<[u8; 3]>,
 ) -> egui::Response {
-    let tint = colour.map(|c| Color32::from_rgb(c[0], c[1], c[2]));
+    let tint = colour.map(|c| theme::c(c[0], c[1], c[2]));
     row_tinted(ui, label, Some(icon), selected, key, tint)
 }
 
@@ -4479,7 +4685,7 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
     if resp.hovered() {
         ui.painter()
-            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), theme::row_hover());
     }
     let chev = Rect::from_center_size(
         Pos2::new(rect.left() + 8.0, rect.center().y),
@@ -4489,14 +4695,14 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
         ui.painter(),
         chev,
         if expanded { "chevron_down" } else { "chevron_right" },
-        TEXT_DIM,
+        theme::text_dim(),
     );
     ui.painter().text(
         Pos2::new(rect.left() + 19.0, rect.center().y),
         Align2::LEFT_CENTER,
         "Shortcuts",
         FontId::proportional(10.5),
-        TEXT_DIM,
+        theme::text_dim(),
     );
     if pinned > 0 {
         ui.painter().text(
@@ -4504,7 +4710,7 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
             Align2::RIGHT_CENTER,
             format!("{pinned} pinned"),
             FontId::proportional(10.0),
-            TEXT_FAINT,
+            theme::text_faint(),
         );
     }
     let plus_rect = Rect::from_center_size(
@@ -4514,13 +4720,13 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
     let plus = ui.interact(plus_rect, ui.id().with("shortcut_add"), Sense::click());
     if plus.hovered() {
         ui.painter()
-            .rect_filled(plus_rect, CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(plus_rect, CornerRadius::same(3), theme::row_hover());
     }
     theme::draw_glyph(
         ui.painter(),
         plus_rect,
         "plus",
-        if plus.hovered() { TEXT } else { TEXT_DIM },
+        if plus.hovered() { theme::text() } else { theme::text_dim() },
     );
     let add = plus.on_hover_text("Add Shortcut (Ctrl+Shift+S)").clicked();
     (resp.on_hover_text("Fold the shortcuts away").clicked(), add)
@@ -4553,7 +4759,7 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> bool {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::click());
     if resp.hovered() {
         ui.painter()
-            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), ROW_HOVER);
+            .rect_filled(rect.shrink2(Vec2::new(1.0, 1.0)), CornerRadius::same(3), theme::row_hover());
     }
     let icon_rect = Rect::from_center_size(
         Pos2::new(rect.left() + 17.0, rect.center().y),
@@ -4563,14 +4769,14 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> bool {
         ui.painter(),
         icon_rect,
         "plus",
-        if resp.hovered() { TEXT } else { TEXT_DIM },
+        if resp.hovered() { theme::text() } else { theme::text_dim() },
     );
     ui.painter().text(
         Pos2::new(rect.left() + 32.0, rect.center().y),
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(12.0),
-        if resp.hovered() { TEXT } else { TEXT_DIM },
+        if resp.hovered() { theme::text() } else { theme::text_dim() },
     );
     resp.on_hover_text("Pins the folder you are looking at (Ctrl+Shift+S)")
         .clicked()
@@ -4594,7 +4800,7 @@ pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
         ui.painter().rect_filled(
             rect.shrink2(Vec2::new(2.0, 1.0)),
             CornerRadius::same(3),
-            ROW_SEL_ACTIVE.gamma_multiply(0.9),
+            theme::row_sel_active().gamma_multiply(0.9),
         );
     }
     ui.painter().text(
@@ -4602,7 +4808,7 @@ pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
         Align2::LEFT_CENTER,
         label,
         FontId::proportional(12.5),
-        TEXT,
+        theme::text(),
     );
     if !hint.is_empty() {
         ui.painter().text(
@@ -4610,7 +4816,7 @@ pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
             Align2::RIGHT_CENTER,
             hint,
             FontId::proportional(10.5),
-            TEXT_FAINT,
+            theme::text_faint(),
         );
     }
     resp
@@ -4623,7 +4829,7 @@ pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
 /// no colour keep the usual blue-grey place colour, also lifted, instead of
 /// turning white — so nothing loses its colour when it is marked.
 fn place_icon_colour(selected: bool, tint: Option<Color32>) -> Color32 {
-    let base = tint.unwrap_or(PLACE);
+    let base = tint.unwrap_or(theme::place());
     if selected {
         theme::selection_tint(base)
     } else {
@@ -4658,13 +4864,13 @@ fn row_tinted(
         ui.painter().rect_filled(
             rect.shrink2(Vec2::new(1.0, 1.0)),
             CornerRadius::same(3),
-            ROW_SEL_ACTIVE.gamma_multiply(0.75),
+            theme::row_sel_active().gamma_multiply(0.75),
         );
     } else if resp.hovered() {
         ui.painter().rect_filled(
             rect.shrink2(Vec2::new(1.0, 1.0)),
             CornerRadius::same(3),
-            ROW_HOVER,
+            theme::row_hover(),
         );
     }
     let mut text_x = rect.left() + 8.0;
@@ -4691,7 +4897,7 @@ fn row_tinted(
         Align2::LEFT_CENTER,
         text,
         font,
-        if selected { Color32::WHITE } else { TEXT },
+        if selected { theme::on_band() } else { theme::text() },
     );
     if let Some(k) = key {
         let badge = Rect::from_min_max(
@@ -4702,9 +4908,9 @@ fn row_tinted(
             badge,
             CornerRadius::same(3),
             if selected {
-                Color32::from_rgb(48, 57, 66)
+                theme::c(48, 57, 66)
             } else {
-                Color32::from_rgb(36, 42, 48)
+                theme::c(36, 42, 48)
             },
         );
         ui.painter().text(
@@ -4712,7 +4918,7 @@ fn row_tinted(
             Align2::CENTER_CENTER,
             k,
             FontId::monospace(9.0),
-            if selected { TEXT } else { TEXT_DIM },
+            if selected { theme::text() } else { theme::text_dim() },
         );
     }
     resp
@@ -4767,31 +4973,11 @@ fn sort_search_results(entries: &mut [fsutil::Entry], key: state::SortKey, asc: 
 }
 
 /// The name a copy takes in `dest`: the item's own name, then `name (1)`,
-/// `name (2)`… when that is taken. Pasting and dropping both go through this,
-/// so neither can overwrite anything and neither can surprise the other.
+/// `name (2)`… when that is taken — the suggestion the desktop's own rename
+/// dialog makes. Pasting, dropping and both copy rows go through this, so none
+/// of them can overwrite anything and none can surprise another.
 fn free_target(dest: &Path, src: &Path) -> PathBuf {
-    let name = src
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "item".to_string());
-    let mut target = dest.join(&name);
-    if !target.exists() {
-        return target;
-    }
-    let stem = src
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| name.clone());
-    let ext = src
-        .extension()
-        .map(|s| format!(".{}", s.to_string_lossy()))
-        .unwrap_or_default();
-    let mut n = 1;
-    while target.exists() {
-        target = dest.join(format!("{stem} ({n}){ext}"));
-        n += 1;
-    }
-    target
+    copymove::free_target(dest, src)
 }
 
 fn main() -> eframe::Result<()> {
@@ -4813,6 +4999,9 @@ fn main() -> eframe::Result<()> {
     let mut start_compress = false;
     let mut start_extract: Option<PathBuf> = None;
     let mut start_resize: Option<PathBuf> = None;
+    // Added feature capture: `--copy-chooser copy|move` opens the Copy To… /
+    // Move To… window on the first frame.
+    let mut start_copy_chooser: Option<copymove::Mode> = None;
     // Added feature: `--drag-out <file>…` starts the drag that hands those files
     // to another program without a mouse — how the hand-over is checked.
     let mut start_dragout: Vec<PathBuf> = Vec::new();
@@ -4840,6 +5029,8 @@ fn main() -> eframe::Result<()> {
     // Opens the viewer's details panel on the first picture; the panel is shut
     // unless this asks for it.
     let mut start_details = false;
+    // Added feature: open in light mode without touching the saved setting.
+    let mut light_flag = false;
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--selftest") {
         std::process::exit(selftest::run());
@@ -4945,6 +5136,17 @@ fn main() -> eframe::Result<()> {
             // The two added archive windows, for photographs and for anyone
             // who wants to open them straight away.
             "--compress" => start_compress = true,
+            // Added feature: open the Copy To… / Move To… window, for
+            // photographs and for anyone who wants it straight away.
+            "--copy-chooser" => {
+                start_copy_chooser = Some(match args.get(i + 1).map(|s| s.as_str()) {
+                    Some("move") => copymove::Mode::Move,
+                    _ => copymove::Mode::Copy,
+                });
+                if matches!(args.get(i + 1).map(|s| s.as_str()), Some("move") | Some("copy")) {
+                    i += 1;
+                }
+            }
             "--extract" => {
                 if i + 1 < args.len() {
                     start_extract = Some(PathBuf::from(&args[i + 1]));
@@ -4980,6 +5182,7 @@ fn main() -> eframe::Result<()> {
             "--below" => start_below = true,
             "--dims" => start_dims = true,
             "--details" => start_details = true,
+            "--light" => light_flag = true,
             "--play" | "--slideshow" => play = true,
             "--compare" => {
                 start_compare = Some(match args.get(i + 1).map(|s| s.as_str()) {
@@ -5124,6 +5327,7 @@ fn main() -> eframe::Result<()> {
                 start_guide,
                 start_menu,
                 start_details,
+                light_flag,
                 start_below,
             );
             app.pending_trash_demo = trash_demo.clone();
@@ -5137,6 +5341,7 @@ fn main() -> eframe::Result<()> {
             }
             app.pending_extract = start_extract.clone();
             app.pending_resize = start_resize.clone();
+            app.pending_copy_chooser = start_copy_chooser;
             Ok(Box::new(app))
         }),
     )

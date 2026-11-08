@@ -9,7 +9,7 @@ use eframe::egui::{
 use crate::fsutil::{self, Kind};
 use crate::search::ThumbCache;
 use crate::state::{Clipboard, Pane, Request, SortKey, ViewMode};
-use crate::theme::{self, *};
+use crate::theme;
 
 /// Room kept for the "…" that stands in for the elided start of a path.
 const LEADER_W: f32 = 12.0;
@@ -21,6 +21,88 @@ pub struct ViewCtx<'a> {
     pub split: bool,
     pub active: bool,
     pub show_location_bar: bool,
+    /// The folder the other view shows, when there is one: the destination the
+    /// two *Other View* rows copy or move into.
+    pub other_dir: Option<std::path::PathBuf>,
+}
+
+/// The column rectangles of the details view, in drawing order. `path` is
+/// present only while a search is showing (see `Pane::column_rects`).
+pub struct DetailsCols {
+    pub name: Rect,
+    pub path: Option<Rect>,
+    pub size: Rect,
+    pub date: Rect,
+}
+
+/// Where the find bar's controls ended up this frame: the close button and the
+/// cluster holding the two scope chips. Returned so a check can prove the close
+/// button is inside the bar and clear of the chips — it used to be drawn last,
+/// after the field had already taken the room it needed, and fell off the edge.
+#[derive(Clone, Copy)]
+pub struct FindBarLayout {
+    pub close: Rect,
+    pub chips: Rect,
+}
+
+impl Default for FindBarLayout {
+    fn default() -> Self {
+        Self {
+            close: Rect::NOTHING,
+            chips: Rect::NOTHING,
+        }
+    }
+}
+
+/// A small square button whose picture is one of the theme's drawn glyphs. The
+/// glyphs are line shapes rather than characters, so no font is ever missing a
+/// symbol — the `✕` character in particular is not in this app's font and drew
+/// as an empty box where the find bar's close button should have been.
+fn glyph_button(ui: &mut egui::Ui, glyph: &str, tip: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::click());
+    let hovered = resp.hovered();
+    if hovered {
+        ui.painter().rect_filled(
+            rect.shrink2(Vec2::new(1.0, 1.0)),
+            CornerRadius::same(3),
+            theme::row_hover(),
+        );
+    }
+    theme::draw_glyph(
+        ui.painter(),
+        rect,
+        glyph,
+        if hovered { theme::text() } else { theme::text_dim() },
+    );
+    resp.on_hover_text(tip)
+}
+
+/// The Size cell of one details row: a folder says how many items it holds, a
+/// file its size, and a count or size that was not read is a dash. Shared by the
+/// row that draws it and the measurement that sizes the column.
+fn size_label(entry: &fsutil::Entry) -> String {
+    if entry.is_dir {
+        match entry.children {
+            Some(n) => format!("{} item{}", n, if n == 1 { "" } else { "s" }),
+            None => "—".to_string(),
+        }
+    } else {
+        fsutil::format_size(entry.size)
+    }
+}
+
+/// Where a search hit sits, as the column writes it: the folder relative to the
+/// folder the search started from, so `2024/03` rather than the same long prefix
+/// on every row. `None` when the file lies directly in the searched folder —
+/// there is no folder of its own to name. A hit outside the searched folder (a
+/// link followed elsewhere) keeps its own full path.
+pub(crate) fn hit_folder(root: &std::path::Path, path: &std::path::Path) -> Option<String> {
+    let parent = path.parent()?;
+    match parent.strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => None,
+        Ok(rel) => Some(rel.display().to_string()),
+        Err(_) => Some(parent.display().to_string()),
+    }
 }
 
 /// The colour a folder was given, ready for drawing. Files never take one.
@@ -28,7 +110,7 @@ fn tint_of(entry: &fsutil::Entry) -> Option<Color32> {
     if !entry.is_dir {
         return None;
     }
-    entry.tint.map(|c| Color32::from_rgb(c[0], c[1], c[2]))
+    entry.tint.map(|c| theme::c(c[0], c[1], c[2]))
 }
 
 /// Draw a preview texture inside `rect` the way the original fits a preview
@@ -72,12 +154,12 @@ impl Pane {
 
         if vctx.show_location_bar {
             egui::Frame::new()
-                .fill(HEADER_BG)
+                .fill(theme::header_bg())
                 .inner_margin(egui::Margin::symmetric(6, 4))
                 .show(&mut child, |ui| {
                     egui::Frame::new()
-                        .fill(HEADER_BG)
-                        .stroke(egui::Stroke::new(1.0, BORDER))
+                        .fill(theme::header_bg())
+                        .stroke(egui::Stroke::new(1.0, theme::border()))
                         .corner_radius(CornerRadius::same(4))
                         .inner_margin(egui::Margin::symmetric(7, 2))
                         .show(ui, |ui| {
@@ -115,7 +197,7 @@ impl Pane {
                     Pos2::new(rect.left(), top),
                     Pos2::new(rect.right(), top),
                 ],
-                Stroke::new(2.0, ACCENT),
+                Stroke::new(2.0, theme::accent()),
             );
         }
     }
@@ -275,7 +357,7 @@ impl Pane {
             let widths: Vec<f32> = crumbs
                 .iter()
                 .map(|(label, _)| {
-                    ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), TEXT).size().x)
+                    ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), theme::text()).size().x)
                         + 8.0
                 })
                 .collect();
@@ -292,7 +374,7 @@ impl Pane {
                 ui.add_space(1.0);
                 ui.label(
                     egui::RichText::new("…")
-                        .color(TEXT_FAINT)
+                        .color(theme::text_faint())
                         .size(13.0),
                 )
                 .on_hover_text("Earlier folders in this path");
@@ -331,7 +413,7 @@ impl Pane {
                     }
                 });
                 if i != last {
-                    ui.label(egui::RichText::new("›").color(TEXT_FAINT).size(12.0));
+                    ui.label(egui::RichText::new("›").color(theme::text_faint()).size(12.0));
                 }
             }
             // The empty stretch after the last breadcrumb: this is the part of
@@ -344,7 +426,7 @@ impl Pane {
                     ui.painter().rect_filled(
                         rect.shrink(1.0),
                         CornerRadius::same(3),
-                        ROW_HOVER,
+                        theme::row_hover(),
                     );
                 }
             }
@@ -364,30 +446,95 @@ impl Pane {
     /// search. The original keeps both on one bar too ("Filter" /
     /// "Toggle Search Bar", `dolphin` .ui strings), but hides the choice
     /// behind the keystroke.
-    fn find_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
+    pub(crate) fn find_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) -> FindBarLayout {
+        let mut drawn = FindBarLayout::default();
         if !self.filter_on {
-            return;
+            return drawn;
         }
         let mut stop = false;
         let mut close = false;
         let mut submit = false;
         let mut scope: Option<bool> = None;
         egui::Frame::new()
-            .fill(HEADER_BG)
+            .fill(theme::header_bg())
             .inner_margin(egui::Margin::symmetric(8, 5))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (icon_rect, _) =
-                        ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                    theme::draw_glyph(ui.painter(), icon_rect, "search", TEXT_DIM);
-                    ui.add_space(1.0);
                     let searching = self.search.is_some();
                     let deep = self.find_deep;
-                    // Room for the two chips, the found-count and the close
-                    // button is taken off the top; the field keeps the rest.
-                    let chips_w = FIND_CHIP_W * 2.0 + 4.0;
-                    let extra = chips_w + if searching { 96.0 } else { 30.0 } + 16.0;
-                    let w = (ui.available_width() - extra).max(80.0);
+                    let found = self.search.as_ref().map(|s| s.results.len()).unwrap_or(0);
+                    // The right-hand cluster — the close button, and while a
+                    // search is running the count and Stop — is placed against
+                    // the right edge *first*, in a child of its own, so the
+                    // field and the chips can only take room this cluster did
+                    // not need. Placing it last is what pushed the close button
+                    // out past the edge of the window: the field had already
+                    // eaten the room it was meant to sit in.
+                    let row = ui.available_rect_before_wrap();
+                    let tail_left = {
+                        let mut tail = ui.new_child(
+                            UiBuilder::new()
+                                .max_rect(row)
+                                .layout(Layout::right_to_left(Align::Center)),
+                        );
+                        let close_resp = glyph_button(&mut tail, "close", "Close the find bar (Esc)");
+                        drawn.close = close_resp.rect;
+                        if close_resp.clicked() {
+                            close = true;
+                        }
+                        if searching {
+                            if tail.add(egui::Button::new("Stop").small()).clicked() {
+                                stop = true;
+                            }
+                            tail.add_space(4.0);
+                            tail.label(
+                                egui::RichText::new(format!("{found} found"))
+                                    .size(11.0)
+                                    .color(theme::text_faint()),
+                            );
+                        }
+                        tail.min_rect().left()
+                    };
+                    let gap = ui.spacing().item_spacing.x;
+                    // The two scope chips go in their own child as well, hung off
+                    // the left of that cluster, so the field can be sized from
+                    // where they really ended rather than from an estimate of
+                    // how wide a chip is.
+                    let chips_rect = Rect::from_min_max(
+                        row.min,
+                        Pos2::new(
+                            (tail_left - gap * 2.0).max(row.left()),
+                            row.bottom(),
+                        ),
+                    );
+                    let mut chips = ui.new_child(
+                        UiBuilder::new()
+                            .max_rect(chips_rect)
+                            .layout(Layout::right_to_left(Align::Center)),
+                    );
+                    // Right-to-left, so "In subfolders" is drawn first and lands
+                    // right of "This folder", which is how the pair reads.
+                    if find_chip(&mut chips, "In subfolders", deep)
+                        .on_hover_text("Look through every folder below this one as well")
+                        .clicked()
+                    {
+                        scope = Some(true);
+                    }
+                    if find_chip(&mut chips, "This folder", !deep)
+                        .on_hover_text("Show only the items in this folder whose name matches")
+                        .clicked()
+                    {
+                        scope = Some(false);
+                    }
+                    drawn.chips = chips.min_rect();
+                    let chips_left = chips.min_rect().left();
+                    let (icon_rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                    theme::draw_glyph(ui.painter(), icon_rect, "search", theme::text_dim());
+                    ui.add_space(4.0);
+                    // The field takes what the chips and that cluster leave, so
+                    // nothing is ever drawn past the right edge.
+                    let w = (chips_left - gap - ui.cursor().left()).max(80.0);
                     let hint = if searching {
                         "Looking in this folder and below…"
                     } else if deep {
@@ -424,46 +571,6 @@ impl Pane {
                     if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                         close = true;
                     }
-                    ui.add_space(6.0);
-                    if find_chip(ui, "This folder", !deep)
-                        .on_hover_text("Show only the items in this folder whose name matches")
-                        .clicked()
-                    {
-                        scope = Some(false);
-                    }
-                    if find_chip(ui, "In subfolders", deep)
-                        .on_hover_text("Look through every folder below this one as well")
-                        .clicked()
-                    {
-                        scope = Some(true);
-                    }
-                    if searching {
-                        ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} found",
-                                self.search.as_ref().map(|s| s.results.len()).unwrap_or(0)
-                            ))
-                            .size(11.0)
-                            .color(TEXT_FAINT),
-                        );
-                        if ui.small_button("Stop").clicked() {
-                            stop = true;
-                        }
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(egui::RichText::new("✕").size(11.0))
-                                    .fill(Color32::TRANSPARENT)
-                                    .min_size(Vec2::new(22.0, 20.0)),
-                            )
-                            .on_hover_text("Close the find bar (Esc)")
-                            .clicked()
-                        {
-                            close = true;
-                        }
-                    });
                 });
             });
         if let Some(deep) = scope {
@@ -490,45 +597,182 @@ impl Pane {
             self.filter_focus = false;
             vctx.reqs.push(Request::Navigate(self.path.clone()));
         }
+        drawn
     }
 
     // -----------------------------------------------------------------------
     // Details view
     // -----------------------------------------------------------------------
 
-    /// The three column rectangles of the details view for a row (or the header
+    /// The column rectangles of the details view for a row (or the header
     /// row), inset by the original's 20 px side padding — see
     /// `theme::DETAILS_SIDE_PAD` and `DetailsModeSettings` @0x2b0f10.
-    pub fn details_columns(&self, rect: Rect) -> (Rect, Rect, Rect) {
+    pub fn details_columns(&self, rect: Rect) -> DetailsCols {
         self.column_rects(rect.shrink2(Vec2::new(theme::DETAILS_SIDE_PAD, 0.0)))
     }
 
-    fn column_rects(&self, rect: Rect) -> (Rect, Rect, Rect) {
+    fn column_rects(&self, rect: Rect) -> DetailsCols {
         let w = rect.width();
-        let date_w = (w * 0.28).clamp(64.0, 150.0);
-        let size_w = (w * 0.16).clamp(44.0, 88.0);
-        let name_w = (w - size_w - date_w).max(w * 0.45);
+        let mut date_w = (w * 0.28).clamp(64.0, 150.0);
+        let mut size_w = (w * 0.16).clamp(44.0, 88.0);
+        // Only when the walk covers the folders *below* this one: a "This
+        // folder" search has every row in the folder the bar already names, so
+        // the column would hold one value repeated down the list. It is also
+        // absent when every hit lies in the searched folder itself.
+        let show_path = self.find_deep && self.search.is_some() && self.search_path_px > 0.0;
+        // Both text columns are sized from the widest string each has to hold,
+        // measured with the fonts the rows are drawn with
+        // (`measure_search_columns`), so a name is never cut short while the
+        // folder beside it has room to spare. The icon sits inside the name
+        // column, and each label keeps a few pixels of air at its right edge.
+        let icon_w = self.icon_size().clamp(16.0, theme::MAX_ICON_PX) + 8.0;
+        let name_need = icon_w + self.search_name_px + 8.0;
+        let path_need = self.search_path_px + 10.0;
+        if show_path {
+            // The original's 16 % / 28 % for Size and Modified are what a plain
+            // folder shows, and they stay while there is room. When the two text
+            // columns cannot both fit in what those leave, the numeric columns
+            // give their slack back — down to what their own cells hold — rather
+            // than have a name or a folder elided for the sake of empty space.
+            if name_need + path_need > w - size_w - date_w {
+                date_w = (self.search_date_px + 16.0).max(64.0).min(date_w);
+                size_w = (self.search_size_px + 14.0).max(44.0).min(size_w);
+            }
+        }
+        // What the two text columns share once size and date have theirs.
+        let text_w = w - size_w - date_w;
+        let mut name_w = text_w.max(w * 0.45);
+        let mut path = None;
+        let mut path_w = 0.0;
+        if show_path {
+            let need = name_need + path_need;
+            if need <= text_w {
+                let slack = (text_w - need) * 0.5;
+                name_w = name_need + slack;
+                path_w = path_need + slack;
+            } else {
+                // The row physically cannot hold both. The name keeps its room
+                // whenever that still leaves the folder a usable 90 px, because
+                // the name is what the row is about; below that neither can be
+                // shown whole and the name takes the larger half.
+                name_w = if text_w - name_need >= 90.0 {
+                    name_need
+                } else {
+                    text_w * 0.55
+                };
+                path_w = text_w - name_w;
+            }
+            path = Some(Rect::from_min_max(
+                Pos2::new(rect.left() + name_w, rect.top()),
+                Pos2::new(rect.left() + name_w + path_w, rect.bottom()),
+            ));
+        }
         let name = Rect::from_min_max(
             rect.min,
             Pos2::new(rect.left() + name_w, rect.bottom()),
         );
+        let after_name = rect.left() + name_w + path_w;
         let size = Rect::from_min_max(
-            Pos2::new(rect.left() + name_w, rect.top()),
-            Pos2::new(rect.left() + name_w + size_w, rect.bottom()),
+            Pos2::new(after_name, rect.top()),
+            Pos2::new(after_name + size_w, rect.bottom()),
         );
         let date = Rect::from_min_max(
             Pos2::new(rect.right() - date_w, rect.top()),
             rect.max,
         );
-        (name, size, date)
+        DetailsCols { name, path, size, date }
+    }
+
+    /// Measure the widest name and the widest folder in the search results, with
+    /// the very fonts the details rows are drawn with, so the two text columns
+    /// can be sized to what they have to hold instead of to a share of the row.
+    /// Only entries that arrived since the last frame are measured, and a new
+    /// search starts the count again (`Pane::start_search`).
+    pub fn measure_search_columns(&mut self, ui: &egui::Ui) {
+        let Some(total) = self.search.as_ref().map(|s| s.results.len()) else {
+            self.search_name_px = 0.0;
+            self.search_path_px = 0.0;
+            self.search_measured = 0;
+            return;
+        };
+        if !self.find_deep || self.search_measured >= total {
+            return;
+        }
+        // The two fonts the details row uses: the name at 13 px, the folder at
+        // its smaller 12 px.
+        let name_font = FontId::proportional(13.0);
+        let path_font = FontId::proportional(12.0);
+        let root = self
+            .search
+            .as_ref()
+            .map(|s| s.root.clone())
+            .unwrap_or_default();
+        let first = self.search_measured;
+        let mut name_px = self.search_name_px;
+        let mut path_px = self.search_path_px;
+        let mut size_px = self.search_size_px;
+        let mut date_px = self.search_date_px;
+        let results = self
+            .search
+            .as_ref()
+            .map(|s| &s.results[..])
+            .unwrap_or(&[]);
+        for entry in &results[first..] {
+            let w = ui
+                .fonts_mut(|f| f.layout_no_wrap(entry.name.clone(), name_font.clone(), theme::text()))
+                .size()
+                .x;
+            name_px = name_px.max(w);
+            if let Some(folder) = hit_folder(&root, &entry.path) {
+                let w = ui
+                    .fonts_mut(|f| f.layout_no_wrap(folder, path_font.clone(), theme::text()))
+                    .size()
+                    .x;
+                path_px = path_px.max(w);
+            }
+            // The two numeric cells, so they can hand their slack to the text
+            // columns when the row is tight instead of holding a fixed share.
+            let w = ui
+                .fonts_mut(|f| f.layout_no_wrap(size_label(entry), path_font.clone(), theme::text()))
+                .size()
+                .x;
+            size_px = size_px.max(w);
+            let w = ui
+                .fonts_mut(|f| {
+                    f.layout_no_wrap(fsutil::short_date(entry.modified), path_font.clone(), theme::text())
+                })
+                .size()
+                .x;
+            date_px = date_px.max(w);
+        }
+        self.search_name_px = name_px;
+        self.search_path_px = path_px;
+        self.search_size_px = size_px;
+        self.search_date_px = date_px;
+        self.search_measured = total;
     }
 
     fn ui_details(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
+        // Before any column is placed: what the two text columns have to hold.
+        self.measure_search_columns(ui);
         let width = ui.available_width().max(200.0);
         let header_h = 25.0;
         let (hrect, _) = ui.allocate_exact_size(Vec2::new(width, header_h), Sense::hover());
-        ui.painter().rect_filled(hrect, 0.0, HEADER_BG);
-        let (name_c, size_c, date_c) = self.details_columns(hrect);
+        ui.painter().rect_filled(hrect, 0.0, theme::header_bg());
+        let cols = self.details_columns(hrect);
+        let (name_c, size_c, date_c) = (cols.name, cols.size, cols.date);
+        // Added feature: the folder column, while a search is showing. It is a
+        // label rather than a button: the rows are found by content, not
+        // ordered by folder, so a header that pretended to sort would lie.
+        if let Some(path_c) = cols.path {
+            ui.painter().text(
+                Pos2::new(path_c.left() + 2.0, path_c.center().y),
+                Align2::LEFT_CENTER,
+                "Path",
+                FontId::proportional(12.0),
+                theme::text_dim(),
+            );
+        }
         let labels = [
             (SortKey::Name, "Name", name_c, Align2::LEFT_CENTER),
             (SortKey::Size, "Size", size_c, Align2::RIGHT_CENTER),
@@ -536,7 +780,7 @@ impl Pane {
         ];
         for (key, label, rect, align) in labels {
             let sort_here = self.sort == key;
-            let color = if sort_here { TEXT } else { TEXT_DIM };
+            let color = if sort_here { theme::text() } else { theme::text_dim() };
             let font = FontId::proportional(12.0);
             let text_w = ui
                 .fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), color))
@@ -570,7 +814,7 @@ impl Pane {
                     ]
                 };
                 ui.painter()
-                    .add(egui::Shape::convex_polygon(tri, TEXT_DIM, egui::epaint::PathStroke::NONE));
+                    .add(egui::Shape::convex_polygon(tri, theme::text_dim(), egui::epaint::PathStroke::NONE));
             }
             let resp = ui.interact(rect, Id::new(("details_head", self.id, label)), Sense::click());
             if resp.clicked() {
@@ -584,15 +828,19 @@ impl Pane {
             }
         }
         // Vertical column separators, as in the original header.
-        for x in [size_c.left() - 6.0, date_c.left() - 6.0] {
+        let mut seps = vec![size_c.left() - 6.0, date_c.left() - 6.0];
+        if let Some(path_c) = cols.path {
+            seps.push(path_c.left() - 6.0);
+        }
+        for x in seps {
             ui.painter().line_segment(
                 [Pos2::new(x, hrect.top() + 3.0), Pos2::new(x, hrect.bottom() - 3.0)],
-                Stroke::new(1.0, SEPARATOR),
+                Stroke::new(1.0, theme::separator()),
             );
         }
         ui.painter().line_segment(
             [Pos2::new(hrect.left(), hrect.bottom()), Pos2::new(hrect.right(), hrect.bottom())],
-            Stroke::new(1.0, BORDER),
+            Stroke::new(1.0, theme::border()),
         );
 
         let icon_sz = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
@@ -639,12 +887,12 @@ impl Pane {
         let selected = self.sel.contains(&idx);
         let bg = if selected {
             if vctx.active || !vctx.split {
-                ROW_SEL_ACTIVE
+                theme::row_sel_active()
             } else {
-                ROW_SEL_INACTIVE
+                theme::row_sel_inactive()
             }
         } else if resp.hovered() {
-            ROW_HOVER
+            theme::row_hover()
         } else {
             Color32::TRANSPARENT
         };
@@ -653,10 +901,11 @@ impl Pane {
         }
         ui.painter().line_segment(
             [Pos2::new(rect.left() + 4.0, rect.bottom()), Pos2::new(rect.right() - 4.0, rect.bottom())],
-            Stroke::new(1.0, SEPARATOR.gamma_multiply(0.55)),
+            Stroke::new(1.0, theme::separator().gamma_multiply(0.55)),
         );
 
-        let (name_c, size_c, date_c) = self.details_columns(rect);
+        let cols = self.details_columns(rect);
+        let (name_c, size_c, date_c) = (cols.name, cols.size, cols.date);
         // The icon follows the zoom level, as it does in the original's details
         // view: Ctrl+Plus makes the rows grow instead of only changing the label
         // in the status bar.
@@ -683,7 +932,7 @@ impl Pane {
             );
         }
 
-        let text_color = TEXT;
+        let text_color = theme::text();
         let font = FontId::proportional(13.0);
         let name_x = name_c.left() + icon_sz + 8.0;
         let max_w = (name_c.right() - name_x - 8.0).max(20.0);
@@ -743,27 +992,43 @@ impl Pane {
             self.rename = None;
         }
 
-        let size_text = if entry.is_dir {
-            match entry.children {
-                Some(n) => format!("{} item{}", n, if n == 1 { "" } else { "s" }),
-                None => "—".to_string(),
-            }
-        } else {
-            fsutil::format_size(entry.size)
-        };
+        // Added feature: the folder a search hit was found in, written relative
+        // to the folder the search started from — the bar above already names
+        // that folder, so repeating the same prefix down every row would spend
+        // the column on nothing. A hit sitting directly in the searched folder
+        // has no folder of its own to add.
+        if let Some(path_c) = cols.path {
+            let folder = self
+                .search
+                .as_ref()
+                .and_then(|s| hit_folder(&s.root, &entry.path))
+                .unwrap_or_else(|| "—".to_string());
+            let font = FontId::proportional(12.0);
+            let max_w = (path_c.width() - 6.0).max(20.0);
+            let label = theme::elide_name(ui, &folder, max_w, font.clone());
+            ui.painter().text(
+                Pos2::new(path_c.left() + 2.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                font,
+                theme::text_dim(),
+            );
+        }
+
+        let size_text = size_label(&entry);
         ui.painter().text(
             Pos2::new(size_c.right(), rect.center().y),
             Align2::RIGHT_CENTER,
             size_text,
             FontId::proportional(12.0),
-            TEXT_DIM,
+            theme::text_dim(),
         );
         ui.painter().text(
             Pos2::new(date_c.right(), rect.center().y),
             Align2::RIGHT_CENTER,
             fsutil::short_date(entry.modified),
             FontId::proportional(12.0),
-            TEXT_DIM,
+            theme::text_dim(),
         );
 
         self.handle_row_interaction(ui, rect, resp, idx, vctx);
@@ -797,7 +1062,7 @@ impl Pane {
                 .layout_no_wrap(
                     "1920×1080:AR 1.78:MP 2.07".to_owned(),
                     crate::gallery::caption_font(),
-                    TEXT,
+                    theme::text(),
                 )
                 .size()
                 .y;
@@ -816,7 +1081,7 @@ impl Pane {
         // size is the same width to within a pixel for the fonts in use.
         let avg_char = ui
             .painter()
-            .layout_no_wrap("n".to_owned(), egui::FontId::proportional(13.0), TEXT)
+            .layout_no_wrap("n".to_owned(), egui::FontId::proportional(13.0), theme::text())
             .size()
             .x
             .max(1.0);
@@ -892,7 +1157,7 @@ impl Pane {
         let mut previews = self.previews;
 
         egui::Frame::new()
-            .fill(HEADER_BG)
+            .fill(theme::header_bg())
             .inner_margin(egui::Margin::symmetric(8, 3))
             .show(ui, |ui| {
                 let row = Vec2::new(ui.available_width(), 22.0);
@@ -901,7 +1166,7 @@ impl Pane {
                     ui.label(
                         egui::RichText::new("Pictures:")
                             .size(11.5)
-                            .color(TEXT_DIM),
+                            .color(theme::text_dim()),
                     );
                     let slider = theme::strip_slider(
                         ui,
@@ -918,7 +1183,7 @@ impl Pane {
                             theme::icon_size_for_zoom(zoom.round() as u8) as u32
                         ))
                         .size(11.0)
-                        .color(TEXT_FAINT),
+                        .color(theme::text_faint()),
                     );
                     if ui
                         .add(egui::Checkbox::new(
@@ -992,12 +1257,12 @@ impl Pane {
         let selected = self.sel.contains(&idx);
         let bg = if selected {
             if vctx.active || !vctx.split {
-                ROW_SEL_ACTIVE
+                theme::row_sel_active()
             } else {
-                ROW_SEL_INACTIVE
+                theme::row_sel_inactive()
             }
         } else if resp.hovered() {
-            ROW_HOVER
+            theme::row_hover()
         } else {
             Color32::TRANSPARENT
         };
@@ -1032,7 +1297,7 @@ impl Pane {
                     // The mask takes the colour actually behind the picture so a
                     // selected or hovered cell keeps its own tint in the corners.
                     if self.gallery_round {
-                        let mask = if bg == Color32::TRANSPARENT { VIEW_BG } else { bg };
+                        let mask = if bg == Color32::TRANSPARENT { theme::view_bg() } else { bg };
                         crate::gallery::round_picture(
                             ui.painter(),
                             drawn,
@@ -1082,7 +1347,7 @@ impl Pane {
                     Align2::CENTER_CENTER,
                     line,
                     font.clone(),
-                    if selected { Color32::WHITE } else { TEXT },
+                    if selected { theme::on_band() } else { theme::text() },
                 );
             }
             caption_y = label_y + 11.0 + (lines.len().saturating_sub(1)) as f32 * 13.0;
@@ -1172,12 +1437,12 @@ impl Pane {
         let selected = self.sel.contains(&idx);
         let bg = if selected {
             if vctx.active || !vctx.split {
-                ROW_SEL_ACTIVE
+                theme::row_sel_active()
             } else {
-                ROW_SEL_INACTIVE
+                theme::row_sel_inactive()
             }
         } else if resp.hovered() {
-            ROW_HOVER
+            theme::row_hover()
         } else {
             Color32::TRANSPARENT
         };
@@ -1195,7 +1460,7 @@ impl Pane {
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {
                 if let Some(drawn) = draw_preview(ui.painter(), &tex, icon_rect) {
                     if self.gallery_round {
-                        let mask = if bg == Color32::TRANSPARENT { VIEW_BG } else { bg };
+                        let mask = if bg == Color32::TRANSPARENT { theme::view_bg() } else { bg };
                         crate::gallery::round_picture(
                             ui.painter(),
                             drawn,
@@ -1225,7 +1490,7 @@ impl Pane {
             Align2::LEFT_CENTER,
             label,
             font,
-            if selected { Color32::WHITE } else { TEXT },
+            if selected { theme::on_band() } else { theme::text() },
         );
         self.handle_row_interaction(ui, rect, resp, idx, vctx);
     }
@@ -1400,7 +1665,7 @@ impl Pane {
                             ui.label(
                                 egui::RichText::new("No program claims this kind of file.")
                                     .size(11.5)
-                                    .color(TEXT_FAINT),
+                                    .color(theme::text_faint()),
                             );
                         }
                         ui.separator();
@@ -1527,6 +1792,57 @@ impl Pane {
                     vctx.reqs.push(Request::Duplicate(selected_paths.clone()));
                     ui.close();
                 }
+                // Added feature: the original's two Other View rows (enabled
+                // only with two views open, and only when its own four tests
+                // pass) plus the Copy To… / Move To… pair the original installs
+                // from KIO's context menu.
+                ui.separator();
+                for mode in [crate::copymove::Mode::Copy, crate::copymove::Mode::Move] {
+                    let verdict = crate::copymove::verdict(
+                        mode,
+                        &crate::copymove::Facts {
+                            split: vctx.split,
+                            selected: selected_paths.len(),
+                            already_there: vctx
+                                .other_dir
+                                .as_ref()
+                                .map(|d| crate::copymove::already_there(d, &selected_paths))
+                                .unwrap_or(false),
+                            dest_writable: vctx
+                                .other_dir
+                                .as_ref()
+                                .map(|d| crate::copymove::writable(d))
+                                .unwrap_or(false),
+                            may_move: crate::copymove::may_move(&selected_paths),
+                        },
+                    );
+                    let hint = verdict
+                        .why
+                        .clone()
+                        .unwrap_or_else(|| mode.whats_this().to_string());
+                    let mut clicked = false;
+                    ui.add_enabled_ui(verdict.ok, |ui| {
+                        clicked = ui
+                            .button(format!("{}  {}", mode.other_label(), mode.other_shortcut()))
+                            .on_hover_text(hint)
+                            .clicked();
+                    });
+                    if clicked {
+                        vctx.reqs
+                            .push(Request::CopyToOther(mode == crate::copymove::Mode::Move));
+                        ui.close();
+                    }
+                }
+                for mode in [crate::copymove::Mode::Copy, crate::copymove::Mode::Move] {
+                    if ui
+                        .button(mode.chooser_label())
+                        .on_hover_text("Into a folder you choose; nothing already there is replaced")
+                        .clicked()
+                    {
+                        vctx.reqs.push(Request::OpenCopyChooser(mode));
+                        ui.close();
+                    }
+                }
                 if ui.button("Copy Location").clicked() {
                     ui.ctx().copy_text(entry.path.display().to_string());
                     ui.close();
@@ -1634,18 +1950,18 @@ impl Pane {
         let galley = ui.painter().layout(
             text,
             FontId::proportional(14.0),
-            TEXT_DIM,
+            theme::text_dim(),
             (rect.width() - 48.0).max(120.0),
         );
         let pos = Pos2::new(center.x - galley.size().x * 0.5, center.y - galley.size().y * 0.5);
-        ui.painter().galley(pos, galley, TEXT_DIM);
+        ui.painter().galley(pos, galley, theme::text_dim());
         if !hint.is_empty() {
             ui.painter().text(
                 Pos2::new(center.x, center.y + 22.0),
                 Align2::CENTER_CENTER,
                 hint,
                 FontId::proportional(12.0),
-                TEXT_FAINT,
+                theme::text_faint(),
             );
         }
     }
@@ -1727,7 +2043,7 @@ pub fn pack_icon_rows(widths: &[f32], avail: f32, gap: f32) -> Vec<(usize, usize
 }
 
 fn measure_text(ui: &egui::Ui, text: &str, font: &FontId) -> f32 {
-    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), TEXT))
+    ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), theme::text()))
         .size()
         .x
 }
@@ -1830,14 +2146,14 @@ fn find_chip(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(FIND_CHIP_W, 22.0), Sense::click());
     let (fill, stroke, tint) = if on {
         (
-            Color32::from_rgb(56, 63, 70),
-            Stroke::new(1.0, ACCENT),
-            ACCENT,
+            theme::c(56, 63, 70),
+            Stroke::new(1.0, theme::accent()),
+            theme::accent(),
         )
     } else if resp.hovered() {
-        (ROW_HOVER, Stroke::new(1.0, BORDER), TEXT)
+        (theme::row_hover(), Stroke::new(1.0, theme::border()), theme::text())
     } else {
-        (Color32::TRANSPARENT, Stroke::new(1.0, BORDER), TEXT_DIM)
+        (Color32::TRANSPARENT, Stroke::new(1.0, theme::border()), theme::text_dim())
     };
     ui.painter()
         .rect(rect, CornerRadius::same(3), fill, stroke, egui::StrokeKind::Inside);

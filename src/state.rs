@@ -347,6 +347,15 @@ pub enum Request {
     Rename(PathBuf, String),
     OpenTerminal(PathBuf),
     CopyToOther(bool),
+    /// Added feature: *Copy To…* / *Move To…* — the same work, into a folder the
+    /// person names in the small window instead of the other view.
+    CopyToChosen {
+        mode: crate::copymove::Mode,
+        paths: Vec<PathBuf>,
+        dest: PathBuf,
+    },
+    /// Added feature: open that window on the marked items.
+    OpenCopyChooser(crate::copymove::Mode),
     Duplicate(Vec<PathBuf>),
     FolderSize(Vec<PathBuf>),
     /// Added feature: give folders a colour of the person's choosing (`None`
@@ -487,6 +496,19 @@ pub struct Pane {
     pub location_select: bool,
     pub rename: Option<RenameState>,
     pub search: Option<SearchSession>,
+    /// The widest name and the widest folder in the current search result, in
+    /// pixels, measured with the details row's own fonts as the results arrive.
+    /// The two text columns are sized from these and from nothing else, so a
+    /// name is never cut short while the folder next to it has room to spare.
+    /// `search_measured` is how many of `results` have been measured already.
+    pub search_name_px: f32,
+    pub search_path_px: f32,
+    /// The widest Size and Modified cells in the same result. When the row is
+    /// too tight for both text columns, these two hand their slack over rather
+    /// than have a name or a folder elided.
+    pub search_size_px: f32,
+    pub search_date_px: f32,
+    pub search_measured: usize,
     pub scroll_to: Option<usize>,
     pub last_click: Option<(usize, std::time::Instant)>,
     pub loading: bool,
@@ -535,6 +557,11 @@ impl Pane {
             location_select: false,
             rename: None,
             search: None,
+            search_name_px: 0.0,
+            search_path_px: 0.0,
+            search_size_px: 0.0,
+            search_date_px: 0.0,
+            search_measured: 0,
             scroll_to: None,
             last_click: None,
             loading: false,
@@ -983,6 +1010,13 @@ impl Pane {
             query,
             filters,
         ));
+        // A new search starts with nothing measured: the columns are sized from
+        // its own results, not from the last search's.
+        self.search_name_px = 0.0;
+        self.search_path_px = 0.0;
+        self.search_size_px = 0.0;
+        self.search_date_px = 0.0;
+        self.search_measured = 0;
         self.sel.clear();
         self.cursor = 0;
     }

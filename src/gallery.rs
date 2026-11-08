@@ -34,7 +34,7 @@ use eframe::egui::{
 use crate::fsutil::{self, Entry, Kind};
 use crate::search::probe_image_size;
 use crate::state::{Pane, Request};
-use crate::theme::{self, *};
+use crate::theme;
 use crate::views::ViewCtx;
 
 // ---------------------------------------------------------------------------
@@ -372,9 +372,9 @@ pub fn caption_font() -> FontId {
 /// it is the ordinary text colour.
 pub fn caption_colour(selected: bool) -> Color32 {
     if selected {
-        Color32::WHITE
+        theme::on_band()
     } else {
-        TEXT
+        theme::text()
     }
 }
 
@@ -513,7 +513,7 @@ impl Pane {
             ui.label(
                 egui::RichText::new("Size:")
                     .size(11.5)
-                    .color(TEXT_DIM),
+                    .color(theme::text_dim()),
             );
             let mut px = self.thumb_px;
             let slider = theme::strip_slider(ui, &mut px, THUMB_MIN..=THUMB_MAX, 132.0)
@@ -529,7 +529,7 @@ impl Pane {
             ui.label(
                 egui::RichText::new(format!("{} px", self.thumb_px.round() as u32))
                     .size(11.0)
-                    .color(TEXT_FAINT),
+                    .color(theme::text_faint()),
             );
 
             let mut names = self.gallery_names;
@@ -586,7 +586,7 @@ impl Pane {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let play = egui::Button::new(egui::RichText::new("Slideshow").size(11.5))
-                    .fill(Color32::from_rgb(46, 53, 59));
+                    .fill(theme::c(46, 53, 59));
                 if ui
                     .add(play)
                     .on_hover_text("Play the pictures full screen, one every 1.5 s to start (Space)")
@@ -608,7 +608,7 @@ impl Pane {
                 let can_compare = selected.len() >= 2 || pictures.len() >= 2;
                 ui.add_enabled_ui(can_compare, |ui| {
                     let btn = egui::Button::new(egui::RichText::new("Compare").size(11.5))
-                        .fill(Color32::from_rgb(46, 53, 59));
+                        .fill(theme::c(46, 53, 59));
                     if ui
                         .add(btn)
                         .on_hover_text("Put two pictures side by side, split or overlaid (C)")
@@ -651,7 +651,7 @@ impl Pane {
                 ui.label(
                     egui::RichText::new(count_text)
                         .size(11.0)
-                        .color(TEXT_FAINT),
+                        .color(theme::text_faint()),
                 );
             });
         });
@@ -661,7 +661,7 @@ impl Pane {
     /// order, with the pane's own selection rules.
     pub fn ui_pictures(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
         egui::Frame::new()
-            .fill(Color32::from_rgb(31, 34, 37))
+            .fill(theme::c(31, 34, 37))
             .inner_margin(egui::Margin::symmetric(10, 6))
             .show(ui, |ui| {
                 self.gallery_bar(ui, vctx);
@@ -705,14 +705,14 @@ impl Pane {
                 Align2::CENTER_CENTER,
                 title,
                 FontId::proportional(14.0),
-                TEXT_DIM,
+                theme::text_dim(),
             );
             ui.painter().text(
                 Pos2::new(rect.center().x, rect.top() + 112.0),
                 Align2::CENTER_CENTER,
                 hint,
                 FontId::proportional(12.0),
-                TEXT_FAINT,
+                theme::text_faint(),
             );
             return;
         }
@@ -748,9 +748,9 @@ impl Pane {
         }
 
         let selected_colour = if vctx.active || !vctx.split {
-            ROW_SEL_ACTIVE
+            theme::row_sel_active()
         } else {
-            ROW_SEL_INACTIVE
+            theme::row_sel_inactive()
         };
 
         egui::ScrollArea::vertical()
@@ -788,7 +788,7 @@ impl Pane {
                             let bg = if selected {
                                 selected_colour
                             } else if resp.hovered() {
-                                ROW_HOVER
+                                theme::row_hover()
                             } else {
                                 Color32::TRANSPARENT
                             };
@@ -800,7 +800,7 @@ impl Pane {
                                 );
                             }
                             let behind =
-                                if bg == Color32::TRANSPARENT { VIEW_BG } else { bg };
+                                if bg == Color32::TRANSPARENT { theme::view_bg() } else { bg };
                             self.draw_gallery_card(ui, rect, &entry, behind, vctx);
                             self.handle_row_interaction(ui, rect, &resp, disp, vctx);
                         }
@@ -833,7 +833,7 @@ impl Pane {
         ui.painter().rect_filled(
             pic_rect,
             CornerRadius::same(if self.gallery_round { PICTURE_CORNER } else { 2 }),
-            Color32::from_rgb(24, 27, 30),
+            theme::c(24, 27, 30),
         );
 
         let mut drew = false;
@@ -876,7 +876,7 @@ impl Pane {
                 entry
                     .tint
                     .filter(|_| entry.is_dir)
-                    .map(|c| Color32::from_rgb(c[0], c[1], c[2])),
+                    .map(|t| theme::c(t[0], t[1], t[2])),
             );
         }
         // The browser frames each picture with a two-pixel border; the same
@@ -885,7 +885,7 @@ impl Pane {
         ui.painter().rect_stroke(
             pic_rect,
             CornerRadius::same(if self.gallery_round { PICTURE_CORNER } else { 2 }),
-            Stroke::new(2.0, Color32::from_rgb(58, 64, 70)),
+            Stroke::new(2.0, theme::c(58, 64, 70)),
             egui::StrokeKind::Inside,
         );
 
@@ -899,7 +899,7 @@ impl Pane {
                 Align2::CENTER_CENTER,
                 name,
                 font,
-                TEXT,
+                theme::text(),
             );
             y += CAPTION_STEP;
         }
@@ -1021,7 +1021,7 @@ fn prompt_header(ui: &mut egui::Ui, open: bool, source: Option<&str>) -> (bool, 
     );
     if resp.hovered() {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(4), HEADER_BG);
+            .rect_filled(rect, CornerRadius::same(4), theme::header_bg());
     }
     // The arrow: a small solid triangle, filled while open and pointing right
     // while folded, the way a fold arrow reads everywhere else in this build.
@@ -1041,13 +1041,13 @@ fn prompt_header(ui: &mut egui::Ui, open: bool, source: Option<&str>) -> (bool, 
         ]
     };
     ui.painter()
-        .add(egui::Shape::convex_polygon(arrow, TEXT_DIM, Stroke::NONE));
+        .add(egui::Shape::convex_polygon(arrow, theme::text_dim(), Stroke::NONE));
     ui.painter().text(
         Pos2::new(rect.left() + 22.0, rect.center().y),
         Align2::LEFT_CENTER,
         "Prompt",
         FontId::proportional(12.0),
-        TEXT,
+        theme::text(),
     );
     if let Some(src) = source {
         ui.painter().text(
@@ -1055,7 +1055,7 @@ fn prompt_header(ui: &mut egui::Ui, open: bool, source: Option<&str>) -> (bool, 
             Align2::RIGHT_CENTER,
             src,
             FontId::proportional(9.5),
-            TEXT_FAINT,
+            theme::text_faint(),
         );
     }
     let hit = resp
@@ -1106,7 +1106,7 @@ pub fn prompt_panel(
                 ui.label(
                     egui::RichText::new(elide(ui, &first, w, FontId::proportional(10.5)))
                         .size(10.5)
-                        .color(TEXT_FAINT),
+                        .color(theme::text_faint()),
                 );
             }
         }
@@ -1118,12 +1118,12 @@ pub fn prompt_panel(
         ui.label(
             egui::RichText::new("No generation prompt is stored in this picture.")
                 .size(11.5)
-                .color(TEXT_DIM),
+                .color(theme::text_dim()),
         );
         ui.label(
             egui::RichText::new("Pictures made by common text-to-image tools carry theirs; photos usually do not.")
                 .size(10.5)
-                .color(TEXT_FAINT),
+                .color(theme::text_faint()),
         );
         return out;
     };
@@ -1189,12 +1189,12 @@ pub fn prompt_panel(
 
     for (k, v) in &m.fields {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("{k}:")).size(10.5).color(TEXT_DIM));
+            ui.label(egui::RichText::new(format!("{k}:")).size(10.5).color(theme::text_dim()));
             ui.label(
                 egui::RichText::new(elide(ui, v, 190.0, FontId::proportional(11.0)))
                     .size(11.0)
                     .strong()
-                    .color(TEXT),
+                    .color(theme::text()),
             );
         });
     }
@@ -1222,7 +1222,7 @@ pub fn prompt_panel(
             "Drag to select — the box scrolls when the drag reaches its edge. Ctrl+A selects all, Ctrl+C copies, Shift+click extends.",
         )
         .size(9.5)
-        .color(TEXT_FAINT),
+        .color(theme::text_faint()),
     );
 
     if let Some(neg) = &m.negative {
@@ -1230,7 +1230,7 @@ pub fn prompt_panel(
         ui.label(
             egui::RichText::new("Negative prompt")
                 .size(10.0)
-                .color(TEXT_FAINT),
+                .color(theme::text_faint()),
         );
         crate::selectable::text_block(
             ui,
@@ -1246,7 +1246,7 @@ pub fn prompt_panel(
 /// is drawn in.
 fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
     let painter = ui.painter();
-    let full = painter.layout_no_wrap(text.to_owned(), font.clone(), TEXT);
+    let full = painter.layout_no_wrap(text.to_owned(), font.clone(), theme::text());
     if full.size().x <= max_w {
         return text.to_string();
     }
@@ -1256,7 +1256,7 @@ fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
         trial.push(ch);
         trial.push('…');
         let w = painter
-            .layout_no_wrap(trial.clone(), font.clone(), TEXT)
+            .layout_no_wrap(trial.clone(), font.clone(), theme::text())
             .size()
             .x;
         if w > max_w {
@@ -1565,7 +1565,7 @@ fn bar_button(ui: &mut egui::Ui, glyph: &str, label: &str, active: bool) -> egui
         0.0
     } else {
         ui.painter()
-            .layout_no_wrap(label.to_owned(), font.clone(), TEXT)
+            .layout_no_wrap(label.to_owned(), font.clone(), theme::text())
             .size()
             .x
     };
@@ -1576,20 +1576,20 @@ fn bar_button(ui: &mut egui::Ui, glyph: &str, label: &str, active: bool) -> egui
     };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width.max(24.0), 22.0), Sense::click());
     let tint = if active {
-        Color32::WHITE
+        theme::on_band()
     } else if resp.hovered() {
-        TEXT
+        theme::text()
     } else {
-        TEXT_DIM
+        theme::text_dim()
     };
     if active || resp.hovered() {
         ui.painter().rect_filled(
             rect,
             CornerRadius::same(3),
             if active {
-                Color32::from_rgb(52, 60, 68)
+                theme::c(52, 60, 68)
             } else {
-                Color32::from_rgb(40, 46, 52)
+                theme::c(40, 46, 52)
             },
         );
     }
@@ -1597,7 +1597,7 @@ fn bar_button(ui: &mut egui::Ui, glyph: &str, label: &str, active: bool) -> egui
         ui.painter().rect_stroke(
             rect,
             CornerRadius::same(3),
-            Stroke::new(1.0, ACCENT),
+            Stroke::new(1.0, theme::accent()),
             egui::StrokeKind::Inside,
         );
     }
@@ -1836,7 +1836,7 @@ impl crate::App {
             .show(ctx, |ui| {
                 ui.set_min_size(screen.size());
                 ui.painter()
-                    .rect_filled(screen, 0.0, Color32::from_rgb(10, 12, 14));
+                    .rect_filled(screen, 0.0, theme::c(10, 12, 14));
 
                 let top = Rect::from_min_size(
                     screen.min,
@@ -1854,7 +1854,7 @@ impl crate::App {
                 // A picture this size is what the browser shows behind its
                 // viewer: near-black, so the photograph is the bright thing.
                 ui.painter()
-                    .rect_filled(canvas, 0.0, Color32::from_rgb(14, 16, 18));
+                    .rect_filled(canvas, 0.0, theme::c(14, 16, 18));
 
                 let viewer = self.viewer.as_mut().unwrap();
                 let path = viewer.current().cloned().unwrap_or_default();
@@ -1964,10 +1964,10 @@ impl crate::App {
                     let (note, colour) = if refused {
                         (
                             "This file could not be opened as a picture",
-                            Color32::from_rgb(220, 170, 140),
+                            theme::c(220, 170, 140),
                         )
                     } else {
-                        ("Loading picture…", TEXT_DIM)
+                        ("Loading picture…", theme::text_dim())
                     };
                     ui.painter().text(
                         canvas.center(),
@@ -1980,10 +1980,10 @@ impl crate::App {
 
                 // ---- top bar ---------------------------------------------
                 ui.painter()
-                    .rect_filled(top, 0.0, Color32::from_rgb(20, 23, 26));
+                    .rect_filled(top, 0.0, theme::c(20, 23, 26));
                 ui.painter().line_segment(
                     [Pos2::new(top.left(), top.bottom()), Pos2::new(top.right(), top.bottom())],
-                    Stroke::new(1.0, Color32::from_rgb(38, 43, 48)),
+                    Stroke::new(1.0, theme::c(38, 43, 48)),
                 );
                 ui.scope_builder(
                     egui::UiBuilder::new()
@@ -1999,7 +1999,7 @@ impl crate::App {
                         }
                         let name = viewer.name();
                         let shown = elide(ui, &name, 420.0, FontId::proportional(13.0));
-                        ui.label(egui::RichText::new(shown).size(13.0).color(TEXT));
+                        ui.label(egui::RichText::new(shown).size(13.0).color(theme::text()));
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} / {}",
@@ -2007,7 +2007,7 @@ impl crate::App {
                                 viewer.items.len()
                             ))
                             .size(11.0)
-                            .color(TEXT_FAINT),
+                            .color(theme::text_faint()),
                         );
 
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2067,7 +2067,7 @@ impl crate::App {
                                 ui.label(
                                     egui::RichText::new(format!("{:.1}s", slide.interval))
                                         .size(10.5)
-                                        .color(TEXT_FAINT),
+                                        .color(theme::text_faint()),
                                 );
                                 let mut fade_on = slide.fade;
                                 if ui
@@ -2115,7 +2115,7 @@ impl crate::App {
                             ui.label(
                                 egui::RichText::new(zoom_text)
                                     .size(11.0)
-                                    .color(TEXT_DIM),
+                                    .color(theme::text_dim()),
                             );
                             if bar_button(ui, "minus", "", false)
                                 .on_hover_text("Zoom out")
@@ -2135,13 +2135,13 @@ impl crate::App {
 
                 // ---- bottom bar ------------------------------------------
                 ui.painter()
-                    .rect_filled(bottom, 0.0, Color32::from_rgb(20, 23, 26));
+                    .rect_filled(bottom, 0.0, theme::c(20, 23, 26));
                 ui.painter().line_segment(
                     [
                         Pos2::new(bottom.left(), bottom.top()),
                         Pos2::new(bottom.right(), bottom.top()),
                     ],
-                    Stroke::new(1.0, Color32::from_rgb(38, 43, 48)),
+                    Stroke::new(1.0, theme::c(38, 43, 48)),
                 );
                 ui.scope_builder(
                     egui::UiBuilder::new()
@@ -2184,13 +2184,13 @@ impl crate::App {
                             ui.label(
                                 egui::RichText::new(elide(ui, &long, 700.0, FontId::proportional(11.5)))
                                     .size(11.5)
-                                    .color(TEXT_DIM),
+                                    .color(theme::text_dim()),
                             );
                         } else {
                             ui.label(
                                 egui::RichText::new(caption)
                                     .size(11.5)
-                                    .color(TEXT_FAINT),
+                                    .color(theme::text_faint()),
                             );
                         }
 
@@ -2244,12 +2244,12 @@ impl crate::App {
                                     ui.label(
                                         egui::RichText::new(format!("{}%", cmp.opacity))
                                             .size(10.5)
-                                            .color(TEXT_FAINT),
+                                            .color(theme::text_faint()),
                                     );
                                     ui.label(
                                         egui::RichText::new("Opacity")
                                             .size(11.0)
-                                            .color(TEXT_DIM),
+                                            .color(theme::text_dim()),
                                     );
                                 }
                             });
@@ -2264,7 +2264,7 @@ impl crate::App {
                         Align2::CENTER_CENTER,
                         help,
                         FontId::proportional(11.5),
-                        TEXT_FAINT,
+                        theme::text_faint(),
                     );
                 }
 
@@ -2276,15 +2276,24 @@ impl crate::App {
                         Pos2::new(canvas.right() - 312.0, canvas.top() + 10.0),
                         Pos2::new(canvas.right() - 10.0, canvas.bottom() - 10.0),
                     );
+                    // The viewer's control panel is a palette surface, not a black
+                    // slab: its labels are drawn in the palette's text colour, which
+                    // is light in dark mode and dark in light mode.
+                    let panel_bg = theme::c(22, 26, 30);
                     ui.painter().rect_filled(
                         panel,
                         CornerRadius::same(6),
-                        Color32::from_rgba_unmultiplied(22, 26, 30, 236),
+                        Color32::from_rgba_unmultiplied(
+                            panel_bg.r(),
+                            panel_bg.g(),
+                            panel_bg.b(),
+                            236,
+                        ),
                     );
                     ui.painter().rect_stroke(
                         panel,
                         CornerRadius::same(6),
-                        Stroke::new(1.0, Color32::from_rgb(48, 54, 60)),
+                        Stroke::new(1.0, theme::separator()),
                         egui::StrokeKind::Inside,
                     );
                     let inner = panel.shrink(10.0);
@@ -2523,7 +2532,7 @@ fn draw_compare(
                     Vec2::new(gap, canvas.height()),
                 ),
                 0.0,
-                Color32::from_rgb(30, 34, 38),
+                theme::c(30, 34, 38),
             );
             match tex_b.as_ref() {
                 Some(tb) => draw_fit(ui, right, tb, cmp.zoom_b, cmp.pan_b),
@@ -2544,7 +2553,7 @@ fn draw_compare(
                     Align2::CENTER_CENTER,
                     name,
                     FontId::proportional(10.5),
-                    Color32::from_rgb(226, 232, 238),
+                    theme::on_scrim(),
                 );
             }
         }
@@ -2623,13 +2632,13 @@ fn draw_compare(
                     Vec2::new(2.0, canvas.height()),
                 ),
                 0.0,
-                Color32::from_rgb(220, 226, 232),
+                theme::c(220, 226, 232),
             );
             // A grip, so the divider can be found with the pointer.
             ui.painter().circle_filled(
                 Pos2::new(x, canvas.center().y),
                 9.0,
-                Color32::from_rgb(220, 226, 232),
+                theme::c(220, 226, 232),
             );
             // Each name sits on a dark tab beside the divider: written straight
             // onto a photograph it could not be read.
@@ -2637,7 +2646,7 @@ fn draw_compare(
                 let font = FontId::proportional(10.5);
                 let w = ui
                     .painter()
-                    .layout_no_wrap(name.clone(), font.clone(), TEXT)
+                    .layout_no_wrap(name.clone(), font.clone(), theme::text())
                     .size()
                     .x;
                 let y = if above {
@@ -2653,7 +2662,7 @@ fn draw_compare(
                     Align2::LEFT_CENTER,
                     name,
                     font,
-                    Color32::from_rgb(226, 232, 238),
+                    theme::on_scrim(),
                 );
             }
         }
@@ -2706,7 +2715,7 @@ fn draw_compare(
             let font = FontId::proportional(10.5);
             let w = ui
                 .painter()
-                .layout_no_wrap(caption.clone(), font.clone(), TEXT)
+                .layout_no_wrap(caption.clone(), font.clone(), theme::text())
                 .size()
                 .x;
             let tab = Rect::from_min_size(
@@ -2720,7 +2729,7 @@ fn draw_compare(
                 Align2::LEFT_CENTER,
                 caption,
                 font,
-                Color32::from_rgb(226, 232, 238),
+                theme::on_scrim(),
             );
         }
     }
@@ -2732,7 +2741,7 @@ fn loading(ui: &egui::Ui, pane: Rect) {
         Align2::CENTER_CENTER,
         "Loading…",
         FontId::proportional(12.0),
-        TEXT_DIM,
+        theme::text_dim(),
     );
 }
 

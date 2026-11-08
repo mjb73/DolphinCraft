@@ -981,11 +981,49 @@ Three faults were fixed to make that true:
    the sort key's name first, then the sort button (sorting stays in the
    menu), and only then the words — measured against the location bar's own
    110 px floor at every width from 360 to 1600 px.
+4. **The find bar's close button was drawn off the edge and as an empty box.**
+   The field's width was reserved from a guess at what followed it, so once a
+   search was running — count, Stop, chips — the right-hand cluster was laid out
+   past the window edge and the close button disappeared. The count, Stop and
+   close now go in a child ui anchored to the row's right edge *first*, the two
+   scope chips hang off that cluster's real left edge, and the field is sized
+   from where the chips really ended (`FindBarLayout` reports both rects, and
+   `--selftest` *"the find bar keeps its close button inside the bar, clear of
+   the chips"* asserts `chips.right ≤ close.left` and `close.right ≤ width` at
+   720, 900 and 1400 px). The glyph was the second half of the bug: `✕` is not in
+   this app's font and drew as a missing-character box, so the button is drawn
+   with `theme::draw_glyph("close")` — a line shape, like every other icon in
+   the window.
 
 The card that spells the three jobs out was unreachable for the same class of
 reason: `guide_open` was never set by `--guide`, so the dialog existed and never
 drew. It now opens from the menu, from F1, and from `--guide`
 (`app/shots/now/guide2.png`).
+
+## The Path column in search results (asked for by the person)
+
+An *In subfolders* search puts rows from different folders on one list, and the
+details view named only the file, the size and the date — so two files called
+`report.txt` were two identical-looking rows and the folder that told them apart
+was nowhere on screen. The details view now grows a fourth column while that
+search is showing.
+
+| what | value |
+| --- | --- |
+| when | the pane is showing a search **and** the walk covers the subfolders (`search.is_some() && find_deep`); a *This folder* search has every row in the folder the bar already names, so the column would repeat one value down the list. It also stays away when every hit lies in the searched folder itself, because then there is no folder to name |
+| where | between **Name** and **Size** — Name, Path, Size, Modified — drawn by `Pane::column_rects` (`app/src/views.rs`) |
+| width | **measured from what the two columns hold**, not from a share of the row. `Pane::measure_search_columns` lays out the widest name and the widest folder of the result with the very fonts the rows draw with (13 px name, 12 px folder) as the batches arrive, and `column_rects` gives each column that width plus its padding — the icon and its gaps live inside the name's. Any room left over is split evenly. Two earlier attempts were wrong in opposite directions: a fixed 42 % capped at 240 px cut deep folders off while the name column sat empty, and a character estimate with a 220 px floor for the name then cut long *names* off. When the row cannot hold both, the numeric columns hand their slack back first (Size and Modified shrink to what their own cells need, never below 44 / 64 px), then the name keeps 220 px if the folder still gets 90 px, and only a row that cannot physically hold both elides anything |
+| the text | the folder relative to the folder the search started from (`2024/03`), because the bar above already names the root; `—` for a file lying directly in the searched folder; the file's own full folder if it somehow lies outside the root. `views::hit_folder` |
+| the header | a plain label, not one of the three sort buttons: the rows are found by name, not ordered by folder, and a header that sorted nothing would be the lie |
+
+`--selftest` *"a search's columns fit the longest name and folder, not a share of the
+row"* builds a tree with a 44-character file name three folders down, runs the
+search for real (a bounded wait on `wait_for_search`), measures in a live egui
+frame, and at 1600 / 1084 / 700 / 260 px asserts the columns do not overlap and —
+while the row is wide enough for both — that `theme::elide_name` returns the long
+name and the long folder **unchanged**, i.e. nothing is cut. *"a search hit's folder
+is written relative to the folder searched"* covers the three label cases
+(relative, `—`, outside-the-root).
 
 ## The deep pass: the main program read function by function
 
@@ -2213,6 +2251,15 @@ With nothing mounted the group shows the original's own sentence,
 run of empty-state strings as `0x1bf937` *No recently used items*). The heading
 folds like the recent groups, so an empty Network group costs one line, not four.
 
+A group that is always there is still not always wanted: on a computer with no
+shares the heading plus one row of apology is a permanent two lines of nothing.
+So the app menu's **View** group carries **Show Network Shared Folders** (ticked
+on a fresh profile, which is the original's always-shown state). Switching it off
+takes the heading away with the rows — a hidden group must not leave an orphan
+heading — and the switch is in the menu rather than on the group's own header
+because a hidden group has no header left to click. The choice is the config key
+`network_visible`; absent from an older settings file, it means shown.
+
 The group's own label in the original is *Remote* with a row called *Network*;
 this build draws one folding group called *Network* directly. That is written in
 `mechanics.json` (`network` group) next to the original's wording.
@@ -2223,6 +2270,29 @@ export, an sshfs mount and a local vfat with an escaped space — and fails unle
 exactly the three shares come back, named *media*, *photos* and *data*, with the
 escaped mount point unescaped and the local drive left out. It also checks the two
 GIO folder names.
+
+## The *Added tools* group folds, and starts folded (asked for by the person)
+
+The tools this build adds lived in a plain section at the bottom of the panel —
+seven rows that were always there, whether or not the person was on their way to
+one. They are a menu of tools, not a place to walk to, so the section became one
+more folding group, opened by its own heading and **folded on a fresh profile**:
+the panel opens on the places, and the tools are one click away.
+
+* The heading is the same `recent_group_header` the recent and Network groups
+  use, so a click folds and the next click opens; the chevron is the same pair,
+  `chevron_down` open and `chevron_right` folded.
+* The count at the right of the heading is `ADDED_TOOLS.len()`, read from the same
+  table that draws the rows (`ADDED_TOOLS` in `app/src/main.rs`), so the number
+  cannot drift from what is inside. A row's press reports `ToolWhat`, so the
+  group needs one variable rather than six flags.
+* The fold state is the config key `tools_expanded`, **absent = folded**, so a
+  settings file written by an older build lands folded rather than open.
+* `--selftest` *"the Added tools group starts folded and counts its own rows"*
+  checks the fresh default, the older-file default, that opening survives a save,
+  that the choice reaches the settings file, and that no two rows share a label.
+  *"the Network group is shown by default and stays hidden when switched off"*
+  does the same for `network_visible`.
 
 ## This pass: the zoom, the grid and the three view modes re-read out of the installed 26.08.3
 
@@ -2853,6 +2923,53 @@ silently.
 
 `mechanics.json` gains nine values for the same table, each with its source or
 marked *added*.
+
+## The light palette (asked for by the person)
+
+The window had one palette, written as eighteen constants sampled from the
+reference window and used by roughly three hundred drawing calls, plus some
+ninety colour literals scattered through the same code. A second hand-written
+palette would have been a second thing to keep in step with every colour added
+later, and the first one to drift. So the colours are still written **once**, as
+the dark values, and light mode is *derived* from them.
+
+| what | how |
+| --- | --- |
+| the switch | app menu → **View** → *Light Mode* (`Panels::app_menu`). Config key `light`; absent from an older settings file it means dark, which is how the window has always looked. `--light` opens a window light for one session without touching the file |
+| the derivation | `theme::c(r, g, b)`: keep the hue, drop the saturation a touch (×0.92), and flip the lightness with a stretch — `L' = 1 − L^1.6`. Without the stretch a dark surface at L 0.15 comes out at 0.85, a muddy grey that reads as "dimmed", not as a light theme; with it the same surface lands at 0.95, the panel at 0.93, and the near-white text at 0.09 |
+| the palette | the eighteen colours are now functions (`theme::view_bg()`, `theme::text()`, …), each one line of `c(dark values)`; every drawing site that used the constants uses the functions, and every literal went through `c(…)` as well, so nothing anywhere can be left in the other mode's colour |
+| the exceptions | four colours are written out by hand because the derivation is wrong for them: `text_dim` and `text_faint`, which come out too pale to read on white, and `paper` / `paper_shade`, because a document icon is a white page with a grey edge in either mode and `c()` would paint it black |
+| egui's own colours | `theme::install` used to set the fonts *and* the whole `Visuals`; the style half is now `theme::apply_style`, which the switch calls again. A switch that only repainted the view would leave the menus, buttons and text fields in the old palette |
+| the startup order | the settings are read before anything is styled, so a light window is light on its first frame rather than opening dark and repainting |
+
+### What the derivation must **not** be used for
+
+Deriving the light palette from the dark one is only right for colours that mean
+"this surface" or "this text". A blanket conversion of every colour literal gets
+four kinds of site wrong, and each one was visible on screen before it was put
+right:
+
+| kind of site | what happened | the rule now |
+| --- | --- | --- |
+| **a picture's tint** | a thumbnail is drawn with `painter.image(.., tint)` and the tint *multiplies* the picture. The old code passed white; the sweep turned that into `c(255, 255, 255)`, which is near-white in dark and **black** in light — so every preview in the icons view, the gallery and the viewer came out black | image tints are `Color32::WHITE`, always |
+| **white or black used as maths** | `blend(base, white, 0.22)` (lifting a folder's own colour) and `blend(base, black, 0.20)` (its shaded edge) — in light mode the "white" end became black and the highlight turned into a shadow | `Color32::WHITE` / `Color32::BLACK` for the maths, never `c()` |
+| **text that inherits a widget's colour** | `RichText::strong()` takes its colour from `Visuals::widgets.active.fg_stroke`. That was a dark literal, which in light mode became near-white: the location bar's **current folder name** and every emphasised name (a file's name in its properties, the disk-space heading) were white on white — the bar looked empty | `active.fg_stroke` is `text()`, and text on a band or an accent fill is `on_band()` (white in dark, near-black in light) |
+| **text on a dark scrim** | the viewer writes picture names on a `from_black_alpha` strip; that strip stays black in both modes, so its text must stay light in both | `on_scrim()` — a fixed light colour, never `c()` |
+
+Two smaller ones from the same pass: a document page was a white shape on a white
+view with no edge, so most file types read as a floating glyph (the page now has
+`paper_edge()`, which is the page's own colour in dark mode — invisible, as before
+— and a grey line in light mode); and the toast and the viewer's control panel
+were hard-coded dark surfaces carrying palette text, which made their labels
+dark-on-dark (both now take their fill from `c()`).
+
+`--selftest` *"the light palette is the dark one with its lightness flipped"* holds
+both modes to the palette they claim to be: in dark, view/panel/toolbar/header
+under 0.25 luminance and the text over 0.85; in light, the four surfaces over 0.85,
+the text under 0.25, and at least 0.55 of contrast between text and view; the
+folder icon still blue (`b > r + 20`) in both; the switch reaching the settings
+signature, surviving a round trip, and a settings file without the key opening
+dark.
 
 ## Drag and drop with other programs
 

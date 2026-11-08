@@ -2059,6 +2059,84 @@
    "value": 10,
    "unit": "extensions",
    "source": "added: VIDEO_EXT in fsutil.rs, the same list kind_for reads for Kind::Video"
+  },
+  {
+   "name": "added tools group, folded",
+   "group": "added",
+   "value": "7 rows: Duplicates, Find in Files, Bulk Rename, Quick Look, Disk Space, Compress, Resize Image; folded on a fresh profile, the heading counts its own rows",
+   "source": "own design; the original has no such group (the rows are this build's added tools)"
+  },
+  {
+   "name": "added tools group fold state",
+   "group": "added",
+   "value": "config key tools_expanded, absent = folded",
+   "source": "own design"
+  },
+  {
+   "name": "network group shown",
+   "group": "network",
+   "value": true,
+   "source": "own switch: app menu, View, 'Show Network Shared Folders'; the original's Remote group can only be folded, not hidden"
+  },
+  {
+   "name": "network group hidden",
+   "group": "network",
+   "value": "the heading leaves with the rows; config key network_visible = false",
+   "source": "own switch, asked for by the person; the switch lives in the menu because a hidden group has no heading to click"
+  },
+  {
+   "name": "search results, Path column",
+   "group": "search",
+   "value": "details view, between Name and Size, while the walk covers subfolders and at least one hit lies in a folder below the root",
+   "source": "own addition, asked for by the person; the original's find bar hands its results to KIO's search helper, which has no such column"
+  },
+  {
+   "name": "search results, Path column width",
+   "group": "search",
+   "value": "measured: the widest name and the widest folder in the result, laid out with the row's own fonts (13 px / 12 px); leftover room split evenly; when the row cannot hold both, Size and Modified shrink to what their own cells need (44 / 64 px floors) before anything is elided",
+   "source": "own rule; a fixed share capped at 240 px cut folders, and a character estimate with a 220 px floor for the name cut names"
+  },
+  {
+   "name": "search results, Path text",
+   "group": "search",
+   "value": "the folder relative to the folder searched; an em dash for a file in that folder itself",
+   "source": "own rule; the find bar above already names the root"
+  },
+  {
+   "name": "find bar close button",
+   "group": "controls",
+   "value": "drawn glyph, not a character; laid out against the row's right edge before the field",
+   "source": "own fix: the ✕ character is absent from this app's font and the button was laid out past the window edge while a search ran"
+  },
+  {
+   "name": "the light palette",
+   "group": "colours",
+   "value": "derived from the dark values: hue kept, saturation x0.92, lightness L' = 1 - L^1.6; four colours written out by hand (text_dim, text_faint, paper, paper_shade)",
+   "source": "own rule, asked for by the person; one palette written once so both modes stay in step"
+  },
+  {
+   "name": "the light palette switch",
+   "group": "colours",
+   "value": "app menu > View > Light Mode; config key light, absent = dark; --light for one session",
+   "source": "own addition; egui's Visuals are set again on the switch (theme::apply_style)"
+  },
+  {
+   "name": "light mode, colours the derivation must not touch",
+   "group": "colours",
+   "value": "image tints are Color32::WHITE; white/black used in blend maths are the constants; strong text and text on a band are text()/on_band(); text on a black scrim is on_scrim()",
+   "source": "own fix: a blanket derivation turned every preview black, inverted the folder highlight into a shadow, and made every emphasised name white on white"
+  },
+  {
+   "name": "document icon page edge",
+   "group": "colours",
+   "value": "paper_edge(): the page's own colour in dark mode (invisible), a grey line in light mode where a white page on a white view has no shape",
+   "source": "own fix: file types without a coloured badge read as a floating glyph in light mode"
+  },
+  {
+   "name": "widget strong text",
+   "group": "colours",
+   "value": "Visuals::widgets.active.fg_stroke = text(), because RichText::strong() takes its colour from there",
+   "source": "egui 0.33 style.rs strong_text_color() -> widgets.active.text_color()"
   }
  ]
 }

@@ -92,7 +92,14 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   always starts as one view; **F3** (or the menu switch) splits it, and the
   next start is one view again.
 - **Search** inside the current folder, with the results in place of the list.
+  *In subfolders* looks through everything below as well, and while it does the
+  details view gains a **Path** column between the name and the size, so results
+  from different folders can be told apart — the folder is written relative to
+  the one you searched, and a file sitting in that folder itself shows a dash.
 - **Added tools**
+  - The sidebar keeps them in one **Added tools** group at the bottom of the
+    panel, folded until you click its heading; the heading counts the rows so you
+    can see what is inside without opening it, and it remembers being opened.
   - **Find Duplicates** — groups identical files by content hash.
   - **Bulk Rename** — renames many files at once from a pattern.
   - **Quick Look** — a fast preview window for a single file (Space).
@@ -134,6 +141,13 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
     ever overwritten. On a Wayland session the window opens as an X11 one so both
     drags can reach the desktop (`DOLPHINCRAFT_BACKEND=wayland` keeps the
     compositor's own path at the cost of them).
+- **Copy to Other View / Move to Other View** (**Shift+F5** / **Shift+F6**), and
+    **Copy To… / Move To…** from the right-click menu: the marked items go into the
+    view beside this one, or into a folder picked in a small window with a field to
+    narrow the list. Both refuse in the original's own words — nothing marked, the
+    other view already holding them, a folder that cannot be written, a move out of
+    a folder that cannot be written — and neither ever overwrites: a name already
+    taken steps aside to `name (1)`.
 - **Open With**, the way the original does it: right-click a file and the first
   row opens it in the program your desktop already prefers, *Open With ▸* lists
   the other programs that claim that kind of file, and **Other Application…**
@@ -147,7 +161,17 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   lists the network folders this computer already has — SMB, NFS and SSH shares in
   the mount table, and shares opened through the desktop's own file choosers —
   each named after its share. Nothing is mounted from here; with none mounted it
-  says *No shared folders found*, and the heading folds away.
+  says *No shared folders found*, and the heading folds away. A computer with no
+  shares at all can take the group off the panel altogether: the app menu's
+  **View** group carries *Show Network Shared Folders*, so the heading and its rows
+  leave together, and the same switch brings them back.
+- **Light mode**, from the app menu's **View** group: *Light Mode* switches the
+  whole window — view, panel, toolbar, dialogs, icons, text — from the dark
+  palette to a light one, and back. The light palette is derived from the dark
+  one by flipping its lightness, so every colour keeps its hue (folders stay
+  blue, the accent stays blue) and anything added later is right in both. Your
+  choice is remembered; a window that has never been switched stays dark, which
+  is how it has always looked.
 - **Two recent groups in the sidebar**, under your shortcuts: **Recent Files**
   lists what you have actually opened lately, newest visit first, read from the
   desktop's own recently-used list — a row opens the file, its menu can show it
@@ -219,6 +243,8 @@ Options:
 --drag-out <file>...       hand those files to another program as a drag, for
                           checking the hand-over without a mouse
 --size <WxH>              open the window at a given size
+--light                   open in the light palette for this run, without changing
+                          the saved setting
 --selftest                run the built-in checks and exit
 ```
 

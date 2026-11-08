@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::fsutil;
+use crate::theme;
 use crate::findtext;
 use crate::imageresize;
 use crate::search::{self, DupScan, SearchFilters, SearchSession};
@@ -77,6 +78,112 @@ fn wait_find(ft: &mut findtext::FindText) -> Result<(), String> {
         return Err("the search did not finish in 15 seconds".into());
     }
     Ok(())
+}
+
+/// Wait for a name search's walk to finish, so a check can read its results.
+fn wait_for_search(pane: &mut crate::state::Pane) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let Some(session) = pane.search.as_mut() else {
+            return Err("the search never started".into());
+        };
+        session.poll();
+        if session.done {
+            return Ok(());
+        }
+        if Instant::now() > deadline {
+            return Err("the search did not finish in 10 seconds".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The details columns of a pane showing search results: no two may overlap, and
+/// while the row is wide enough for both the longest name and the longest folder
+/// nothing may be elided. Shared by the selftest check, which needs a live `ui`
+/// to lay text out.
+fn check_search_columns(
+    ui: &egui::Ui,
+    pane: &crate::state::Pane,
+    long_name: &str,
+    folder: &str,
+) -> Result<String, String> {
+    let name_font = egui::FontId::proportional(13.0);
+    let path_font = egui::FontId::proportional(12.0);
+    let measure = |text: &str, font: egui::FontId| {
+        ui.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font, crate::theme::text()))
+            .size()
+            .x
+    };
+    let name_px = measure(long_name, name_font.clone());
+    let path_px = measure(folder, path_font.clone());
+    // The pane measures the same strings with the same fonts, and must agree.
+    if (pane.search_name_px - name_px).abs() > 0.5 {
+        return Err(format!(
+            "the pane measured the widest name as {:.1} px, not {:.1}",
+            pane.search_name_px, name_px
+        ));
+    }
+    if (pane.search_path_px - path_px).abs() > 0.5 {
+        return Err(format!(
+            "the pane measured the widest folder as {:.1} px, not {:.1}",
+            pane.search_path_px, path_px
+        ));
+    }
+    let mut said: Vec<String> = Vec::new();
+    for (w, label) in [
+        (1600.0f32, "1600"),
+        (1084.0, "1084"),
+        (700.0, "700"),
+        (260.0, "260"),
+    ] {
+        let rect = egui::Rect::from_min_size(
+            egui::Pos2::new(100.0, 50.0),
+            egui::Vec2::new(w, 26.0),
+        );
+        let c = pane.details_columns(rect);
+        let Some(path) = c.path else {
+            return Err(format!("no Path column at {label} px"));
+        };
+        if !(c.name.right() <= path.left() + 0.01
+            && path.right() <= c.size.left() + 0.01
+            && c.size.right() <= c.date.left() + 0.01)
+        {
+            return Err(format!("{label} px: the columns overlap"));
+        }
+        // The room each label actually gets: the name starts one icon and its
+        // 8 px gap in, with 8 px to spare at the end; the folder has 6 px.
+        let icon = pane.icon_size().clamp(16.0, crate::theme::MAX_ICON_PX) + 8.0;
+        let name_room = c.name.width() - icon - 8.0;
+        let path_room = path.width() - 6.0;
+        let text_w = c.name.width() + path.width();
+        let need = icon + name_px + 8.0 + path_px + 10.0;
+        if need <= text_w {
+            if crate::theme::elide_name(ui, long_name, name_room, name_font.clone()) != long_name {
+                return Err(format!(
+                    "{label}: the name is still cut ({name_room:.0} px of room for {name_px:.0} px), \
+                     with {:.0} px of row unused",
+                    text_w - need
+                ));
+            }
+            if crate::theme::elide_name(ui, folder, path_room, path_font.clone()) != folder {
+                return Err(format!(
+                    "{label}: the folder is still cut ({path_room:.0} px of room for {path_px:.0} px)"
+                ));
+            }
+            said.push(format!("{label} px: both fit"));
+        } else if c.name.width() < text_w * 0.50 {
+            return Err(format!(
+                "{label} px: the row cannot hold both, and the name kept only {:.0} of {:.0} px",
+                c.name.width(),
+                text_w
+            ));
+        } else {
+            said.push(format!("{label} px: too tight for both, name kept {:.0}%",
+                c.name.width() / text_w * 100.0));
+        }
+    }
+    Ok(said.join("; "))
 }
 
 pub fn run() -> i32 {
@@ -1226,7 +1333,11 @@ pub fn run() -> i32 {
                 egui::Pos2::new(100.0, 50.0),
                 egui::Vec2::new(700.0, 26.0),
             );
-            let (name, _size, date) = pane.details_columns(rect);
+            let columns = pane.details_columns(rect);
+            let (name, date) = (columns.name, columns.date);
+            if columns.path.is_some() {
+                return Err("a folder view has no Path column, and a search does".into());
+            }
             if pane.view != ViewMode::Icons {
                 return Err("the pane did not start in the icons view".into());
             }
@@ -1246,6 +1357,147 @@ pub fn run() -> i32 {
                 return Err("the measured padding is no longer 20 px".into());
             }
             Ok("name starts 20 px in, date ends 20 px short".into())
+        })(),
+    );
+
+    // The find bar's close button must sit inside the bar and clear of the scope
+    // chips, at every width. It used to be drawn last, after the field had taken
+    // the room it needed, and fell off the right edge of the window.
+    r.check(
+        "the find bar keeps its close button inside the bar, clear of the chips",
+        (|| {
+            use crate::search::ThumbCache;
+            use crate::state::{Clipboard, Pane, Request};
+            let root = base.join("findbar");
+            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+            let mut pane = Pane::new(12, root.clone());
+            pane.filter_on = true;
+            pane.filter = "anything".to_string();
+            pane.find_deep = true;
+            pane.start_search();
+            let mut said = Vec::new();
+            for width in [720.0f32, 900.0, 1400.0] {
+                let ctx = egui::Context::default();
+                let mut layout: Option<crate::views::FindBarLayout> = None;
+                let mut raw = egui::RawInput::default();
+                raw.screen_rect = Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(width, 260.0),
+                ));
+                let _ = ctx.run(raw, |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| {
+                            let mut thumbs = ThumbCache::new();
+                            let clip = Clipboard::new();
+                            let mut reqs: Vec<Request> = Vec::new();
+                            let mut vctx = crate::views::ViewCtx {
+                                thumbs: &mut thumbs,
+                                clipboard: &clip,
+                                reqs: &mut reqs,
+                                split: false,
+                                active: true,
+                                show_location_bar: false,
+                                other_dir: None,
+                            };
+                            layout = Some(pane.find_bar(ui, &mut vctx));
+                        });
+                });
+                let Some(bar) = layout else {
+                    return Err(format!("at {width:.0} px the bar never drew"));
+                };
+                let (close, chips) = (bar.close, bar.chips);
+                if close.width() <= 0.0 {
+                    return Err(format!("at {width:.0} px there was no close button"));
+                }
+                if chips.right() > close.left() + 0.01 {
+                    return Err(format!(
+                        "at {width:.0} px the chips (to {:.0}) run into the close button (from {:.0})",
+                        chips.right(),
+                        close.left()
+                    ));
+                }
+                if close.right() > width + 0.01 {
+                    return Err(format!(
+                        "at {width:.0} px the close button ends at {:.0}, past the edge",
+                        close.right()
+                    ));
+                }
+                said.push(format!("{width:.0} px: close at {:.0}..{:.0}", close.left(), close.right()));
+            }
+            pane.search = None;
+            Ok(said.join("; "))
+        })(),
+    );
+
+    // Added feature: while a search is showing, the details rows carry the folder
+    // each document was found in, between the name and the size. Both text
+    // columns are sized from the strings they actually hold, so neither the name
+    // nor the folder is cut short while the row has room for both.
+    r.check(
+        "a search's columns fit the longest name and folder, not a share of the row",
+        (|| {
+            use crate::state::Pane;
+            let root = base.join("searchfit");
+            let folder = "2024/03/reports-with-a-long-name-for-the-check";
+            let long_name = "quarterly-report-with-a-long-name-2026-09.txt";
+            let deep = root.join(folder);
+            std::fs::create_dir_all(&deep).map_err(|e| e.to_string())?;
+            std::fs::write(deep.join(long_name), b"x").map_err(|e| e.to_string())?;
+            std::fs::write(root.join("quarterly-top.txt"), b"x").map_err(|e| e.to_string())?;
+            let mut pane = Pane::new(11, root.clone());
+            pane.find_deep = true;
+            pane.filter = "quarterly".to_string();
+            pane.start_search();
+            wait_for_search(&mut pane)?;
+            if pane.search.as_ref().map(|s| s.results.len()).unwrap_or(0) != 2 {
+                return Err("the search did not find both files".into());
+            }
+            // The columns are measured from the fonts, so the check needs a real
+            // frame: run one and read the answer out of it.
+            let ctx = egui::Context::default();
+            let mut outcome: Option<Result<String, String>> = None;
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(1600.0, 900.0),
+            ));
+            let _ = ctx.run(raw, |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        pane.measure_search_columns(ui);
+                        outcome = Some(check_search_columns(ui, &pane, long_name, folder));
+                    });
+            });
+            match outcome {
+                Some(result) => result,
+                None => Err("the frame never ran".into()),
+            }
+        })(),
+    );
+    // The folder a hit is written as: relative to the folder that was searched,
+    // nothing for a file in that folder itself, and its own path outside it.
+    r.check(
+        "a search hit's folder is written relative to the folder searched",
+        (|| {
+            let root = std::path::Path::new("/home/me/docs");
+            if crate::views::hit_folder(root, std::path::Path::new("/home/me/docs/a.txt")).is_some()
+            {
+                return Err("a file in the searched folder got a folder name".into());
+            }
+            if crate::views::hit_folder(root, std::path::Path::new("/home/me/docs/2024/03/b.txt"))
+                .as_deref()
+                != Some("2024/03")
+            {
+                return Err("a file two folders down did not read 2024/03".into());
+            }
+            if crate::views::hit_folder(root, std::path::Path::new("/elsewhere/c.txt")).as_deref()
+                != Some("/elsewhere")
+            {
+                return Err("a file outside the search lost its own folder".into());
+            }
+            Ok("2024/03, —, /elsewhere".into())
         })(),
     );
 
@@ -1445,13 +1697,13 @@ pub fn run() -> i32 {
         "a marked shortcut keeps the colour the person gave it",
         (|| {
             use eframe::egui::Color32;
-            let red = Color32::from_rgb(196, 72, 66);
+            let red = theme::c(196, 72, 66);
             let plain = crate::place_icon_colour(false, Some(red));
             let marked = crate::place_icon_colour(true, Some(red));
             if plain != red {
                 return Err("an unmarked row changed its colour".into());
             }
-            if marked == Color32::WHITE || marked == plain {
+            if marked == theme::on_band() || marked == plain {
                 return Err("the marked row was repainted instead of tinted".into());
             }
             // Still red, not a washed-out grey: the red channel leads the others.
@@ -1469,7 +1721,7 @@ pub fn run() -> i32 {
             // A row with no colour of its own keeps the blue-grey place colour
             // rather than turning white.
             let place = crate::place_icon_colour(true, None);
-            if place == Color32::WHITE || place.b() <= place.r() {
+            if place == theme::on_band() || place.b() <= place.r() {
                 return Err(format!(
                     "a plain place row went colourless when marked: {:?}",
                     (place.r(), place.g(), place.b())
@@ -1807,10 +2059,10 @@ pub fn run() -> i32 {
             if font.family != eframe::egui::FontFamily::Proportional {
                 return Err(format!("the caption font family is {:?}", font.family));
             }
-            if caption_colour(false) != crate::theme::TEXT {
+            if caption_colour(false) != crate::theme::text() {
                 return Err("a plain size line is not drawn in the text colour".into());
             }
-            if caption_colour(true) != eframe::egui::Color32::WHITE {
+            if caption_colour(true) != theme::on_band() {
                 return Err("a marked picture's size line is not lifted to white".into());
             }
             // The wall gives the size line the same room it gives the name, so
@@ -3472,6 +3724,325 @@ pub fn run() -> i32 {
                 return Err("the rows were never drawn before the fold".into());
             }
             Ok(format!("folded on the click after {body_rows} row(s) drawn"))
+        })(),
+    );
+
+    // The *Added tools* group is a menu of tools rather than a place to walk
+    // to, so it starts folded and remembers being opened. The heading's count is
+    // read from the same table that draws the rows, so the two cannot drift.
+    r.check(
+        "the Added tools group starts folded and counts its own rows",
+        (|| {
+            use crate::config::Config;
+            let fresh = Config::default();
+            if fresh.tools_expanded {
+                return Err("a fresh profile opens with the tools group unfolded".into());
+            }
+            // A file written before the group could fold lands folded as well.
+            let old: Config = serde_json::from_str("{\"last_dir\":\"/tmp\"}")
+                .map_err(|e| e.to_string())?;
+            if old.tools_expanded {
+                return Err("a settings file without the key opened the group".into());
+            }
+            // Opened once, the choice is the person's and survives a reload.
+            let mut opened = fresh.clone();
+            opened.tools_expanded = true;
+            let text = serde_json::to_string(&opened).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            if !back.tools_expanded {
+                return Err("the open group did not survive the settings file".into());
+            }
+            if crate::settings_signature(&fresh) == crate::settings_signature(&opened) {
+                return Err("folding the group never reaches the settings file".into());
+            }
+            if crate::ADDED_TOOLS.is_empty() {
+                return Err("the group has no rows to show".into());
+            }
+            let mut labels: Vec<&str> = crate::ADDED_TOOLS.iter().map(|t| t.label).collect();
+            labels.sort_unstable();
+            let distinct = labels.len();
+            labels.dedup();
+            if labels.len() != distinct {
+                return Err(format!("two tool rows share a label: {labels:?}"));
+            }
+            Ok(format!(
+                "{} rows, folded on a fresh profile",
+                crate::ADDED_TOOLS.len()
+            ))
+        })(),
+    );
+    // The *Network* group can leave the panel altogether, heading included, for
+    // a desktop with no shares — and a hidden group still has a switch, because
+    // its heading is gone and a setting with no way back is a trap.
+    r.check(
+        "the Network group is shown by default and stays hidden when switched off",
+        (|| {
+            use crate::config::Config;
+            let fresh = Config::default();
+            if !fresh.network_visible {
+                return Err("a fresh profile hides the Network group".into());
+            }
+            let old: Config = serde_json::from_str("{\"last_dir\":\"/tmp\"}")
+                .map_err(|e| e.to_string())?;
+            if !old.network_visible {
+                return Err("a settings file without the key hid the group".into());
+            }
+            let mut hidden = fresh.clone();
+            hidden.network_visible = false;
+            let text = serde_json::to_string(&hidden).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            if back.network_visible {
+                return Err("hiding the group did not survive the settings file".into());
+            }
+            if crate::settings_signature(&fresh) == crate::settings_signature(&hidden) {
+                return Err("hiding the group never reaches the settings file".into());
+            }
+            Ok("shown on a fresh profile, the switch is remembered".into())
+        })(),
+    );
+
+    // The light palette is derived from the dark one, so both modes stay in step:
+    // every surface the dark window paints dark has to come out light, every
+    // piece of text has to invert, and the setting has to survive the file.
+    r.check(
+        "the light palette is the dark one with its lightness flipped",
+        (|| {
+            use crate::config::Config;
+            use crate::theme;
+            let lum = |c: egui::Color32| {
+                (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0
+            };
+            theme::set_light(false);
+            // Dark first: surfaces under 0.25, text over 0.85.
+            for (name, c) in [
+                ("view", theme::view_bg()),
+                ("panel", theme::panel_bg()),
+                ("toolbar", theme::toolbar_bg()),
+                ("header", theme::header_bg()),
+            ] {
+                if lum(c) > 0.25 {
+                    return Err(format!("the dark {name} is not dark ({:.2})", lum(c)));
+                }
+            }
+            if lum(theme::text()) < 0.85 {
+                return Err("the dark text is not light".into());
+            }
+            theme::set_light(true);
+            let light = [
+                ("view", theme::view_bg()),
+                ("panel", theme::panel_bg()),
+                ("toolbar", theme::toolbar_bg()),
+                ("header", theme::header_bg()),
+            ];
+            for (name, c) in light {
+                if lum(c) < 0.85 {
+                    theme::set_light(false);
+                    return Err(format!("the light {name} is not light ({:.2})", lum(c)));
+                }
+            }
+            // Text has to invert, and stay far enough from the surface behind it.
+            let ink = lum(theme::text());
+            let bg = lum(theme::view_bg());
+            let light_view = bg;
+            if ink > 0.25 {
+                theme::set_light(false);
+                return Err(format!("the light text is not dark ({ink:.2})"));
+            }
+            if bg - ink < 0.55 {
+                theme::set_light(false);
+                return Err(format!(
+                    "light text and view background are only {:.2} apart",
+                    bg - ink
+                ));
+            }
+            // Every icon colour keeps its hue: a blue folder stays blue.
+            let folder = theme::folder();
+            if !(folder.b() > folder.r() + 20) {
+                theme::set_light(false);
+                return Err("the light folder icon lost its blue".into());
+            }
+            theme::set_light(false);
+            if crate::settings_signature(&Config::default()) == crate::settings_signature(&{
+                let mut c = Config::default();
+                c.light = true;
+                c
+            }) {
+                return Err("the light switch never reaches the settings file".into());
+            }
+            let mut saved = Config::default();
+            saved.light = true;
+            let text = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            if !back.light {
+                return Err("the light switch did not survive the settings file".into());
+            }
+            let old: Config = serde_json::from_str("{\"last_dir\":\"/tmp\"}")
+                .map_err(|e| e.to_string())?;
+            if old.light {
+                return Err("a settings file without the key opened light".into());
+            }
+            Ok(format!(
+                "light: view {light_view:.2}, text {ink:.2}, folder keeps its blue"
+            ))
+        })(),
+    );
+
+    // The light palette must never stand in for *white* itself. A picture's tint is
+    // multiplied into the thumbnail, and a blend towards white has to stay a blend
+    // towards white, so those sites take `Color32::WHITE` — which in light mode is
+    // not what `c(255, 255, 255)` returns. The same for the colours that mean
+    // "readable on a band" or "readable on a black scrim", and for the colour
+    // `RichText::strong()` inherits from egui.
+    r.check(
+        "the light palette does not stand in for white, black or a band's text",
+        (|| {
+            use crate::theme;
+            theme::set_light(false);
+            if theme::c(255, 255, 255) != egui::Color32::WHITE {
+                return Err("dark mode: c(255,255,255) is not white".into());
+            }
+            let on_band_dark = theme::on_band();
+            let scrim_dark = theme::on_scrim();
+            let edge_dark = theme::paper_edge();
+            theme::set_light(true);
+            let out = (|| {
+                if theme::c(255, 255, 255) == egui::Color32::WHITE {
+                    return Err(
+                        "in light mode c(255,255,255) is still white, so nothing warns a tint away from it".to_string()
+                    );
+                }
+                if theme::on_band() == on_band_dark {
+                    return Err("text on the selection band did not follow the band".to_string());
+                }
+                if theme::on_scrim() != scrim_dark {
+                    return Err("text on the viewer's black scrim changed with the mode".to_string());
+                }
+                if theme::paper_edge() == edge_dark {
+                    return Err("the document page has no edge in light mode".to_string());
+                }
+                if theme::paper() != egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255) {
+                    return Err("the document page is not paper in light mode".to_string());
+                }
+                // egui takes RichText::strong() from the active widget visuals.
+                let ctx = egui::Context::default();
+                theme::apply_style(&ctx);
+                let strong = ctx.style().visuals.strong_text_color();
+                if strong != theme::text() {
+                    return Err(format!(
+                        "strong text is {strong:?} while the palette's text is {:?}: emphasised names would vanish",
+                        theme::text()
+                    ));
+                }
+                Ok(())
+            })();
+            theme::set_light(false);
+            out?;
+            Ok("tints stay white, scrims stay light, the page keeps its edge, strong text follows the palette".into())
+        })(),
+    );
+
+    // Copy to Other View / Move to Other View, and the Copy To… chooser behind
+    // them: the four refusals in the order the original tests them, and a run
+    // that actually copies and moves.
+    r.check(
+        "copying to the other view refuses what the original refuses, in its words",
+        (|| {
+            use crate::copymove::{already_there, plan, run, verdict, Facts, Mode};
+            let ok = Facts {
+                split: true,
+                selected: 1,
+                already_there: false,
+                dest_writable: true,
+                may_move: true,
+            };
+            if !verdict(Mode::Copy, &ok).ok {
+                return Err("one marked file and a writable destination was refused".into());
+            }
+            let alone = Facts { split: false, ..ok.clone() };
+            let v = verdict(Mode::Copy, &alone);
+            if v.ok || v.why.is_some() {
+                return Err("with one view the rows should be disabled without a sentence".into());
+            }
+            let nothing = Facts { selected: 0, ..ok.clone() };
+            if verdict(Mode::Copy, &nothing).why.as_deref()
+                != Some("Cannot copy to other view: No files selected.")
+            {
+                return Err(format!("nothing marked said {:?}", verdict(Mode::Copy, &nothing).why));
+            }
+            let there = Facts { already_there: true, ..ok.clone() };
+            if verdict(Mode::Move, &there).why.as_deref()
+                != Some("Cannot move to other view: The other view already contains these items.")
+            {
+                return Err("a destination that already holds the item was not refused in the original's words".into());
+            }
+            let readonly = Facts { dest_writable: false, ..ok.clone() };
+            if verdict(Mode::Copy, &readonly).why.as_deref()
+                != Some("Cannot copy to other view: You do not have permission to write into the destination folder.")
+            {
+                return Err("a destination that cannot be written was not refused".into());
+            }
+            let stuck = Facts { may_move: false, ..ok.clone() };
+            if verdict(Mode::Move, &stuck).why.as_deref()
+                != Some("Cannot move to other view: You do not have permission to move items from this folder.")
+            {
+                return Err("a move that cannot leave was not refused".into());
+            }
+            if !verdict(Mode::Copy, &stuck).ok {
+                return Err("a copy is not blocked by being unable to move".into());
+            }
+
+            // A real copy, a name that steps aside, and a move.
+            let root = base.join("copymove");
+            let from = root.join("from");
+            let to = root.join("to");
+            fs::create_dir_all(&from).map_err(|e| e.to_string())?;
+            fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+            let one = from.join("report.txt");
+            fs::write(&one, b"hello").map_err(|e| e.to_string())?;
+            let folder = from.join("tree");
+            fs::create_dir_all(folder.join("deeper")).map_err(|e| e.to_string())?;
+            fs::write(folder.join("deeper/leaf.txt"), b"leaf").map_err(|e| e.to_string())?;
+            fs::write(to.join("report.txt"), b"the one already there").map_err(|e| e.to_string())?;
+            // "Already there" is about an item's own folder, so the file in
+            // `from` is not in `to`, and a file sitting in `to` is.
+            if already_there(&to, std::slice::from_ref(&one)) {
+                return Err("an item in another folder was called already in the destination".into());
+            }
+            if !already_there(&to, std::slice::from_ref(&to.join("report.txt"))) {
+                return Err("an item whose own folder is the destination was not noticed".into());
+            }
+
+            let p = plan(&to, &[one.clone(), folder.clone()]);
+            if p.steps.len() != 2 || !p.skipped.is_empty() {
+                return Err(format!("planned {} steps, {} skipped", p.steps.len(), p.skipped.len()));
+            }
+            if p.steps[0].to != to.join("report (1).txt") {
+                return Err(format!("the taken name did not step aside: {:?}", p.steps[0].to));
+            }
+            let inside = plan(&folder, &[folder.clone()]);
+            if inside.steps.len() != 0 || inside.skipped.len() != 1 {
+                return Err("a folder was planned into itself".into());
+            }
+            let outcome = run(&p, Mode::Copy);
+            if outcome.done != 2 || outcome.failed != 0 {
+                return Err(format!("copy: {} done, {} failed: {:?}", outcome.done, outcome.failed, outcome.first_error));
+            }
+            if !to.join("report (1).txt").exists() || !to.join("tree/deeper/leaf.txt").exists() {
+                return Err("the copy did not arrive, or did not bring the folder with it".into());
+            }
+            if fs::read(to.join("report.txt")).map_err(|e| e.to_string())? != b"the one already there" {
+                return Err("the copy overwrote the file that was already there".into());
+            }
+            let moved = plan(&to.join("moved"), &[to.join("report (1).txt")]);
+            fs::create_dir_all(to.join("moved")).map_err(|e| e.to_string())?;
+            let outcome = run(&moved, Mode::Move);
+            if outcome.done != 1 || to.join("report (1).txt").exists() {
+                return Err("the move did not take the file away".into());
+            }
+            Ok(format!(
+                "five refusals in the original's words; a copy stepped aside to {:?} and a move took the file away",
+                p.steps[0].to.file_name().unwrap_or_default()
+            ))
         })(),
     );
 

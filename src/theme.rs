@@ -4,29 +4,219 @@ use eframe::egui::{
     self, epaint::PathStroke, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily,
     FontId, Pos2, Rect, Stroke, TextStyle, Vec2,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::fsutil::Kind;
 
-// Breeze-dark-like palette, sampled from the reference window.
-pub const VIEW_BG: Color32 = Color32::from_rgb(35, 38, 41);
-pub const PANEL_BG: Color32 = Color32::from_rgb(43, 47, 51);
-pub const TOOLBAR_BG: Color32 = Color32::from_rgb(49, 54, 59);
-pub const HEADER_BG: Color32 = Color32::from_rgb(46, 51, 56);
-pub const ROW_HOVER: Color32 = Color32::from_rgb(57, 63, 69);
-pub const ROW_SEL_ACTIVE: Color32 = Color32::from_rgb(42, 104, 143);
-pub const ROW_SEL_INACTIVE: Color32 = Color32::from_rgb(64, 72, 79);
-pub const TEXT: Color32 = Color32::from_rgb(239, 240, 241);
-pub const TEXT_DIM: Color32 = Color32::from_rgb(152, 160, 166);
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(120, 128, 134);
-pub const ACCENT: Color32 = Color32::from_rgb(61, 174, 233);
-pub const BORDER: Color32 = Color32::from_rgb(27, 30, 33);
-pub const SEPARATOR: Color32 = Color32::from_rgb(53, 59, 64);
-pub const FOLDER: Color32 = Color32::from_rgb(76, 148, 201);
-pub const FOLDER_TOP: Color32 = Color32::from_rgb(104, 172, 219);
-pub const PAPER: Color32 = Color32::from_rgb(226, 230, 233);
-pub const PAPER_SHADE: Color32 = Color32::from_rgb(188, 194, 199);
-pub const PLACE: Color32 = Color32::from_rgb(150, 178, 198);
+// ---------------------------------------------------------------------------
+// Palette — dark and light
+// ---------------------------------------------------------------------------
+
+/// Added feature, asked for by the person: dark and light, switched from the app
+/// menu's View group. Every colour in the window is written down once, as the
+/// dark value sampled from the reference window, and `c()` derives the light one
+/// from it — so a colour added anywhere later is right in both modes without a
+/// second palette to keep in step. Only the two colours where the derivation
+/// reads badly (the paper of the document icon, which has to stay paper) are
+/// written out by hand.
+static LIGHT: AtomicBool = AtomicBool::new(false);
+
+/// Is the light palette in use?
+pub fn light() -> bool {
+    LIGHT.load(Ordering::Relaxed)
+}
+
+/// Choose the palette. The window has to be restyled afterwards
+/// (`apply_style`), because egui's own widget colours are set once and kept.
+pub fn set_light(on: bool) {
+    LIGHT.store(on, Ordering::Relaxed);
+}
+
+/// `r, g, b` as the current mode draws it. Light mode keeps the hue and flips the
+/// lightness, stretched — `1 − L^1.6` — so the near-black surfaces of the dark
+/// palette come out near-white (L 0.15 → 0.95) instead of a muddy grey, the
+/// near-white text lands near black (0.94 → 0.09), and a mid-tone icon colour
+/// barely moves at all. Saturation gives a little, as it does in any light
+/// scheme.
+pub fn c(r: u8, g: u8, b: u8) -> Color32 {
+    if !light() {
+        return Color32::from_rgba_unmultiplied(r, g, b, 255);
+    }
+    let (h, s, l) = rgb_to_hsl(r, g, b);
+    let l2 = (1.0 - l.powf(1.6)).clamp(0.04, 0.98);
+    hsl_to_colour(h, s * 0.92, l2)
+}
+
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < f32::EPSILON {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
+    } else if max == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    (h, s, l)
+}
+
+fn hsl_to_colour(h: f32, s: f32, l: f32) -> Color32 {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    if s <= 0.0 {
+        let v = byte(l);
+        return Color32::from_rgba_unmultiplied(v, v, v, 255);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let channel = |mut t: f32| {
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        }
+    };
+    Color32::from_rgba_unmultiplied(
+        byte(channel(h + 1.0 / 3.0)),
+        byte(channel(h)),
+        byte(channel(h - 1.0 / 3.0)),
+        255,
+    )
+}
+
+// The palette, written as the dark values from the reference window. Each one is
+// handed to `c()`, so the light value comes from the same line of code.
+/// The view behind the file rows.
+pub fn view_bg() -> Color32 {
+    c(35, 38, 41)
+}
+/// The side panel and the find bar's strip.
+pub fn panel_bg() -> Color32 {
+    c(43, 47, 51)
+}
+/// The toolbar and dialog chrome.
+pub fn toolbar_bg() -> Color32 {
+    c(49, 54, 59)
+}
+/// The details view's column header.
+pub fn header_bg() -> Color32 {
+    c(46, 51, 56)
+}
+/// A row under the pointer.
+pub fn row_hover() -> Color32 {
+    c(57, 63, 69)
+}
+/// The selected row of the view the person is working in.
+pub fn row_sel_active() -> Color32 {
+    c(42, 104, 143)
+}
+/// The selected row of the view beside it.
+pub fn row_sel_inactive() -> Color32 {
+    c(64, 72, 79)
+}
+/// Text drawn on the selection band, or on a button filled with `accent()`: white
+/// in the dark palette, near-black in the light one, because the band it sits on
+/// inverts with everything else.
+pub fn on_band() -> Color32 {
+    self::c(255, 255, 255)
+}
+
+/// Text drawn on a dark scrim laid over a photograph (the viewer's name strips).
+/// The scrim is black in both modes, so its text stays light in both.
+pub fn on_scrim() -> Color32 {
+    Color32::from_rgba_unmultiplied(226, 232, 238, 255)
+}
+
+/// The outline of a document page. In the dark palette the page's own brightness
+/// is its edge, so this is the page colour and the stroke is invisible; in the
+/// light one a white page on a white view has no shape at all without a grey
+/// line around it.
+pub fn paper_edge() -> Color32 {
+    if light() {
+        Color32::from_rgba_unmultiplied(163, 171, 178, 255)
+    } else {
+        paper()
+    }
+}
+
+/// A colour with its own light value, for the two places where the derivation
+/// reads too pale on white to be worth keeping. Everything else comes from `c()`.
+fn pair(dark: (u8, u8, u8), light: (u8, u8, u8)) -> Color32 {
+    let (r, g, b) = if self::light() { light } else { dark };
+    Color32::from_rgba_unmultiplied(r, g, b, 255)
+}
+
+/// File names and other primary text.
+pub fn text() -> Color32 {
+    c(239, 240, 241)
+}
+/// Secondary text: sizes, dates, hints. Written out in light mode, where the
+/// derivation leaves it too pale to read on white.
+pub fn text_dim() -> Color32 {
+    pair((152, 160, 166), (86, 94, 100))
+}
+/// Tertiary text: counts and captions. Likewise written out.
+pub fn text_faint() -> Color32 {
+    pair((120, 128, 134), (118, 126, 132))
+}
+/// The one accent: the active sort column, the chosen chip, the focus ring.
+pub fn accent() -> Color32 {
+    c(61, 174, 233)
+}
+/// The window's outer edge.
+pub fn border() -> Color32 {
+    c(27, 30, 33)
+}
+/// The hairline between rows and columns.
+pub fn separator() -> Color32 {
+    c(53, 59, 64)
+}
+/// The folder icon's body.
+pub fn folder() -> Color32 {
+    c(76, 148, 201)
+}
+/// The folder icon's lit top edge.
+pub fn folder_top() -> Color32 {
+    c(104, 172, 219)
+}
+/// The document icon's page. Written out: `c()` would turn a white page into a
+/// black one, and a file is drawn on paper in either mode.
+pub fn paper() -> Color32 {
+    if light() {
+        Color32::from_rgba_unmultiplied(255, 255, 255, 255)
+    } else {
+        Color32::from_rgba_unmultiplied(226, 230, 233, 255)
+    }
+}
+/// The fold and the page's edge.
+pub fn paper_shade() -> Color32 {
+    if light() {
+        Color32::from_rgba_unmultiplied(176, 184, 190, 255)
+    } else {
+        Color32::from_rgba_unmultiplied(188, 194, 199, 255)
+    }
+}
+/// The glyph of a place in the side panel.
+pub fn place() -> Color32 {
+    c(150, 178, 198)
+}
 
 /// The original's ceiling: `ZoomLevelInfo::maximumLevel()` @0x2a6370 returns 16,
 /// and level 16 is 256 px. Everything up to here is measured, not chosen.
@@ -198,35 +388,47 @@ pub fn install(ctx: &egui::Context) {
     }
     ctx.set_fonts(fonts);
 
+    apply_style(ctx);
+}
+
+/// The window's colours and spacing, from the palette in force. Called once at
+/// startup and again whenever the person switches between dark and light, which
+/// is why the fonts are set in `install` and only the style is here.
+pub fn apply_style(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
     let mut v = egui::Visuals::dark();
-    v.panel_fill = PANEL_BG;
-    v.window_fill = TOOLBAR_BG;
-    v.window_stroke = Stroke::new(1.0, BORDER);
-    v.extreme_bg_color = Color32::from_rgb(30, 33, 36);
-    v.faint_bg_color = Color32::from_rgb(48, 53, 58);
-    v.selection.bg_fill = Color32::from_rgb(42, 104, 143);
-    v.selection.stroke = Stroke::new(1.0, TEXT);
-    v.hyperlink_color = ACCENT;
+    v.panel_fill = panel_bg();
+    v.window_fill = toolbar_bg();
+    v.window_stroke = Stroke::new(1.0, border());
+    v.extreme_bg_color = c(30, 33, 36);
+    v.faint_bg_color = c(48, 53, 58);
+    v.selection.bg_fill = c(42, 104, 143);
+    v.selection.stroke = Stroke::new(1.0, text());
+    v.hyperlink_color = accent();
     v.slider_trailing_fill = true;
     v.widgets.noninteractive.bg_fill = Color32::TRANSPARENT;
     v.widgets.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, SEPARATOR);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TEXT_DIM);
-    v.widgets.inactive.bg_fill = Color32::from_rgb(56, 62, 68);
-    v.widgets.inactive.weak_bg_fill = Color32::from_rgb(56, 62, 68);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, separator());
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_dim());
+    v.widgets.inactive.bg_fill = c(56, 62, 68);
+    v.widgets.inactive.weak_bg_fill = c(56, 62, 68);
     v.widgets.inactive.bg_stroke = Stroke::NONE;
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
-    v.widgets.hovered.bg_fill = Color32::from_rgb(70, 78, 85);
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(70, 78, 85);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(84, 92, 99));
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, Color32::WHITE);
-    v.widgets.active.bg_fill = Color32::from_rgb(61, 174, 233);
-    v.widgets.active.weak_bg_fill = Color32::from_rgb(61, 174, 233);
-    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::from_rgb(24, 27, 30));
-    v.widgets.open.bg_fill = Color32::from_rgb(70, 78, 85);
-    v.widgets.open.weak_bg_fill = Color32::from_rgb(70, 78, 85);
-    v.widgets.open.fg_stroke = Stroke::new(1.0, ACCENT);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, text());
+    v.widgets.hovered.bg_fill = c(70, 78, 85);
+    v.widgets.hovered.weak_bg_fill = c(70, 78, 85);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, c(84, 92, 99));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, c(255, 255, 255));
+    v.widgets.active.bg_fill = c(61, 174, 233);
+    v.widgets.active.weak_bg_fill = c(61, 174, 233);
+    // `RichText::strong()` takes its colour from the active widget visuals, so
+    // this is the colour of every emphasised name in the window (the location
+    // bar's current folder, a file's name in its properties). It has to follow
+    // the palette: left as a dark literal it turned near-white in light mode and
+    // those names vanished.
+    v.widgets.active.fg_stroke = Stroke::new(1.0, text());
+    v.widgets.open.bg_fill = c(70, 78, 85);
+    v.widgets.open.weak_bg_fill = c(70, 78, 85);
+    v.widgets.open.fg_stroke = Stroke::new(1.0, accent());
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
     style.visuals = v;
@@ -246,7 +448,7 @@ pub fn install(ctx: &egui::Context) {
 
 /// Cut a string to fit `max_w`, appending an ellipsis.
 pub fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
-    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), TEXT));
+    let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), self::text()));
     if galley.size().x <= max_w {
         return text.to_owned();
     }
@@ -257,7 +459,7 @@ pub fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
         let mid = (lo + hi + 1) / 2;
         let candidate: String = text.chars().take(mid).collect::<String>() + ell;
         let w = ui
-            .fonts_mut(|f| f.layout_no_wrap(candidate, font.clone(), TEXT))
+            .fonts_mut(|f| f.layout_no_wrap(candidate, font.clone(), self::text()))
             .size()
             .x;
         if w <= max_w {
@@ -281,7 +483,7 @@ pub fn elide(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
 /// location bar keep the right-hand cut Qt gives them.
 pub fn elide_name(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String {
     let width = |s: &str, ui: &egui::Ui| {
-        ui.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), TEXT))
+        ui.fonts_mut(|f| f.layout_no_wrap(s.to_owned(), font.clone(), self::text()))
             .size()
             .x
     };
@@ -354,8 +556,8 @@ pub const SELECTION_LIFT: f32 = 0.32;
 
 /// The colour an icon keeps on the marked row: the same hue, lifted towards
 /// white so it is legible on the selection band.
-pub fn selection_tint(c: Color32) -> Color32 {
-    blend(c, Color32::WHITE, SELECTION_LIFT)
+pub fn selection_tint(colour: Color32) -> Color32 {
+    blend(colour, Color32::WHITE, SELECTION_LIFT)
 }
 
 /// Blend `a` towards `b` by `t` (0..=1).
@@ -373,9 +575,9 @@ fn draw_folder(painter: &egui::Painter, rect: Rect, alpha: u8, tint: Option<Colo
             blend(base, Color32::BLACK, 0.20),
         ),
         None => (
-            FOLDER,
-            FOLDER_TOP,
-            Color32::from_rgb(58, 122, 168),
+            folder(),
+            folder_top(),
+            c(58, 122, 168),
         ),
     };
     let (w, h) = (rect.width(), rect.height());
@@ -424,8 +626,8 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
     ];
     painter.add(egui::Shape::convex_polygon(
         page,
-        fade(PAPER, alpha),
-        PathStroke::NONE,
+        fade(paper(), alpha),
+        PathStroke::new(1.0, fade(paper_edge(), alpha)),
     ));
     // Folded corner.
     let corner = vec![
@@ -435,7 +637,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
     ];
     painter.add(egui::Shape::convex_polygon(
         corner,
-        fade(PAPER_SHADE, alpha),
+        fade(paper_shade(), alpha),
         PathStroke::NONE,
     ));
 
@@ -446,7 +648,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
 
     match kind {
         Kind::Image => {
-            let green = fade(Color32::from_rgb(103, 168, 92), alpha);
+            let green = fade(c(103, 168, 92), alpha);
             let hill = vec![
                 Pos2::new(g.left(), g.bottom()),
                 Pos2::new(g.left() + g.width() * 0.34, g.top() + g.height() * 0.42),
@@ -460,17 +662,17 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             ];
             painter.add(egui::Shape::convex_polygon(
                 hill2,
-                fade(Color32::from_rgb(76, 140, 70), alpha),
+                fade(c(76, 140, 70), alpha),
                 PathStroke::NONE,
             ));
             painter.circle_filled(
                 Pos2::new(g.left() + g.width() * 0.24, g.top() + g.height() * 0.22),
                 g.width() * 0.11,
-                fade(Color32::from_rgb(240, 194, 84), alpha),
+                fade(c(240, 194, 84), alpha),
             );
         }
         Kind::Audio => {
-            let orange = fade(Color32::from_rgb(219, 139, 61), alpha);
+            let orange = fade(c(219, 139, 61), alpha);
             painter.circle_filled(
                 Pos2::new(g.left() + g.width() * 0.30, g.bottom() - g.height() * 0.12),
                 g.width() * 0.15,
@@ -505,7 +707,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             );
         }
         Kind::Video => {
-            let purple = fade(Color32::from_rgb(151, 116, 206), alpha);
+            let purple = fade(c(151, 116, 206), alpha);
             let tri = vec![
                 Pos2::new(g.left() + g.width() * 0.18, g.top()),
                 Pos2::new(g.right() - g.width() * 0.10, cy),
@@ -514,7 +716,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             painter.add(egui::Shape::convex_polygon(tri, purple, PathStroke::NONE));
         }
         Kind::Archive => {
-            let amber = fade(Color32::from_rgb(198, 158, 80), alpha);
+            let amber = fade(c(198, 158, 80), alpha);
             painter.rect_filled(
                 Rect::from_min_max(
                     Pos2::new(g.left(), g.top() + g.height() * 0.18),
@@ -533,7 +735,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             );
         }
         Kind::Text => {
-            let grey = fade(Color32::from_rgb(140, 148, 154), alpha);
+            let grey = fade(c(140, 148, 154), alpha);
             for i in 0..3 {
                 let y = g.top() + g.height() * (0.12 + 0.26 * i as f32);
                 painter.line_segment(
@@ -546,7 +748,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             }
         }
         Kind::Code => {
-            let teal = fade(Color32::from_rgb(86, 170, 175), alpha);
+            let teal = fade(c(86, 170, 175), alpha);
             let st = Stroke::new((h * 0.045).clamp(1.2, 2.4), teal);
             painter.line_segment(
                 [
@@ -578,7 +780,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             );
         }
         Kind::Pdf => {
-            let red = fade(Color32::from_rgb(203, 84, 74), alpha);
+            let red = fade(c(203, 84, 74), alpha);
             painter.rect_filled(
                 Rect::from_min_max(
                     Pos2::new(g.left(), g.top() + g.height() * 0.40),
@@ -592,11 +794,11 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
                 Align2::CENTER_CENTER,
                 "PDF",
                 FontId::proportional((g.height() * 0.30).max(6.0)),
-                fade(Color32::WHITE, alpha),
+                fade(c(255, 255, 255), alpha),
             );
         }
         Kind::Exec => {
-            let green = fade(Color32::from_rgb(96, 168, 104), alpha);
+            let green = fade(c(96, 168, 104), alpha);
             painter.circle_filled(Pos2::new(cx, cy + h * 0.08), g.width() * 0.16, green);
             for i in 0..6 {
                 let a = i as f32 * std::f32::consts::TAU / 6.0;
@@ -608,7 +810,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             }
         }
         Kind::Config => {
-            let blue = fade(Color32::from_rgb(104, 156, 200), alpha);
+            let blue = fade(c(104, 156, 200), alpha);
             for i in 0..3 {
                 let y = g.top() + g.height() * (0.22 + 0.28 * i as f32);
                 painter.line_segment(
@@ -623,7 +825,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             }
         }
         Kind::Link => {
-            let accent = fade(ACCENT, alpha);
+            let accent = fade(accent(), alpha);
             let stw = (h * 0.045).clamp(1.2, 2.4);
             painter.circle_stroke(
                 Pos2::new(cx - g.width() * 0.16, cy + h * 0.06),
@@ -637,7 +839,7 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             );
         }
         _ => {
-            let grey = fade(Color32::from_rgb(150, 157, 163), alpha);
+            let grey = fade(c(150, 157, 163), alpha);
             for i in 0..3 {
                 let y = g.top() + g.height() * (0.20 + 0.28 * i as f32);
                 painter.line_segment(
@@ -963,7 +1165,7 @@ pub fn colour_menu(ui: &mut egui::Ui, current: Option<[u8; 3]>) -> Option<Colour
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             for sw in row {
-                let rgb = Color32::from_rgb(sw.rgb[0], sw.rgb[1], sw.rgb[2]);
+                let rgb = c(sw.rgb[0], sw.rgb[1], sw.rgb[2]);
                 let (rect, resp) = ui.allocate_exact_size(Vec2::splat(26.0), egui::Sense::click());
                 let painter = ui.painter();
                 painter.rect_filled(rect.shrink(2.0), CornerRadius::same(4), rgb);
@@ -974,9 +1176,9 @@ pub fn colour_menu(ui: &mut egui::Ui, current: Option<[u8; 3]>) -> Option<Colour
                     Stroke::new(
                         if chosen { 2.0 } else { 1.0 },
                         if chosen {
-                            Color32::WHITE
+                            c(255, 255, 255)
                         } else {
-                            Color32::from_rgb(24, 27, 30)
+                            c(24, 27, 30)
                         },
                     ),
                     egui::StrokeKind::Inside,

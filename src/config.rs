@@ -158,6 +158,21 @@ pub struct Config {
     /// because the original shows its Remote group from the start.
     #[serde(default = "yes")]
     pub network_expanded: bool,
+    /// Added feature, asked for by the person: the light palette instead of the
+    /// dark one. Absent from an older settings file, it means dark — the palette
+    /// the window has always drawn.
+    #[serde(default)]
+    pub light: bool,
+    /// Added feature: whether the *Network* group is drawn at all. A desktop
+    /// with no shares shows an empty heading and one row of apology, so the
+    /// menu carries a switch to take the group off the panel and put it back.
+    #[serde(default = "yes")]
+    pub network_visible: bool,
+    /// Added feature: the *Added tools* group folds away like the other groups
+    /// and starts folded. It is a list of tools rather than a place to walk to,
+    /// so a new window shows the places first and the tools one click away.
+    #[serde(default)]
+    pub tools_expanded: bool,
     /// How many rows *Recent Files* asks the list for. The panel is narrow and
     /// a group taller than the window is not a shortcut, so it stops at eight.
     #[serde(default = "recent_rows")]
@@ -312,6 +327,9 @@ impl Default for Config {
             recent_files_expanded: true,
             recent_locations_expanded: true,
             network_expanded: true,
+            network_visible: true,
+            tools_expanded: false,
+            light: false,
             recent_files_shown: 8,
             recent_locations: Vec::new(),
 

@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Color32, FontId, Id, Pos2, Rect, Sense, Stroke, Vec2};
 
-use crate::theme::{ACCENT, BORDER, TEXT};
+use crate::theme;
 
 /// What the widget remembers between frames, keyed by its id in egui's
 /// temporary store: the two ends of the selection and whether a drag is in
@@ -115,7 +115,7 @@ pub fn text_block(ui: &mut egui::Ui, id: Id, text: &str, max_height: f32) -> Tex
     let wrap_width = (ui.available_width() - 2.0 * PAD - GUTTER).max(40.0);
     let galley: Arc<egui::Galley> = ui
         .painter()
-        .layout(text.to_owned(), font, TEXT, wrap_width);
+        .layout(text.to_owned(), font, theme::text(), wrap_width);
     let content_h = galley.size().y + 2.0 * PAD;
     // Cut the box on a line boundary rather than through the middle of a row:
     // a half-drawn line at the bottom looks like a bug and hides the fact that
@@ -263,13 +263,13 @@ pub fn text_block(ui: &mut egui::Ui, id: Id, text: &str, max_height: f32) -> Tex
             Pos2::new(view.right(), (view.bottom() - PAD).max(view.top() + 1.0)),
         );
         let painter = ui.painter().with_clip_rect(clip);
-        painter.rect_filled(rect, 3.0, Color32::from_rgb(33, 37, 40));
+        painter.rect_filled(rect, 3.0, theme::c(33, 37, 40));
         painter.rect_stroke(
             rect,
             3.0,
             Stroke::new(
                 1.0,
-                if resp.has_focus() { ACCENT } else { BORDER },
+                if resp.has_focus() { theme::accent() } else { theme::border() },
             ),
             egui::StrokeKind::Inside,
         );
@@ -295,7 +295,7 @@ pub fn text_block(ui: &mut egui::Ui, id: Id, text: &str, max_height: f32) -> Tex
                 }
             }
         }
-        painter.galley(origin, galley.clone(), TEXT);
+        painter.galley(origin, galley.clone(), theme::text());
 
         // A hairline down the right edge shows how much of the text is in view.
         if scrolls {
@@ -303,7 +303,7 @@ pub fn text_block(ui: &mut egui::Ui, id: Id, text: &str, max_height: f32) -> Tex
                 Pos2::new(rect.right() - 5.0, rect.top() + 3.0),
                 Pos2::new(rect.right() - 2.0, rect.bottom() - 3.0),
             );
-            painter.rect_filled(track, 2.0, Color32::from_rgb(48, 53, 57));
+            painter.rect_filled(track, 2.0, theme::c(48, 53, 57));
             let frac = (block.view.height() / rect.height()).clamp(0.06, 1.0);
             let top = rect.top()
                 + (rect.height() - track.height() * frac)
@@ -317,7 +317,7 @@ pub fn text_block(ui: &mut egui::Ui, id: Id, text: &str, max_height: f32) -> Tex
                 Pos2::new(track.left(), top),
                 Vec2::new(track.width(), track.height() * frac),
             );
-            painter.rect_filled(thumb, 2.0, Color32::from_rgb(96, 105, 112));
+            painter.rect_filled(thumb, 2.0, theme::c(96, 105, 112));
         }
 
         if state.range().is_some_and(|(a, b)| b > a) {
