@@ -837,7 +837,7 @@ impl Pane {
         );
 
         let mut drew = false;
-        if !entry.is_dir && entry.is_image() && self.previews {
+        if !entry.is_dir && entry.has_preview() && self.previews {
             let px = (pic_rect.height().max(pic_rect.width()) * ui.ctx().pixels_per_point())
                 .round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {

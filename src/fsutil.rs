@@ -127,6 +127,18 @@ impl Entry {
         matches!(self.kind, Kind::Image)
     }
 
+    /// Added feature, asked for: a video shows its first frame where a picture
+    /// shows itself, so both count as something with a preview.
+    pub fn is_video(&self) -> bool {
+        matches!(self.kind, Kind::Video)
+    }
+
+    /// Whether a preview can be drawn for this entry: a picture, or a video's
+    /// first frame.
+    pub fn has_preview(&self) -> bool {
+        matches!(self.kind, Kind::Image | Kind::Video)
+    }
+
     pub fn is_text(&self) -> bool {
         matches!(self.kind, Kind::Text | Kind::Code | Kind::Config)
     }
@@ -138,6 +150,22 @@ impl Entry {
 pub fn kind_of(path: &Path, is_dir: bool, mode: u32) -> Kind {
     kind_for(path, is_dir, mode)
 }
+
+/// Whether a name is one of the video formats this build can show a frame of.
+/// The list is the one `kind_for` sorts into `Kind::Video`, kept in one place so
+/// a format added there is picked up by the previews too.
+pub fn is_video_path(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    VIDEO_EXT.contains(&ext.as_str())
+}
+
+/// The video formats, as `kind_for` reads them.
+pub const VIDEO_EXT: [&str; 10] = [
+    "mp4", "mkv", "webm", "avi", "mov", "m4v", "wmv", "mpg", "mpeg", "flv",
+];
 
 fn kind_for(path: &Path, is_dir: bool, mode: u32) -> Kind {
     if is_dir {
@@ -152,7 +180,6 @@ fn kind_for(path: &Path, is_dir: bool, mode: u32) -> Kind {
         "xpm", "ppm",
     ];
     let audio = ["mp3", "flac", "ogg", "oga", "wav", "m4a", "aac", "opus", "wma", "mid"];
-    let video = ["mp4", "mkv", "webm", "avi", "mov", "m4v", "wmv", "mpg", "mpeg", "flv"];
     let archive = [
         "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst", "lz4", "tgz", "iso", "cab",
     ];
@@ -168,7 +195,7 @@ fn kind_for(path: &Path, is_dir: bool, mode: u32) -> Kind {
     if audio.contains(&ext.as_str()) {
         return Kind::Audio;
     }
-    if video.contains(&ext.as_str()) {
+    if VIDEO_EXT.contains(&ext.as_str()) {
         return Kind::Video;
     }
     if archive.contains(&ext.as_str()) {

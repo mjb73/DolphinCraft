@@ -2884,3 +2884,23 @@ protocol itself. What is *added*, and what was measured:
   manager puts on the selection — and the `name (1)` convention for a copy.
 
 `mechanics.json` gains five values for the same table, each marked *added*.
+
+## A video's first frame
+
+Added, since Dolphin gets this from its thumbnailers and this build has none:
+
+* **The frame** is taken by `ffmpeg` from `PATH` (`video::ffmpeg`) and comes back
+  as a PNG on the command's standard output, so nothing else has to be linked in:
+  `-frames:v 1` at the start of the file, scaled with
+  `scale='min(N,iw)':'min(N,ih)':force_original_aspect_ratio=decrease` so a 4K
+  frame is not carried across the pipe for a 96 px tile. The ceiling is **2048**
+  px (`video::MAX_PX`, the thumbnail cache's own limit) and a frame gets **30 s**
+  (`video::BUDGET`) before ffmpeg is killed, which only ever happens on a damaged
+  file.
+* **The extensions** are the ones `kind_for` already sorts into `Kind::Video`
+  (ten of them, `fsutil::VIDEO_EXT`), so the previews and the file type can never
+  drift apart.
+* **No ffmpeg** is not an error: the item keeps its kind icon, exactly as before,
+  the way the archive tools fall back when `zip` is missing.
+* The frame is cached under the same key as a picture thumbnail (path, modified
+  time, size), so switching views or coming back to the folder costs nothing.

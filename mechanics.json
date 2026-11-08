@@ -2038,6 +2038,27 @@
    "value": 12,
    "unit": "milliseconds",
    "source": "added: the follow loop in dragout.rs (a position is sent at most every 20 ms)"
+  },
+  {
+   "name": "video frame ceiling",
+   "group": "video",
+   "value": 2048,
+   "unit": "pixels",
+   "source": "added: MAX_PX in video.rs (the thumbnail cache's own ceiling; the scale filter is clamped to it)"
+  },
+  {
+   "name": "video frame time budget",
+   "group": "video",
+   "value": 30,
+   "unit": "seconds",
+   "source": "added: BUDGET in video.rs (ffmpeg is killed after this; only a damaged file gets there)"
+  },
+  {
+   "name": "video formats with a preview",
+   "group": "video",
+   "value": 10,
+   "unit": "extensions",
+   "source": "added: VIDEO_EXT in fsutil.rs, the same list kind_for reads for Kind::Video"
   }
  ]
 }

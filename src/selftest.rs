@@ -4518,6 +4518,81 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
         })(),
     );
 
+    // -----------------------------------------------------------------------
+    // A video's first frame as its preview
+    // -----------------------------------------------------------------------
+    r.check(
+        "a video is recognised by its extension, and a picture is not",
+        (|| {
+            for name in ["clip.mp4", "clip.MKV", "clip.webm", "clip.mov", "clip.m4v"] {
+                if !crate::fsutil::is_video_path(Path::new(name)) {
+                    return Err(format!("{name} was not seen as a video"));
+                }
+            }
+            for name in ["photo.png", "notes.txt", "clip.mkv.zip", "clip"] {
+                if crate::fsutil::is_video_path(Path::new(name)) {
+                    return Err(format!("{name} was seen as a video"));
+                }
+            }
+            Ok(format!("{} extensions", crate::fsutil::VIDEO_EXT.len()))
+        })(),
+    );
+    r.check(
+        "the first frame is asked of ffmpeg at the size the tile needs",
+        (|| {
+            let args = crate::video::first_frame_args(Path::new("/tmp/clip.mp4"), 96);
+            let joined = args.join(" ");
+            for want in [
+                "-nostdin",
+                "-frames:v 1",
+                "image2pipe",
+                "-vcodec png",
+                "/tmp/clip.mp4",
+                "min(96,iw)",
+            ] {
+                if !joined.contains(want) {
+                    return Err(format!("{want:?} missing from {joined}"));
+                }
+            }
+            // A size over the module's ceiling is clamped rather than passed on.
+            let big = crate::video::first_frame_args(Path::new("/tmp/clip.mp4"), 99_999).join(" ");
+            if !big.contains(&format!("min({},iw)", crate::video::MAX_PX)) {
+                return Err(format!("{big}"));
+            }
+            Ok(joined)
+        })(),
+    );
+    r.check(
+        "a real video's first frame comes back as a picture of its own shape",
+        (|| {
+            let Some(exe) = crate::video::ffmpeg() else {
+                return Ok("ffmpeg is not installed here, so the frame was skipped".into());
+            };
+            let clip = base.join("frame-test.mp4");
+            let made = std::process::Command::new(exe)
+                .args([
+                    "-v", "error", "-f", "lavfi", "-i", "color=c=0x1e88e5:s=320x240:d=1",
+                    "-pix_fmt", "yuv420p", "-y",
+                ])
+                .arg(&clip)
+                .status();
+            match made {
+                Ok(status) if status.success() => {}
+                _ => return Err("the test clip could not be made".into()),
+            }
+            let frame = crate::video::first_frame(&clip, 160).ok_or("no frame came back")?;
+            let (w, h) = (frame.width(), frame.height());
+            if w == 0 || h == 0 || w > 160 || h > 160 {
+                return Err(format!("{w}×{h} is outside the 160 px asked for"));
+            }
+            let ratio = w as f32 / h as f32;
+            if (ratio - 4.0 / 3.0).abs() > 0.05 {
+                return Err(format!("{w}×{h} is not the clip's own 4:3"));
+            }
+            Ok(format!("320×240 clip → {w}×{h}"))
+        })(),
+    );
+
     let _ = fs::remove_dir_all(&base);
     if r.failures == 0 {
         println!("selftest: all checks passed");

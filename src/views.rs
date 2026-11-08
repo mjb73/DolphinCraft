@@ -666,7 +666,7 @@ impl Pane {
             Vec2::splat(icon_sz),
         );
         let mut drew_preview = false;
-        if self.previews && entry.is_image() {
+        if self.previews && entry.has_preview() {
             let px = (icon_sz * ui.ctx().pixels_per_point()).round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {
                 let _ = draw_preview(ui.painter(), &tex, icon_rect);
@@ -834,7 +834,7 @@ impl Pane {
             .display_entries()
             .iter()
             .map(|entry| {
-                let aspect = if previews && entry.is_image() {
+                let aspect = if previews && entry.has_preview() {
                     vctx.thumbs.aspect(&entry.path)
                 } else {
                     1.0
@@ -1004,7 +1004,7 @@ impl Pane {
         if bg != Color32::TRANSPARENT {
             ui.painter().rect_filled(rect.shrink(4.0), CornerRadius::same(4), bg);
         }
-        let aspect = if self.previews && entry.is_image() {
+        let aspect = if self.previews && entry.has_preview() {
             vctx.thumbs.aspect(&entry.path)
         } else {
             1.0
@@ -1021,7 +1021,7 @@ impl Pane {
             shape,
         );
         let mut drew_thumb = false;
-        if self.previews && entry.is_image() {
+        if self.previews && entry.has_preview() {
             // Previews are shown from the smallest zoom level up, as in the
             // original, and the thumbnail is rendered at the icon size times the
             // screen scale so zooming in always gives a sharper, bigger picture.
@@ -1190,7 +1190,7 @@ impl Pane {
             Vec2::splat(icon),
         );
         let mut drew_preview = false;
-        if self.previews && entry.is_image() {
+        if self.previews && entry.has_preview() {
             let px = (icon * ui.ctx().pixels_per_point()).round() as u32;
             if let Some(tex) = vctx.thumbs.get(ui.ctx(), &entry.path, px.max(16)) {
                 if let Some(drawn) = draw_preview(ui.painter(), &tex, icon_rect) {

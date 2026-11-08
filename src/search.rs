@@ -292,7 +292,17 @@ impl ThumbCache {
                         Some((w, h, rgba.into_raw()))
                     });
                 if thumb.is_none() {
-                    if let Ok(img) = image::open(&job.path) {
+                    // A picture decodes here; a video has no decoder in the
+                    // `image` crate, so its first frame is taken by ffmpeg — the
+                    // program the machine already has for video.
+                    let frame = image::open(&job.path).ok().or_else(|| {
+                        if crate::fsutil::is_video_path(&job.path) {
+                            crate::video::first_frame(&job.path, job.size)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(img) = frame {
                         let rgba = img.thumbnail(job.size, job.size).to_rgba8();
                         let (w, h) = rgba.dimensions();
                         if let Some(p) = cache_file.as_ref() {

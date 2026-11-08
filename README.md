@@ -35,6 +35,13 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
 - **Three view modes**: icons, details and columns, each with its own zoom
   level and sort order. The measured ladder is 0–16 zoom steps (16–256 px);
   the icons and compact views continue the same ladder to level 25 = 400 px.
+- **Video previews**: a video shows its **first frame** wherever a picture shows
+  itself — the icon grid, the compact and details rows, and the picture wall —
+  instead of a generic film icon. The frame is taken by `ffmpeg` (the one your
+  machine already has for video) and scaled down to the tile before it is read,
+  so a 4K film costs about as much as a photo. Without `ffmpeg` installed the
+  item simply keeps its kind icon; thumbnails are cached the same way a
+  picture's are, so a folder of films fills once and stays filled.
 - **Picture controls in the file view**: above the icon grid of any folder that
   holds pictures, a one-row strip carries the thumbnail size slider (50–400 px
   in the picture wall, the same 16–400 px ladder here), plus switches for

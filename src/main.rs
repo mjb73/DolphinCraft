@@ -25,6 +25,7 @@ mod fsutil;
 mod gallery;
 mod imagemeta;
 mod imageresize;
+mod video;
 mod dragout;
 mod panels;
 mod search;
