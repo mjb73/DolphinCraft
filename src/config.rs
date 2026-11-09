@@ -7,11 +7,246 @@ use serde::{Deserialize, Serialize};
 /// The version written by this build; see `Config::settings_version`.
 pub const SETTINGS_VERSION: u32 = 1;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+/// One row of the person's own part of the Shortcuts panel.
+///
+/// Added feature: a **group** is the same row with `group` set, its own name and
+/// no folder — a container the person drops shortcuts into, folded away when
+/// they are not wanted. A plain shortcut carries a folder and no children, so
+/// the older shape (just `name` and `path`) still loads: every field added here
+/// defaults to the plain-shortcut case.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Bookmark {
     pub name: String,
+    #[serde(default)]
     pub path: PathBuf,
+    /// This row holds other shortcuts instead of standing for a folder.
+    #[serde(default)]
+    pub group: bool,
+    /// A group's disclosure state, remembered so a folded group comes back folded.
+    #[serde(default)]
+    pub open: bool,
+    #[serde(default)]
+    pub children: Vec<Bookmark>,
 }
+
+impl Bookmark {
+    pub fn plain(name: impl Into<String>, path: PathBuf) -> Self {
+        Self {
+            name: name.into(),
+            path,
+            group: false,
+            open: false,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn group(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            path: PathBuf::new(),
+            group: true,
+            open: true,
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Where one of the person's shortcuts sits: a row at the top of the list, or a
+/// row inside a group.
+///
+/// Added feature (shortcut groups): the panel used to address its rows by their
+/// index among the top-level shortcuts, which cannot name a row inside a group.
+/// An index equal to the length of the list is the position *after* the last
+/// row, which is where a drop at the end lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spot {
+    Top(usize),
+    In(usize, usize),
+}
+
+impl Spot {
+    pub fn row(self) -> usize {
+        match self {
+            Spot::Top(i) | Spot::In(_, i) => i,
+        }
+    }
+
+    pub fn group(self) -> Option<usize> {
+        match self {
+            Spot::Top(_) => None,
+            Spot::In(g, _) => Some(g),
+        }
+    }
+}
+
+/// The row a spot names, if it is a row and not the gap after the last one.
+pub fn row_at(tree: &[Bookmark], spot: Spot) -> Option<&Bookmark> {
+    match spot {
+        Spot::Top(i) => tree.get(i),
+        Spot::In(g, i) => tree.get(g)?.children.get(i),
+    }
+}
+
+pub fn row_at_mut(tree: &mut [Bookmark], spot: Spot) -> Option<&mut Bookmark> {
+    match spot {
+        Spot::Top(i) => tree.get_mut(i),
+        Spot::In(g, i) => tree.get_mut(g)?.children.get_mut(i),
+    }
+}
+
+/// How many rows sit in the list a spot points into: the top level, or one
+/// group's children.
+pub fn rows_in(tree: &[Bookmark], spot: Spot) -> usize {
+    match spot {
+        Spot::Top(_) => tree.len(),
+        Spot::In(g, _) => tree.get(g).map(|b| b.children.len()).unwrap_or(0),
+    }
+}
+
+/// Where a folder's shortcut lives, searching groups as well.
+pub fn spot_of_path(tree: &[Bookmark], path: &Path) -> Option<Spot> {
+    for (i, bm) in tree.iter().enumerate() {
+        if !bm.group && bm.path == path {
+            return Some(Spot::Top(i));
+        }
+        for (j, child) in bm.children.iter().enumerate() {
+            if !child.group && child.path == path {
+                return Some(Spot::In(i, j));
+            }
+        }
+    }
+    None
+}
+
+/// Every folder the shortcuts point at, groups and their children included.
+pub fn shortcut_paths(tree: &[Bookmark]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for bm in tree {
+        if !bm.group && !bm.path.as_os_str().is_empty() {
+            out.push(bm.path.clone());
+        }
+        for child in &bm.children {
+            if !child.group && !child.path.as_os_str().is_empty() {
+                out.push(child.path.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The row in `spot`, taken out of the tree.
+fn take_row(tree: &mut Vec<Bookmark>, spot: Spot) -> Option<Bookmark> {
+    match spot {
+        Spot::Top(i) => {
+            if i < tree.len() {
+                Some(tree.remove(i))
+            } else {
+                None
+            }
+        }
+        Spot::In(g, i) => {
+            let grp = tree.get_mut(g).filter(|b| b.group)?;
+            if i < grp.children.len() {
+                Some(grp.children.remove(i))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Move the row at `from` so it lands in the gap before `to`.
+///
+/// `to` may be one past the end of its list, which is the drop at the bottom.
+/// A group can be reordered among the top-level rows but never moved inside
+/// another group — one level of nesting is what the panel draws.
+pub fn move_row(tree: &mut Vec<Bookmark>, from: Spot, to: Spot) -> bool {
+    let Some(item) = row_at(tree, from) else {
+        return false;
+    };
+    let is_group = item.group;
+    // The target has to be a real list: the top level, or a group.
+    let dst_ok = match to {
+        Spot::Top(t) => t <= tree.len(),
+        Spot::In(g, t) => tree.get(g).map(|b| b.group && t <= b.children.len()).unwrap_or(false),
+    };
+    if !dst_ok || (is_group && matches!(to, Spot::In(..))) {
+        return false;
+    }
+    // A drop on the row's own place, or on the gap right below it, is a no-op.
+    if from == to {
+        return false;
+    }
+    if from.group() == to.group() && to.row() == from.row() + 1 {
+        return false;
+    }
+    let Some(item) = take_row(tree, from) else {
+        return false;
+    };
+    // Taking the row out shifts anything below it in the same list.
+    let dst = match to {
+        Spot::Top(t) => {
+            let t = if matches!(from, Spot::Top(f) if f < t) {
+                t - 1
+            } else {
+                t
+            };
+            (None, t)
+        }
+        Spot::In(g, t) => {
+            // A group index counts top-level rows, so a row leaving above the
+            // group moves the group up by one.
+            let g = if matches!(from, Spot::Top(f) if f < g) {
+                g - 1
+            } else {
+                g
+            };
+            let t = if matches!(from, Spot::In(fg, fi) if fg == g && fi < t) {
+                t - 1
+            } else {
+                t
+            };
+            (Some(g), t)
+        }
+    };
+    match dst.0 {
+        None => {
+            let at = dst.1.min(tree.len());
+            tree.insert(at, item);
+        }
+        Some(g) => {
+            let Some(grp) = tree.get_mut(g) else {
+                return false;
+            };
+            let at = dst.1.min(grp.children.len());
+            grp.children.insert(at, item);
+        }
+    }
+    if let Some(grp) = dst.0.and_then(|g| tree.get_mut(g)) {
+        // A group that just took a row opens, so the row is not dropped out of
+        // sight; the person can fold it again with one click.
+        grp.open = true;
+    }
+    true
+}
+
+/// Take one shortcut out by the folder it stands for, wherever it sits.
+pub fn remove_path(tree: &mut Vec<Bookmark>, path: &Path) -> bool {
+    if let Some(Spot::In(g, i)) = spot_of_path(tree, path) {
+        if let Some(grp) = tree.get_mut(g) {
+            grp.children.remove(i);
+            return true;
+        }
+    }
+    match spot_of_path(tree, path) {
+        Some(Spot::Top(i)) => {
+            tree.remove(i);
+            true
+        }
+        _ => false,
+    }
+}
+
 
 /// Added feature: the colour the person gave one row of the Shortcuts panel.
 /// The original has no place colours at all, so this is stored next to the
@@ -445,16 +680,15 @@ impl Config {
 /// "it is already there" and the function returns without touching anything;
 /// otherwise the dragged row lands at `to - 1` when it moved down and at `to`
 /// when it moved up. Returns whether the order really changed.
-pub fn move_shortcut(list: &mut Vec<Bookmark>, from: usize, to: usize) -> bool {
-    if from >= list.len() {
+/// Take a group apart: the container goes and its shortcuts step out into the
+/// top level at the place it stood, in the order they were in.
+pub fn dissolve_group(tree: &mut Vec<Bookmark>, index: usize) -> bool {
+    if !tree.get(index).map(|b| b.group).unwrap_or(false) {
         return false;
     }
-    let to = to.min(list.len());
-    if to == from || to == from + 1 {
-        return false;
+    let grp = tree.remove(index);
+    for (k, child) in grp.children.into_iter().enumerate() {
+        tree.insert(index + k, child);
     }
-    let item = list.remove(from);
-    let target = if to > from { to - 1 } else { to };
-    list.insert(target.min(list.len()), item);
     true
 }

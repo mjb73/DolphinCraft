@@ -3305,7 +3305,9 @@ impl App {
         let mut win_open = true;
         let mut save = false;
         let mut close = false;
-        let renaming = edit.original.is_some();
+        let renaming = edit.original.is_some() || edit.group_at.is_some();
+        // A group carries a name and nothing else: no folder, no suggestions.
+        let is_group = edit.group;
         let suggestions: Vec<(&str, PathBuf)> = vec![
             ("This folder", self.pane().current_dir()),
             ("Home", fsutil::home_dir()),
@@ -3313,7 +3315,9 @@ impl App {
             ("Downloads", fsutil::xdg_dir("DOWNLOAD", "Downloads")),
             ("Pictures", fsutil::xdg_dir("PICTURES", "Pictures")),
         ];
-        window_style(if renaming {
+        window_style(if is_group {
+            if renaming { "Rename Group" } else { "New Group" }
+        } else if renaming {
             "Rename Shortcut"
         } else {
             "Add Shortcut"
@@ -3322,9 +3326,13 @@ impl App {
         .show(ctx, |ui| {
             ui.set_min_width(430.0);
             ui.label(
-                egui::RichText::new("Shortcuts stay in the panel on the left, so one click takes you back here.")
-                    .size(11.5)
-                    .color(theme::text_dim()),
+                egui::RichText::new(if is_group {
+                    "A group is a row in the panel that holds other shortcuts. Drop shortcuts on it, or move them into it from their right-click menu."
+                } else {
+                    "Shortcuts stay in the panel on the left, so one click takes you back here."
+                })
+                .size(11.5)
+                .color(theme::text_dim()),
             );
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Name").size(11.0).color(theme::text_dim()));
@@ -3342,30 +3350,32 @@ impl App {
                 save = true;
             }
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("Folder").size(11.0).color(theme::text_dim()));
-            let path_resp = ui.add(
-                egui::TextEdit::singleline(&mut edit.path)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("/home/you/Documents"),
-            );
-            if path_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                save = true;
-            }
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for (label, path) in &suggestions {
-                    if ui.small_button(*label).clicked() {
-                        edit.path = path.display().to_string();
-                        if edit.name.trim().is_empty() {
-                            edit.name = path
-                                .file_name()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "Shortcut".to_string());
+            if !is_group {
+                ui.label(egui::RichText::new("Folder").size(11.0).color(theme::text_dim()));
+                let path_resp = ui.add(
+                    egui::TextEdit::singleline(&mut edit.path)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("/home/you/Documents"),
+                );
+                if path_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    save = true;
+                }
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (label, path) in &suggestions {
+                        if ui.small_button(*label).clicked() {
+                            edit.path = path.display().to_string();
+                            if edit.name.trim().is_empty() {
+                                edit.name = path
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "Shortcut".to_string());
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
             if let Some(err) = &edit.error {
                 ui.add_space(6.0);
                 ui.label(
@@ -3386,10 +3396,16 @@ impl App {
                     if ui
                         .add(
                             egui::Button::new(
-                                egui::RichText::new(if renaming { "Save" } else { "Add Shortcut" })
-                                    .color(theme::on_band()),
+                                egui::RichText::new(if is_group {
+                                    if renaming { "Save" } else { "Create Group" }
+                                } else if renaming {
+                                    "Save"
+                                } else {
+                                    "Add Shortcut"
+                                })
+                                .color(theme::on_band()),
                             )
-                            .fill(theme::c(61, 130, 180))
+                            .fill(theme::action_fill())
                             .min_size(Vec2::new(130.0, 26.0)),
                         )
                         .clicked()

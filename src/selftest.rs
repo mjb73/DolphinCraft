@@ -1806,23 +1806,20 @@ pub fn run() -> i32 {
     r.check(
         "shortcuts can be dragged into a new order",
         (|| {
-            use crate::config::{move_shortcut, Bookmark};
-            let mk = |n: &str| Bookmark {
-                name: n.into(),
-                path: base.join(n),
-            };
+            use crate::config::{move_row, Bookmark, Spot};
+            let mk = |n: &str| Bookmark::plain(n, base.join(n));
             let names = |v: &Vec<Bookmark>| v.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
 
             let mut list = vec![mk("a"), mk("b"), mk("c")];
             // Dragged down into the gap between b and c.
-            if !move_shortcut(&mut list, 0, 2) {
+            if !move_row(&mut list, Spot::Top(0), Spot::Top(2)) {
                 return Err("dragging the first row down did nothing".into());
             }
             if names(&list) != ["b", "a", "c"] {
                 return Err(format!("dragging down gave {:?}", names(&list)));
             }
             // Dragged up to the very top.
-            if !move_shortcut(&mut list, 2, 0) {
+            if !move_row(&mut list, Spot::Top(2), Spot::Top(0)) {
                 return Err("dragging the last row up did nothing".into());
             }
             if names(&list) != ["c", "b", "a"] {
@@ -1830,20 +1827,135 @@ pub fn run() -> i32 {
             }
             // Let go over its own place, or over the gap right below it: the
             // model's movePlace refuses both, and so does this.
-            if move_shortcut(&mut list, 1, 1) || move_shortcut(&mut list, 1, 2) {
+            if move_row(&mut list, Spot::Top(1), Spot::Top(1))
+                || move_row(&mut list, Spot::Top(1), Spot::Top(2))
+            {
                 return Err("a drop on its own place moved the row".into());
             }
             if names(&list) != ["c", "b", "a"] {
                 return Err("the refused drops changed the order anyway".into());
             }
             // Dropped right at the end of the list.
-            if !move_shortcut(&mut list, 0, 3) {
+            if !move_row(&mut list, Spot::Top(0), Spot::Top(3)) {
                 return Err("dragging to the end did nothing".into());
             }
             if names(&list) != ["b", "a", "c"] {
                 return Err(format!("dragging to the end gave {:?}", names(&list)));
             }
             Ok("down, up, refused in place, to the end".into())
+        })(),
+    );
+
+    // ---- added feature: shortcut groups ----------------------------------
+    r.check(
+        "a shortcut group holds shortcuts and gives them back",
+        (|| {
+            use crate::config::{dissolve_group, move_row, spot_of_path, Bookmark, Spot};
+            let names = |v: &Vec<Bookmark>| v.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+            let mut tree = vec![
+                Bookmark::group("Work"),
+                Bookmark::plain("Photos", base.join("photos")),
+                Bookmark::plain("Music", base.join("music")),
+            ];
+            // Dropped on the group: it goes in, and the group opens so the row
+            // does not vanish into a folded container.
+            if !move_row(&mut tree, Spot::Top(1), Spot::In(0, 0)) {
+                return Err("dropping a shortcut on a group did nothing".into());
+            }
+            if tree.len() != 2 || tree[0].children.len() != 1 {
+                return Err(format!(
+                    "after the drop the panel has {} rows and the group {} children",
+                    tree.len(),
+                    tree[0].children.len()
+                ));
+            }
+            if !tree[0].open {
+                return Err("the group that took the row stayed folded".into());
+            }
+            if names(&tree[0].children) != ["Photos"] {
+                return Err(format!("the group holds {:?}", names(&tree[0].children)));
+            }
+            // Out again: a child dragged to the top level sits at the gap it was
+            // let go on, not inside the group.
+            if !move_row(&mut tree, Spot::In(0, 0), Spot::Top(2)) {
+                return Err("dragging a shortcut out of a group did nothing".into());
+            }
+            if !tree[0].children.is_empty() || names(&tree) != ["Work", "Music", "Photos"] {
+                return Err(format!("dragging out gave {:?} plus {:?}", names(&tree),
+                    names(&tree[0].children)));
+            }
+            // A group holds shortcuts, not groups: one level is what the panel
+            // draws, so the model refuses the drop.
+            let mut two = vec![Bookmark::group("A"), Bookmark::group("B")];
+            if move_row(&mut two, Spot::Top(1), Spot::In(0, 0)) {
+                return Err("a group was allowed inside another group".into());
+            }
+            if two[0].children.len() != 0 || two.len() != 2 {
+                return Err("the refused drop changed the tree anyway".into());
+            }
+            // Removing a group keeps its shortcuts, in their own order, where
+            // the group stood.
+            let mut three = vec![
+                Bookmark::plain("First", base.join("first")),
+                Bookmark::group("Gone"),
+                Bookmark::plain("Last", base.join("last")),
+            ];
+            three[1].children = vec![
+                Bookmark::plain("a", base.join("a")),
+                Bookmark::plain("b", base.join("b")),
+            ];
+            if !dissolve_group(&mut three, 1) {
+                return Err("removing a group did nothing".into());
+            }
+            if names(&three) != ["First", "a", "b", "Last"] {
+                return Err(format!("removing the group left {:?}", names(&three)));
+            }
+            // One folder, one row: the search for a folder sees children too.
+            let mut nested = vec![Bookmark::group("G")];
+            nested[0].children = vec![Bookmark::plain("Docs", base.join("docs"))];
+            if spot_of_path(&nested, &base.join("docs")) != Some(Spot::In(0, 0)) {
+                return Err("a shortcut inside a group could not be found again".into());
+            }
+            Ok("in, out, no group in a group, dissolved in place".into())
+        })(),
+    );
+
+    r.check(
+        "a shortcut group is saved with its shortcuts, and an older file still loads",
+        (|| {
+            use crate::config::Bookmark;
+            // The shape written before groups existed: a name and a folder and
+            // nothing else. It has to load as a plain row, not a broken group.
+            let old = r#"{"name":"Docs","path":"/tmp/dcos/Docs"}"#;
+            let bm: Bookmark = serde_json::from_str(old)
+                .map_err(|e| format!("an older shortcut did not load: {e}"))?;
+            if bm.group || bm.open || !bm.children.is_empty() || bm.path != Path::new("/tmp/dcos/Docs") {
+                return Err(format!("an older shortcut loaded as {bm:?}"));
+            }
+            // A group and its children survive being written and read back.
+            let mut group = Bookmark::group("Work");
+            group.children = vec![
+                Bookmark::plain("Docs", PathBuf::from("/tmp/dcos/Docs")),
+                Bookmark::plain("Code", PathBuf::from("/tmp/dcos/Code")),
+            ];
+            group.open = false;
+            let tree = vec![group, Bookmark::plain("Music", PathBuf::from("/tmp/dcos/Music"))];
+            let text = serde_json::to_string(&tree).map_err(|e| format!("writing failed: {e}"))?;
+            let back: Vec<Bookmark> =
+                serde_json::from_str(&text).map_err(|e| format!("reading back failed: {e}"))?;
+            if back != tree {
+                return Err("the group did not come back as it went out".into());
+            }
+            if back[0].group != true || back[0].open || back[0].children.len() != 2 {
+                return Err(format!("the group came back as {:?}", back[0]));
+            }
+            // Every folder the panel points at, children included, with the
+            // group's empty path left out.
+            let paths = crate::config::shortcut_paths(&tree);
+            if paths.len() != 3 || paths.iter().any(|p| p.as_os_str().is_empty()) {
+                return Err(format!("the folder list came out as {paths:?}"));
+            }
+            Ok("older rows load plain, groups round-trip folded".into())
         })(),
     );
 

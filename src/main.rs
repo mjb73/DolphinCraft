@@ -413,6 +413,11 @@ pub struct ShortcutEdit {
     pub error: Option<String>,
     /// Set when an existing shortcut is being renamed instead of added.
     pub original: Option<PathBuf>,
+    /// Added feature (shortcut groups): this dialog is making or renaming a
+    /// group, which carries a name and nothing else. `group_at` is the group
+    /// being renamed; `None` means a new one.
+    pub group: bool,
+    pub group_at: Option<usize>,
 }
 
 pub struct Shot {
@@ -530,7 +535,7 @@ pub struct App {
     pub filter_focus: bool,
     /// Which of the person's own shortcut rows is being dragged, if any.
     /// The value is the index into `config.bookmarks`.
-    pub shortcut_drag: Option<usize>,
+    pub shortcut_drag: Option<config::Spot>,
     /// What the remembered session looked like on the last frame that was
     /// written to disk. Compared about once a second, so opening a tab,
     /// closing one or walking into another folder reaches the settings file
@@ -1599,7 +1604,13 @@ impl App {
         let mut new_tab_path: Option<PathBuf> = None;
         let mut remove_bookmark: Option<PathBuf> = None;
         let mut rename_bookmark: Option<(PathBuf, String)> = None;
-        let mut move_bookmark: Option<(usize, i32)> = None;
+        // Added feature (shortcut groups): the panel's own rows are a tree, so a
+        // move is named by two spots and a group's fold state is its own row's.
+        let mut move_row_to: Option<(config::Spot, config::Spot)> = None;
+        let mut toggle_group: Option<usize> = None;
+        let mut remove_group: Option<usize> = None;
+        let mut rename_group: Option<usize> = None;
+        let mut new_group = false;
         let mut add_shortcut = false;
         // Added feature: rows of the two recent groups. A click on a file row
         // opens the file itself (that is the point of a recent list); a click
@@ -1618,16 +1629,18 @@ impl App {
         // Drag-and-drop state for the shortcut rows. `start_drag` and
         // `finish_drag` are this frame's edges; `drop_slot` is the gap the
         // pointer is over right now, counted among the person's own shortcuts.
-        let mut start_drag: Option<usize> = None;
+        let mut start_drag: Option<config::Spot> = None;
         let mut finish_drag = false;
-        let mut drop_slot: Option<usize> = None;
+        // The gap the row would land in, or the group it was let go on.
+        let mut drop_before: Option<config::Spot> = None;
+        let mut drop_into: Option<usize> = None;
         let mut colour_pick: Option<(PathBuf, Option<[u8; 3]>)> = None;
         let current = self.pane().current_dir();
         let is_trash = self.pane().is_trash();
         // The navigation panel lists every place the person can jump to: the
         // standard folders first, then the shortcuts they pinned themselves.
         let rows = self.shortcut_entries();
-        let standard = rows.len() - self.config.bookmarks.len();
+        let standard = self.standard_rows();
         let keys = self.config.shortcut_keys;
         let expanded = self.config.shortcuts_expanded;
         let carrying = self.shortcut_drag;
@@ -1655,18 +1668,60 @@ impl App {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                let (fold, add) = shortcuts_header(ui, expanded, self.config.bookmarks.len());
+                let (fold, add, add_group) =
+                    shortcuts_header(ui, expanded, self.pinned_count());
                 if fold {
                     fold_section = true;
                 }
                 if add {
                     add_shortcut = true;
                 }
+                if add_group {
+                    new_group = true;
+                }
                 if expanded {
                     // Where each of the person's own rows sits this frame, so a
                     // drop can be turned into the gap under the pointer.
-                    let mut pinned_rects: Vec<(usize, Rect)> = Vec::new();
-                    for (i, (name, path, icon)) in rows.iter().enumerate() {
+                    //
+                    // Added feature (shortcut groups): the person's rows are one
+                    // small tree — a group among the shortcuts, with its own
+                    // shortcuts one level in — so a row is named by a `Spot`
+                    // (the top level, or a group's child) instead of by an index
+                    // into one flat list.
+                    let bookmarks = self.config.bookmarks.clone();
+                    let groups: Vec<(usize, String)> = bookmarks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, b)| b.group)
+                        .map(|(i, b)| (i, b.name.clone()))
+                        .collect();
+                    // What a row's context menu asked for, applied once the
+                    // panel has finished drawing (the menus hold the panel's own
+                    // state mutably, so they collect instead of acting).
+                    #[derive(Default)]
+                    struct Asked {
+                        new_tab: Option<PathBuf>,
+                        rename: Option<(PathBuf, String)>,
+                        remove: Option<PathBuf>,
+                        colour: Option<(PathBuf, Option<[u8; 3]>)>,
+                        move_to: Option<(config::Spot, config::Spot)>,
+                    }
+                    let mut asked = Asked::default();
+                    let mut top_rects: Vec<(usize, Rect)> = Vec::new();
+                    let mut group_rects: Vec<(usize, Rect)> = Vec::new();
+                    let mut child_rects: Vec<(usize, usize, Rect)> = Vec::new();
+                    // The carried row keeps its place but is outlined, so the
+                    // drop line is easy to read.
+                    let outline = |ui: &egui::Ui, rect: Rect| {
+                        ui.painter().rect_stroke(
+                            rect.shrink2(Vec2::new(1.0, 1.0)),
+                            CornerRadius::same(3),
+                            Stroke::new(1.0, theme::accent()),
+                            egui::StrokeKind::Inside,
+                        );
+                    };
+
+                    for (i, (name, path, icon)) in rows.iter().take(standard).enumerate() {
                         let on_trash = path.to_string_lossy() == TRASH_URI;
                         let selected = if on_trash {
                             is_trash
@@ -1695,97 +1750,371 @@ impl App {
                         if resp.middle_clicked() {
                             new_tab_path = Some(path.clone());
                         }
-                        if i >= standard {
-                            let bm_index = i - standard;
-                            pinned_rects.push((bm_index, resp.rect));
-                            if resp.drag_started() {
-                                start_drag = Some(bm_index);
+                        // The standard rows are shortcuts too, so they take a
+                        // colour the same way; they just cannot be moved or
+                        // removed, because the original's own list fixes them.
+                        let pick_path = path.clone();
+                        resp.context_menu(|ui| {
+                            ui.set_min_width(200.0);
+                            if menu_row(ui, "Open in New Tab", "").clicked() {
+                                asked.new_tab = Some(pick_path.clone());
+                                ui.close();
                             }
-                            if carrying == Some(bm_index) || start_drag == Some(bm_index) {
-                                // The row being carried keeps its place but is
-                                // outlined, so the drop line is easy to read.
-                                ui.painter().rect_stroke(
-                                    resp.rect.shrink2(Vec2::new(1.0, 1.0)),
-                                    CornerRadius::same(3),
-                                    Stroke::new(1.0, theme::accent()),
-                                    egui::StrokeKind::Inside,
-                                );
+                            colour_menu_item(ui, "Shortcut Colour", colour, &mut asked.colour, &pick_path);
+                        });
+                    }
+
+                    // The person's own rows, in their order: each group followed
+                    // by its children while it is open.
+                    let mut key_no = standard;
+                    for (bi, bm) in bookmarks.iter().enumerate() {
+                        let top_spot = config::Spot::Top(bi);
+                        if bm.group {
+                            let mut resp = shortcut_row_at(
+                                ui,
+                                &bm.name,
+                                theme::PlaceIcon::Bookmark,
+                                false,
+                                None,
+                                None,
+                                0.0,
+                                Some(bm.open),
+                            );
+                            top_rects.push((bi, resp.rect));
+                            group_rects.push((bi, resp.rect));
+                            let count = bm.children.len();
+                            resp = resp.on_hover_text(if count == 0 {
+                                format!(
+                                    "{}\nAn empty group — drop a shortcut on it",
+                                    bm.name
+                                )
+                            } else {
+                                format!(
+                                    "{}\n{} shortcut{}\nClick to {}",
+                                    bm.name,
+                                    count,
+                                    if count == 1 { "" } else { "s" },
+                                    if bm.open { "fold it away" } else { "unfold it" }
+                                )
+                            });
+                            if resp.clicked() {
+                                toggle_group = Some(bi);
+                            }
+                            if resp.drag_started() {
+                                start_drag = Some(top_spot);
+                            }
+                            if carrying == Some(top_spot) || start_drag == Some(top_spot) {
+                                outline(ui, resp.rect);
                             }
                             resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
-                            let bm_path = path.clone();
-                            let bm_name = name.clone();
-                            let pick_path = path.clone();
                             resp.context_menu(|ui| {
-                                ui.set_min_width(210.0);
-                                if menu_row(ui, "Open in New Tab", "").clicked() {
-                                    new_tab_path = Some(bm_path.clone());
+                                ui.set_min_width(214.0);
+                                if menu_row(ui, "Rename Group…", "").clicked() {
+                                    rename_group = Some(bi);
                                     ui.close();
                                 }
-                                if menu_row(ui, "Rename Shortcut…", "").clicked() {
-                                    rename_bookmark = Some((bm_path.clone(), bm_name.clone()));
+                                if bi > 0 && menu_row(ui, "Move Up", "").clicked() {
+                                    asked.move_to = Some((
+                                        top_spot,
+                                        config::Spot::Top(bi - 1),
+                                    ));
                                     ui.close();
                                 }
-                                if bm_index > 0 && menu_row(ui, "Move Up", "").clicked() {
-                                    move_bookmark = Some((bm_index, -1));
+                                if bi + 1 < bookmarks.len() && menu_row(ui, "Move Down", "").clicked()
+                                {
+                                    asked.move_to =
+                                        Some((top_spot, config::Spot::Top(bi + 2)));
                                     ui.close();
                                 }
-                                if menu_row(ui, "Move Down", "").clicked() {
-                                    move_bookmark = Some((bm_index, 1));
-                                    ui.close();
-                                }
-                                colour_menu_item(ui, "Shortcut Colour", colour, &mut colour_pick, &pick_path);
                                 ui.separator();
-                                if menu_row(ui, "Remove Shortcut", "").clicked() {
-                                    remove_bookmark = Some(bm_path.clone());
+                                if menu_row(ui, "Remove Group", "keeps its shortcuts").clicked() {
+                                    remove_group = Some(bi);
                                     ui.close();
                                 }
                             });
+                            if bm.open {
+                                if bm.children.is_empty() {
+                                    quiet_row(ui, "Drop a shortcut here");
+                                }
+                                for (ci, child) in bm.children.iter().enumerate() {
+                                    let spot = config::Spot::In(bi, ci);
+                                    let on_trash = child.path.to_string_lossy() == TRASH_URI;
+                                    let selected = if on_trash {
+                                        is_trash
+                                    } else {
+                                        !is_trash && current == child.path
+                                    };
+                                    let colour = self.config.shortcut_color(&child.path);
+                                    let mut resp = shortcut_row_at(
+                                        ui,
+                                        &child.name,
+                                        theme::PlaceIcon::Bookmark,
+                                        selected,
+                                        None,
+                                        colour,
+                                        14.0,
+                                        None,
+                                    );
+                                    if follow && selected {
+                                        resp.scroll_to_me(Some(egui::Align::Center));
+                                    }
+                                    resp = resp.on_hover_text(child.path.display().to_string());
+                                    if resp.clicked() {
+                                        navigate = Some(child.path.clone());
+                                    }
+                                    if resp.middle_clicked() {
+                                        new_tab_path = Some(child.path.clone());
+                                    }
+                                    child_rects.push((bi, ci, resp.rect));
+                                    if resp.drag_started() {
+                                        start_drag = Some(spot);
+                                    }
+                                    if carrying == Some(spot) || start_drag == Some(spot) {
+                                        outline(ui, resp.rect);
+                                    }
+                                    resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
+                                    let c_path = child.path.clone();
+                                    let c_name = child.name.clone();
+                                    let last = ci + 1 == bm.children.len();
+                                    resp.context_menu(|ui| {
+                                        ui.set_min_width(214.0);
+                                        if menu_row(ui, "Open in New Tab", "").clicked() {
+                                            asked.new_tab = Some(c_path.clone());
+                                            ui.close();
+                                        }
+                                        if menu_row(ui, "Rename Shortcut…", "").clicked() {
+                                            asked.rename = Some((c_path.clone(), c_name.clone()));
+                                            ui.close();
+                                        }
+                                        if ci > 0 && menu_row(ui, "Move Up", "").clicked() {
+                                            asked.move_to =
+                                                Some((spot, config::Spot::In(bi, ci - 1)));
+                                            ui.close();
+                                        }
+                                        if !last && menu_row(ui, "Move Down", "").clicked() {
+                                            asked.move_to =
+                                                Some((spot, config::Spot::In(bi, ci + 2)));
+                                            ui.close();
+                                        }
+                                        if menu_row(ui, "Move out of Group", "").clicked() {
+                                            asked.move_to =
+                                                Some((spot, config::Spot::Top(bookmarks.len())));
+                                            ui.close();
+                                        }
+                                        // The group the row is already in is not
+                                        // a move, so it is left out; with no
+                                        // other group there is nothing to offer.
+                                        let elsewhere: Vec<&(usize, String)> = groups
+                                            .iter()
+                                            .filter(|(gi, _)| Some(*gi) != spot.group())
+                                            .collect();
+                                        if !elsewhere.is_empty() {
+                                            ui.menu_button("Move to Group", |ui| {
+                                                ui.set_min_width(180.0);
+                                                for (gi, gname) in elsewhere {
+                                                    if menu_row(ui, gname, "").clicked() {
+                                                        let at = bookmarks[*gi].children.len();
+                                                        asked.move_to = Some((
+                                                            spot,
+                                                            config::Spot::In(*gi, at),
+                                                        ));
+                                                        ui.close();
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        colour_menu_item(
+                                            ui,
+                                            "Shortcut Colour",
+                                            colour,
+                                            &mut asked.colour,
+                                            &c_path,
+                                        );
+                                        ui.separator();
+                                        if menu_row(ui, "Remove Shortcut", "").clicked() {
+                                            asked.remove = Some(c_path.clone());
+                                            ui.close();
+                                        }
+                                    });
+                                }
+                            }
                         } else {
-                            // The standard rows are shortcuts too, so they take a
-                            // colour the same way; they just cannot be moved or
-                            // removed, because the original's own list fixes them.
-                            let pick_path = path.clone();
+                            let path = &bm.path;
+                            let on_trash = path.to_string_lossy() == TRASH_URI;
+                            let selected = if on_trash {
+                                is_trash
+                            } else {
+                                !is_trash && current == *path
+                            };
+                            let hint = if keys && key_no < 9 {
+                                Some(format!("Alt+{}", key_no + 1))
+                            } else {
+                                None
+                            };
+                            key_no += 1;
+                            let colour = self.config.shortcut_color(path);
+                            let mut resp = shortcut_row(
+                                ui,
+                                &bm.name,
+                                theme::PlaceIcon::Bookmark,
+                                selected,
+                                hint.as_deref(),
+                                colour,
+                            );
+                            if follow && selected {
+                                resp.scroll_to_me(Some(egui::Align::Center));
+                            }
+                            let tip = match &hint {
+                                Some(k) => format!("{}\n{k}", path.display()),
+                                None => path.display().to_string(),
+                            };
+                            resp = resp.on_hover_text(tip);
+                            if resp.clicked() {
+                                navigate = Some(path.clone());
+                            }
+                            if resp.middle_clicked() {
+                                new_tab_path = Some(path.clone());
+                            }
+                            top_rects.push((bi, resp.rect));
+                            if resp.drag_started() {
+                                start_drag = Some(top_spot);
+                            }
+                            if carrying == Some(top_spot) || start_drag == Some(top_spot) {
+                                outline(ui, resp.rect);
+                            }
+                            resp = resp.on_hover_cursor(egui::CursorIcon::Grab);
+                            let b_path = path.clone();
+                            let b_name = bm.name.clone();
                             resp.context_menu(|ui| {
-                                ui.set_min_width(200.0);
+                                ui.set_min_width(214.0);
                                 if menu_row(ui, "Open in New Tab", "").clicked() {
-                                    new_tab_path = Some(pick_path.clone());
+                                    asked.new_tab = Some(b_path.clone());
                                     ui.close();
                                 }
-                                colour_menu_item(ui, "Shortcut Colour", colour, &mut colour_pick, &pick_path);
+                                if menu_row(ui, "Rename Shortcut…", "").clicked() {
+                                    asked.rename = Some((b_path.clone(), b_name.clone()));
+                                    ui.close();
+                                }
+                                if bi > 0 && menu_row(ui, "Move Up", "").clicked() {
+                                    asked.move_to =
+                                        Some((top_spot, config::Spot::Top(bi - 1)));
+                                    ui.close();
+                                }
+                                if bi + 1 < bookmarks.len() && menu_row(ui, "Move Down", "").clicked()
+                                {
+                                    asked.move_to =
+                                        Some((top_spot, config::Spot::Top(bi + 2)));
+                                    ui.close();
+                                }
+                                if !groups.is_empty() {
+                                    ui.menu_button("Move to Group", |ui| {
+                                        ui.set_min_width(180.0);
+                                        for (gi, gname) in &groups {
+                                            if menu_row(ui, gname, "").clicked() {
+                                                let at = bookmarks[*gi].children.len();
+                                                asked.move_to =
+                                                    Some((top_spot, config::Spot::In(*gi, at)));
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                                }
+                                colour_menu_item(
+                                    ui,
+                                    "Shortcut Colour",
+                                    colour,
+                                    &mut asked.colour,
+                                    &b_path,
+                                );
+                                ui.separator();
+                                if menu_row(ui, "Remove Shortcut", "").clicked() {
+                                    asked.remove = Some(b_path.clone());
+                                    ui.close();
+                                }
                             });
                         }
                     }
 
-                    // The gap the pointer is over. Half a row decides whether the
-                    // line sits above or below the row underneath the pointer; a
-                    // pointer carried off the panel sideways drops nothing, which
-                    // is how the original's view refuses a drop outside itself.
-                    let active = carrying.or(start_drag);
-                    if active.is_some() {
-                        if let (Some(p), false) = (ctx.pointer_latest_pos(), pinned_rects.is_empty()) {
-                            let first = pinned_rects[0].1;
-                            if p.x >= first.left() - 6.0 && p.x <= first.right() + 6.0 {
-                                let mut slot = pinned_rects.len();
-                                for (k, (_, rect)) in pinned_rects.iter().enumerate() {
-                                    if p.y < rect.center().y {
-                                        slot = k;
+                    // What the pointer is over while one of the person's rows is
+                    // carried: a group row takes the row inside it, any other row
+                    // takes it into the gap above or below itself, and the rest of
+                    // the panel means the end of the top level. A pointer carried
+                    // off the panel sideways drops nothing, which is how the
+                    // original's view refuses a drop outside itself.
+                    if let Some(from) = carrying.or(start_drag) {
+                        // A group can only be reordered among the top-level rows,
+                        // so it takes no child gap and no other group as a target:
+                        // drawing a line there would promise a move that is refused.
+                        let from_is_group = matches!(from, config::Spot::Top(i)
+                            if bookmarks.get(i).map(|b| b.group).unwrap_or(false));
+                        if let Some(p) = ctx.pointer_latest_pos() {
+                            let over_group = group_rects
+                                .iter()
+                                .find(|(g, r)| {
+                                    r.contains(p) && !from_is_group && Some(*g) != from.group()
+                                })
+                                .map(|(g, r)| (*g, *r));
+                            if let Some((g, rect)) = over_group {
+                                drop_into = Some(g);
+                                ui.painter().rect_stroke(
+                                    rect.shrink2(Vec2::new(1.0, 1.0)),
+                                    CornerRadius::same(3),
+                                    Stroke::new(1.5, theme::accent()),
+                                    egui::StrokeKind::Inside,
+                                );
+                            } else {
+                                let mut target: Option<(config::Spot, f32, f32, f32)> = None;
+                                for (g, i, rect) in &child_rects {
+                                    if !from_is_group && rect.contains(p) {
+                                        let (spot, y) = if p.y < rect.center().y {
+                                            (config::Spot::In(*g, *i), rect.top())
+                                        } else {
+                                            (config::Spot::In(*g, *i + 1), rect.bottom())
+                                        };
+                                        target = Some((spot, y, rect.left() + 2.0, rect.right() - 4.0));
                                         break;
                                     }
                                 }
-                                drop_slot = Some(slot);
-                                let y = if slot < pinned_rects.len() {
-                                    pinned_rects[slot].1.top()
-                                } else {
-                                    pinned_rects[pinned_rects.len() - 1].1.bottom()
-                                };
-                                let x0 = first.left() + 4.0;
-                                let x1 = first.right() - 4.0;
-                                ui.painter().line_segment(
-                                    [Pos2::new(x0, y), Pos2::new(x1, y)],
-                                    Stroke::new(2.0, theme::accent()),
-                                );
-                                ui.painter()
-                                    .circle_filled(Pos2::new(x0, y), 3.0, theme::accent());
+                                if target.is_none() {
+                                    for (bi, rect) in &top_rects {
+                                        if p.y < rect.center().y {
+                                            target = Some((
+                                                config::Spot::Top(*bi),
+                                                rect.top(),
+                                                rect.left() + 4.0,
+                                                rect.right() - 4.0,
+                                            ));
+                                            break;
+                                        }
+                                    }
+                                }
+                                if target.is_none() {
+                                    if let Some((_, rect)) = top_rects.last() {
+                                        target = Some((
+                                            config::Spot::Top(bookmarks.len()),
+                                            rect.bottom(),
+                                            rect.left() + 4.0,
+                                            rect.right() - 4.0,
+                                        ));
+                                    }
+                                }
+                                if let Some((spot, y, x0, x1)) = target {
+                                    drop_before = Some(spot);
+                                    ui.painter().line_segment(
+                                        [Pos2::new(x0, y), Pos2::new(x1, y)],
+                                        Stroke::new(2.0, theme::accent()),
+                                    );
+                                    ui.painter().circle_filled(Pos2::new(x0, y), 3.0, theme::accent());
+                                }
+                                // Off the panel sideways: no drop at all.
+                                let inside = top_rects
+                                    .first()
+                                    .map(|(_, r)| p.x >= r.left() - 6.0 && p.x <= r.right() + 6.0)
+                                    .unwrap_or(false);
+                                if !inside {
+                                    drop_before = None;
+                                    drop_into = None;
+                                }
                             }
                         }
                         ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -1798,6 +2127,21 @@ impl App {
 
                     if add_row(ui, "Add Shortcut") {
                         add_shortcut = true;
+                    }
+                    if let Some(p) = asked.new_tab.take() {
+                        new_tab_path = Some(p);
+                    }
+                    if let Some(r) = asked.rename.take() {
+                        rename_bookmark = Some(r);
+                    }
+                    if let Some(p) = asked.remove.take() {
+                        remove_bookmark = Some(p);
+                    }
+                    if let Some(c) = asked.colour.take() {
+                        colour_pick = Some(c);
+                    }
+                    if let Some(m) = asked.move_to.take() {
+                        move_row_to = Some(m);
                     }
                 }
 
@@ -2070,28 +2414,75 @@ impl App {
                 edit.name = name;
             }
         }
-        if let Some((idx, delta)) = move_bookmark {
-            let n = self.config.bookmarks.len();
-            let to = idx as i32 + delta;
-            if to >= 0 && (to as usize) < n {
-                // Dropping a row one place down is the same as moving it to the
-                // gap after its neighbour, which is what the model's own move
-                // takes: an insertion slot, not a destination row.
-                let slot = if delta > 0 { to as usize + 1 } else { to as usize };
-                if config::move_shortcut(&mut self.config.bookmarks, idx, slot) {
-                    self.config_dirty = true;
+        if let Some(g) = toggle_group {
+            if let Some(bm) = self.config.bookmarks.get_mut(g) {
+                bm.open = !bm.open;
+                self.config_dirty = true;
+            }
+        }
+        if let Some(g) = rename_group {
+            self.open_group_editor(Some(g));
+        }
+        if new_group {
+            self.open_group_editor(None);
+        }
+        if let Some(g) = remove_group {
+            // The group goes, its shortcuts stay: they come out at the top level
+            // in the order they were in, which is the least surprising thing a
+            // removed container can do.
+            let kept = self
+                .config
+                .bookmarks
+                .get(g)
+                .map(|b| b.children.len())
+                .unwrap_or(0);
+            if config::dissolve_group(&mut self.config.bookmarks, g) {
+                self.config_dirty = true;
+                self.config.shortcuts_expanded = true;
+                if kept == 0 {
+                    self.toast("Group removed");
+                } else {
+                    self.toast(&format!(
+                        "Group removed, {kept} shortcut{} kept",
+                        if kept == 1 { "" } else { "s" }
+                    ));
                 }
             }
         }
-        // A row that was let go: the gap under the pointer becomes its new place.
+        if let Some((from, to)) = move_row_to {
+            if config::move_row(&mut self.config.bookmarks, from, to) {
+                self.config_dirty = true;
+            }
+        }
+        // A row that was let go: the gap or the group under the pointer becomes
+        // its new place.
         if start_drag.is_some() {
             self.shortcut_drag = start_drag;
         }
         if finish_drag {
-            if let (Some(from), Some(to)) = (self.shortcut_drag, drop_slot) {
-                if config::move_shortcut(&mut self.config.bookmarks, from, to) {
-                    self.config_dirty = true;
-                    self.toast("Shortcut moved");
+            if let Some(from) = self.shortcut_drag {
+                // A group takes the row at the end of its children; any other
+                // place is the gap the line marked.
+                let target = if let Some(g) = drop_into {
+                    let at = self
+                        .config
+                        .bookmarks
+                        .get(g)
+                        .map(|b| b.children.len())
+                        .unwrap_or(0);
+                    Some((config::Spot::In(g, at), true))
+                } else {
+                    drop_before.map(|spot| (spot, false))
+                };
+                if let Some((at, into_group)) = target {
+                    if config::move_row(&mut self.config.bookmarks, from, at) {
+                        self.config_dirty = true;
+                        self.toast(if into_group {
+                            "Shortcut moved into the group"
+                        } else {
+                            "Shortcut moved"
+                        });
+                    }
                 }
             }
             self.shortcut_drag = None;
@@ -2100,7 +2491,9 @@ impl App {
             self.set_shortcut_color(&path, rgb);
         }
         if let Some(p) = remove_bookmark {
-            self.config.bookmarks.retain(|b| b.path != p);
+            // A shortcut can sit at the top level or inside a group, so the
+            // removal has to find it rather than filter one list.
+            config::remove_path(&mut self.config.bookmarks, &p);
             self.config.shortcut_colors.retain(|c| c.path != p);
             self.config_dirty = true;
             self.toast("Shortcut removed");
@@ -3521,7 +3914,10 @@ impl App {
                 theme::PlaceIcon::Trash,
             ),
         ];
-        for bm in &self.config.bookmarks {
+        // A group is a container, not a place: it takes no Alt+N key and no
+        // row in this list, which is the list the keys and the editor's
+        // duplicate check both read.
+        for bm in self.config.bookmarks.iter().filter(|b| !b.group) {
             rows.push((
                 bm.name.clone(),
                 bm.path.clone(),
@@ -3533,7 +3929,18 @@ impl App {
 
     /// Number of standard rows before the person's own shortcuts start.
     pub fn standard_rows(&self) -> usize {
-        self.shortcut_entries().len() - self.config.bookmarks.len()
+        let own = self.config.bookmarks.iter().filter(|b| !b.group).count();
+        self.shortcut_entries().len() - own
+    }
+
+    /// How many shortcuts the person pinned, their groups' children included
+    /// but not the groups themselves.
+    pub fn pinned_count(&self) -> usize {
+        self.config
+            .bookmarks
+            .iter()
+            .map(|b| if b.group { b.children.len() } else { 1 })
+            .sum()
     }
 
     // -----------------------------------------------------------------------
@@ -3606,6 +4013,26 @@ impl App {
                 Some("That is not a folder.".to_string())
             },
             original,
+            group: false,
+            group_at: None,
+        });
+    }
+
+    /// Open the little editor for a shortcut group: a name, no folder. `Some(i)`
+    /// renames the group at that index, `None` makes a new one.
+    pub fn open_group_editor(&mut self, group_at: Option<usize>) {
+        let name = group_at
+            .and_then(|i| self.config.bookmarks.get(i))
+            .map(|b| b.name.clone())
+            .unwrap_or_default();
+        self.shortcut_edit = Some(ShortcutEdit {
+            name,
+            path: String::new(),
+            focus: false,
+            error: None,
+            original: None,
+            group: true,
+            group_at,
         });
     }
 
@@ -3618,9 +4045,31 @@ impl App {
         let path = PathBuf::from(edit.path.trim());
         if name.is_empty() {
             self.shortcut_edit = Some(ShortcutEdit {
-                error: Some("Give the shortcut a name.".to_string()),
+                error: Some(if edit.group {
+                    "Give the group a name.".to_string()
+                } else {
+                    "Give the shortcut a name.".to_string()
+                }),
                 ..edit
             });
+            return;
+        }
+        // A group holds shortcuts; it stands for no folder of its own.
+        if edit.group {
+            match edit.group_at {
+                Some(i) => {
+                    if let Some(bm) = self.config.bookmarks.get_mut(i) {
+                        bm.name = name;
+                    }
+                    self.toast("Group renamed");
+                }
+                None => {
+                    self.config.bookmarks.push(config::Bookmark::group(name));
+                    self.config.shortcuts_expanded = true;
+                    self.toast("Group added");
+                }
+            }
+            self.config_dirty = true;
             return;
         }
         if !path.is_dir() {
@@ -3644,30 +4093,39 @@ impl App {
             });
             return;
         }
+        // A folder may only carry one row, wherever that row sits: the panel
+        // would otherwise show the same place twice and the colour would have
+        // two homes.
+        let existing = config::spot_of_path(&self.config.bookmarks, &path);
         match edit.original {
             Some(old) => {
-                if let Some(bm) = self.config.bookmarks.iter_mut().find(|b| b.path == old) {
-                    bm.name = name;
-                    bm.path = path;
+                if let Some(spot) = config::spot_of_path(&self.config.bookmarks, &old) {
+                    if let Some(bm) = config::row_at_mut(&mut self.config.bookmarks, spot) {
+                        bm.name = name;
+                        bm.path = path.clone();
+                    }
+                }
+                // The colour follows the folder it was given to.
+                for colour in self.config.shortcut_colors.iter_mut() {
+                    if colour.path == old {
+                        colour.path = path.clone();
+                    }
                 }
                 self.toast("Shortcut renamed");
             }
-            None => {
-                if self.config.bookmarks.iter().any(|b| b.path == path) {
-                    self.config
-                        .bookmarks
-                        .iter_mut()
-                        .find(|b| b.path == path)
-                        .map(|b| b.name = name);
+            None => match existing {
+                Some(spot) => {
+                    if let Some(bm) = config::row_at_mut(&mut self.config.bookmarks, spot) {
+                        bm.name = name;
+                    }
                     self.toast("Shortcut updated");
-                } else {
-                    self.config
-                        .bookmarks
-                        .push(config::Bookmark { name, path });
+                }
+                None => {
+                    self.config.bookmarks.push(config::Bookmark::plain(name, path));
+                    self.config.shortcuts_expanded = true;
                     self.toast("Shortcut added");
                 }
-                self.config.shortcuts_expanded = true;
-            }
+            },
         }
         self.config_dirty = true;
     }
@@ -4739,6 +5197,23 @@ fn shortcut_row(
     row_tinted(ui, label, Some(icon), selected, key, tint)
 }
 
+/// A shortcut row with the two things groups added: an indent (a group's own
+/// shortcuts sit one step in from it) and, for a group row, the little fold
+/// arrow in front of the same bookmark icon every shortcut carries.
+fn shortcut_row_at(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: theme::PlaceIcon,
+    selected: bool,
+    key: Option<&str>,
+    colour: Option<[u8; 3]>,
+    indent: f32,
+    fold: Option<bool>,
+) -> egui::Response {
+    let tint = colour.map(|c| theme::c(c[0], c[1], c[2]));
+    row_tinted_at(ui, label, Some(icon), selected, key, tint, indent, fold)
+}
+
 /// A "Shortcut Colour" entry inside a context menu: the eight swatches the
 /// folder menu offers, plus a way back to the normal colour.
 fn colour_menu_item(
@@ -4766,7 +5241,11 @@ fn colour_menu_item(
 
 /// Heading of the Shortcuts section: a fold arrow, the name, how many
 /// shortcuts the person pinned and a "+" button that opens the editor.
-fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, bool) {
+fn shortcuts_header(
+    ui: &mut egui::Ui,
+    expanded: bool,
+    pinned: usize,
+) -> (bool, bool, bool) {
     ui.add_space(4.0);
     let width = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
@@ -4815,8 +5294,26 @@ fn shortcuts_header(ui: &mut egui::Ui, expanded: bool, pinned: usize) -> (bool, 
         "plus",
         if plus.hovered() { theme::text() } else { theme::text_dim() },
     );
-    let add = plus.on_hover_text("Add Shortcut (Ctrl+Shift+S)").clicked();
-    (resp.on_hover_text("Fold the shortcuts away").clicked(), add)
+    let mut add_from_menu = false;
+    let mut add_group = false;
+    resp.context_menu(|ui| {
+        ui.set_min_width(210.0);
+        if menu_row(ui, "New Group…", "").clicked() {
+            add_group = true;
+            ui.close();
+        }
+        if menu_row(ui, "Add Shortcut…", "Ctrl+Shift+S").clicked() {
+            add_from_menu = true;
+            ui.close();
+        }
+    });
+    let add = plus.on_hover_text("Add Shortcut (Ctrl+Shift+S)").clicked() || add_from_menu;
+    (
+        resp.on_hover_text("Fold the shortcuts away\nRight-click for a new group")
+            .clicked(),
+        add,
+        add_group,
+    )
 }
 
 /// The name a delete question shows for one item. The original puts the item's
@@ -4942,6 +5439,23 @@ fn row_tinted(
     key: Option<&str>,
     tint: Option<Color32>,
 ) -> egui::Response {
+    row_tinted_at(ui, label, icon, selected, key, tint, 0.0, None)
+}
+
+/// The row itself. `indent` moves the whole row's content right (a shortcut
+/// inside a group sits one step in), and `fold` draws the disclosure arrow a
+/// group carries — down when it is open, right when it is folded — in front of
+/// its icon, the same way the panel's section headings do.
+fn row_tinted_at(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: Option<theme::PlaceIcon>,
+    selected: bool,
+    key: Option<&str>,
+    tint: Option<Color32>,
+    indent: f32,
+    fold: Option<bool>,
+) -> egui::Response {
     let width = ui.available_width();
     // Drag senses as well as clicks: the shortcut rows are dragged into a new
     // order, and egui only reports a drag for a row that asked for one. A press
@@ -4960,10 +5474,23 @@ fn row_tinted(
             theme::row_hover(),
         );
     }
-    let mut text_x = rect.left() + 8.0;
+    let mut text_x = rect.left() + indent + 8.0;
+    if let Some(open) = fold {
+        let chev = Rect::from_center_size(
+            Pos2::new(rect.left() + indent + 8.0, rect.center().y),
+            Vec2::splat(12.0),
+        );
+        theme::draw_glyph(
+            ui.painter(),
+            chev,
+            if open { "chevron_down" } else { "chevron_right" },
+            if selected || resp.hovered() { theme::text() } else { theme::text_dim() },
+        );
+        text_x = rect.left() + indent + 13.0;
+    }
     if let Some(icon) = icon {
         let icon_rect = Rect::from_center_size(
-            Pos2::new(rect.left() + 17.0, rect.center().y),
+            Pos2::new(text_x + 9.0, rect.center().y),
             Vec2::splat(17.0),
         );
         theme::draw_place_icon(
@@ -4972,7 +5499,7 @@ fn row_tinted(
             icon,
             place_icon_colour(selected, tint),
         );
-        text_x = rect.left() + 32.0;
+        text_x += 24.0;
     }
     // The shortcut badge takes its own little space at the right edge, so the
     // name is shortened around it rather than underneath it.

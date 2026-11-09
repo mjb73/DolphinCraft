@@ -336,7 +336,7 @@ section around it, with the jump keys the person asked to see:
 | add | `+` in the header, the "Add Shortcut" row, the folder context menu, or `Ctrl+Shift+S`; the editor pre-fills the current folder | `Panel::shortcut_dialog` |
 | rename / remove / reorder | right-click a pinned row: Open in New Tab, Rename Shortcut…, Move Up, Move Down, Shortcut Colour, Remove Shortcut; a row can also be dragged up or down | `places_panel` |
 | colour | right-click any row — `Shortcut Colour` with the eight folder colours, or `Normal Colour` to clear it; the flag (or the standard row's icon) takes the colour | `theme::colour_menu`, `App::set_shortcut_color` |
-| order | dragging a row into a gap moves it there; the gaps are counted like `KFilePlacesModel::movePlace` counts them, and a drop over the row's own place changes nothing | `config::move_shortcut` |
+| order | dragging a row into a gap moves it there; the gaps are counted like `KFilePlacesModel::movePlace` counts them, and a drop over the row's own place changes nothing | `config::move_row` |
 | duplicate rule | a folder that is already a standard row is refused with "That folder is already in the panel — click its row instead." | `App::save_shortcut` |
 | persistence | the existing config file, `bookmarks` array plus `shortcuts_expanded`, `shortcut_keys` and `shortcut_colors` | `app/src/config.rs` |
 
@@ -481,6 +481,39 @@ shortcuts and colours instead of factory ones.
   `Alternate` brush, and the exact values are not constants in the code read
   here. The rebuild uses its own accent colour at 2 px.
 
+
+## Shortcut groups (asked for by the person)
+
+The person asked for a row that holds other shortcuts — the same flag icon as a
+shortcut, folding open to reveal what is inside it. The panel had one flat list
+of bookmarks, addressed by index, so the model had to grow a level before the
+drawing could.
+
+**The shape.** A `Bookmark` gained `group`, `open` and `children`; all three
+default, so a settings file written before groups loads exactly as it did — its
+rows come back as plain shortcuts. A group keeps its own name and an empty
+`path`: it stands for no folder, and the panel never navigates to it.
+
+| what | how |
+| --- | --- |
+| address | `config::Spot::{Top(i), In(group, child)}` — one row of the person's list, wherever it sits. The index `len` is the gap after the last row, which is where a drop at the bottom lands |
+| the move | `config::move_row(tree, from, to)` takes the row out, shifts the destination for the removal, and inserts it before `to`. It refuses a drop on its own place, on the gap right below it, and — one level is what the panel draws — a group inside a group |
+| filling a group | a shortcut row dragged onto a group row is appended to it and the group opens, so the row does not disappear into a folded box; `Move to Group ▸` in a row's menu does the same without the pointer |
+| emptying it | a child dragged to the top level lands at the gap the line marks; `Move out of Group` in its menu |
+| folding | a click anywhere on the group row toggles `open`, which is saved with the list |
+| removing | `Remove Group` dissolves the container and leaves its shortcuts at the top level, in their order, where the group stood — nothing the person pinned is thrown away by removing the box |
+| drawing | the group row carries the same `PlaceIcon::Bookmark` every shortcut has, with the panel's `chevron_down`/`chevron_right` in front of it; its children sit 14 px in, so their icons line up under the group's name (`row_tinted_at` in `app/src/main.rs`) |
+| the keys | a group takes no `Alt+N` slot: `shortcut_entries` leaves groups out, so the jump keys and the badges stay on real folders |
+| duplicates | one folder, one row — `config::shortcut_paths` walks children too, and `App::save_shortcut` refuses a second row for a folder that is already inside a group |
+| the editor | the same little window, with the folder field and the suggestions left out: `New Group` / `Rename Group` ask for a name and nothing else (`ShortcutEdit::group`) |
+
+`--selftest` holds the model to it: a shortcut dropped on a group is in its
+children and the group opens; dragged back out it is at the top level again; a
+group is refused inside a group; `dissolve_group` leaves `[a, b]` where the group
+stood; a folder inside a group can still be found by path; an older
+`{"name": …, "path": …}` row loads as a plain shortcut; and a group with two
+children and `open: false` comes back from the settings file exactly as it went
+out.
 
 ## The location bar: click to type, paste an address (asked for by the person)
 

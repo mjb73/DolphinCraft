@@ -28,6 +28,10 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
 - **Places sidebar**: Home, Desktop, Documents, Downloads, Music, Pictures,
   Videos, Trash, plus removable drives and your own shortcuts.
   Shortcuts can be given a colour, renamed, reordered by dragging, and removed.
+  **Shortcut groups** hold them: right-click the Shortcuts heading for *New
+  Group…*, then drag shortcuts onto the group or use *Move to Group*. A group
+  folds with a click and shows the same flag as the shortcuts it holds; removing
+  it keeps them.
 - **Tabs** with a path bar you can click through, and an address field (Ctrl+L).
   Closing a tab is never final: *File → Recently Closed Tabs* lists the ten
   folders closed since the window opened, newest first, and **Ctrl+Shift+T**

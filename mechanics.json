@@ -303,8 +303,14 @@
   {
    "name": "shortcut persistence",
    "group": "shortcuts",
-   "value": "config bookmarks array + shortcuts_expanded + shortcut_keys",
+   "value": "config bookmarks array + shortcuts_expanded + shortcut_keys; a group's children and its fold state travel with it",
    "estimated": true
+  },
+  {
+   "name": "shortcut groups",
+   "group": "shortcuts",
+   "value": "a bookmark row with group set holds other shortcuts: same flag icon, chevron in front, children 14 px in; a click folds it, a row dropped on it joins it, Remove Group dissolves the box and keeps the rows",
+   "source": "own rule, asked for by the person; one level of nesting, and a group takes no Alt+N slot"
   },
   {
    "name": "shortcut hints in menus",
