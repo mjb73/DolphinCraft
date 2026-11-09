@@ -14,12 +14,18 @@ use crate::fsutil::Kind;
 // ---------------------------------------------------------------------------
 
 /// Added feature, asked for by the person: dark and light, switched from the app
-/// menu's View group. Every colour in the window is written down once, as the
-/// dark value sampled from the reference window, and `c()` derives the light one
-/// from it — so a colour added anywhere later is right in both modes without a
-/// second palette to keep in step. Only the two colours where the derivation
-/// reads badly (the paper of the document icon, which has to stay paper) are
-/// written out by hand.
+/// menu's View group.
+///
+/// The light palette is a second, designed rendering of the same system, not the
+/// dark one flipped. Every role is written down as a pair — the dark value and
+/// the light value — because a single `1 − L^1.6` derivation squashes the whole
+/// near-black surface ladder into five RGB levels of near-white and turns the
+/// window's border into its brightest line. The pairs are checked, in
+/// `selftest`, against the same contrast targets in both modes: surfaces a
+/// visible step apart, ink at body contrast, hairlines that survive, an accent
+/// that still reads on paper, and a selection band dark enough to carry white
+/// text. `c()` remains for the icon colours and one-off tints, where a
+/// lightness flip happens to be the right move.
 static LIGHT: AtomicBool = AtomicBool::new(false);
 
 /// Is the light palette in use?
@@ -33,12 +39,14 @@ pub fn set_light(on: bool) {
     LIGHT.store(on, Ordering::Relaxed);
 }
 
-/// `r, g, b` as the current mode draws it. Light mode keeps the hue and flips the
-/// lightness, stretched — `1 − L^1.6` — so the near-black surfaces of the dark
-/// palette come out near-white (L 0.15 → 0.95) instead of a muddy grey, the
-/// near-white text lands near black (0.94 → 0.09), and a mid-tone icon colour
-/// barely moves at all. Saturation gives a little, as it does in any light
-/// scheme.
+/// `r, g, b` as the current mode draws it, for the icon colours and one-off
+/// tints that have no light value of their own. Light mode keeps the hue and
+/// flips the lightness, stretched — `1 − L^1.6` — so the near-black surfaces of
+/// the dark palette come out near-white (L 0.15 → 0.95) instead of a muddy grey,
+/// the near-white text lands near black (0.94 → 0.09), and a mid-tone icon
+/// colour barely moves at all. Saturation gives a little, as it does in any light
+/// scheme. The window's own roles do not use this: their light values are written
+/// beside their dark ones, because a flip cannot keep a ladder or a hairline.
 pub fn c(r: u8, g: u8, b: u8) -> Color32 {
     if !light() {
         return Color32::from_rgba_unmultiplied(r, g, b, 255);
@@ -101,41 +109,45 @@ fn hsl_to_colour(h: f32, s: f32, l: f32) -> Color32 {
     )
 }
 
-// The palette, written as the dark values from the reference window. Each one is
-// handed to `c()`, so the light value comes from the same line of code.
-/// The view behind the file rows.
+// The palette, as pairs: the dark value first, then the light one written for
+// paper. The light surfaces climb down from the view (the paper the files sit
+// on) through the panel and the toolbar, each a measured step, so the window
+// keeps the ladder the dark palette has instead of flattening into one white.
+/// The view behind the file rows. Light: paper, not `#fff` — a tinted white.
 pub fn view_bg() -> Color32 {
-    c(35, 38, 41)
+    pair((35, 38, 41), (251, 252, 253))
 }
-/// The side panel and the find bar's strip.
+/// The side panel and the find bar's strip. One step under the view.
 pub fn panel_bg() -> Color32 {
-    c(43, 47, 51)
+    pair((43, 47, 51), (238, 242, 245))
 }
-/// The toolbar and dialog chrome.
+/// The toolbar and dialog chrome. Two steps under, the deepest surface.
 pub fn toolbar_bg() -> Color32 {
-    c(49, 54, 59)
+    pair((49, 54, 59), (230, 235, 240))
 }
-/// The details view's column header.
+/// The details view's column header. A hair under the panel, over the rows.
 pub fn header_bg() -> Color32 {
-    c(46, 51, 56)
+    pair((46, 51, 56), (239, 243, 246))
 }
 /// A row under the pointer.
 pub fn row_hover() -> Color32 {
-    c(57, 63, 69)
+    pair((57, 63, 69), (225, 231, 237))
 }
-/// The selected row of the view the person is working in.
+/// The selected row of the view the person is working in. In light mode the band
+/// stays a band — a mid blue the white text on it reads against — rather than
+/// turning into a pale wash that could be mistaken for the hover.
 pub fn row_sel_active() -> Color32 {
-    c(42, 104, 143)
+    pair((42, 104, 143), (47, 121, 172))
 }
 /// The selected row of the view beside it.
 pub fn row_sel_inactive() -> Color32 {
-    c(64, 72, 79)
+    pair((64, 72, 79), (208, 219, 229))
 }
-/// Text drawn on the selection band, or on a button filled with `accent()`: white
-/// in the dark palette, near-black in the light one, because the band it sits on
-/// inverts with everything else.
+/// Text drawn on the selection band, or on a button filled with `accent()`:
+/// white in both palettes, because the band and the filled button are the same
+/// dark band in both. Only the surfaces around them change mode.
 pub fn on_band() -> Color32 {
-    self::c(255, 255, 255)
+    Color32::WHITE
 }
 
 /// Text drawn on a dark scrim laid over a photograph (the viewer's name strips).
@@ -146,76 +158,86 @@ pub fn on_scrim() -> Color32 {
 
 /// The outline of a document page. In the dark palette the page's own brightness
 /// is its edge, so this is the page colour and the stroke is invisible; in the
-/// light one a white page on a white view has no shape at all without a grey
-/// line around it.
+/// light one an off-white page on off-white paper has no shape at all without a
+/// grey line around it.
 pub fn paper_edge() -> Color32 {
-    if light() {
-        Color32::from_rgba_unmultiplied(163, 171, 178, 255)
-    } else {
-        paper()
-    }
+    pair((226, 230, 233), (170, 178, 185))
 }
 
-/// A colour with its own light value, for the two places where the derivation
-/// reads too pale on white to be worth keeping. Everything else comes from `c()`.
+/// A colour with its own light value. Every role in the window takes one, since
+/// the single-formula derivation below cannot hold a surface ladder, a border or
+/// an accent at the contrast they need on paper.
 fn pair(dark: (u8, u8, u8), light: (u8, u8, u8)) -> Color32 {
     let (r, g, b) = if self::light() { light } else { dark };
     Color32::from_rgba_unmultiplied(r, g, b, 255)
 }
 
-/// File names and other primary text.
+/// File names and other primary text. Light: a tinted near-black at 16:1 on
+/// paper, never `#000`.
 pub fn text() -> Color32 {
-    c(239, 240, 241)
+    pair((239, 240, 241), (26, 29, 32))
 }
 /// Secondary text: sizes, dates, hints. Written out in light mode, where the
 /// derivation leaves it too pale to read on white.
 pub fn text_dim() -> Color32 {
-    pair((152, 160, 166), (86, 94, 100))
+    pair((160, 168, 174), (86, 94, 100))
 }
-/// Tertiary text: counts and captions. Likewise written out.
+/// Tertiary text: counts and captions. Likewise written out, and held at 4.5:1
+/// or better on the panel and the toolbar as well as on the view — a count in
+/// the side panel is still text.
 pub fn text_faint() -> Color32 {
-    pair((120, 128, 134), (118, 126, 132))
+    pair((144, 152, 159), (98, 107, 115))
 }
 /// The one accent: the active sort column, the chosen chip, the focus ring.
+/// Light: the same hue, dropped in lightness until it clears 3:1 on paper, so
+/// the ring and the sort arrow stay visible on white.
 pub fn accent() -> Color32 {
-    c(61, 174, 233)
+    pair((61, 174, 233), (27, 110, 158))
 }
-/// The window's outer edge.
+/// A filled primary button. The same fill in both modes, because a filled button
+/// is a dark plate whatever the window: white text on it clears 4.5:1.
+pub fn action_fill() -> Color32 {
+    pair((45, 112, 163), (45, 112, 163))
+}
+/// A filled destructive button (Empty Trash, Delete Permanently).
+pub fn danger_fill() -> Color32 {
+    pair((170, 68, 62), (170, 68, 62))
+}
+/// The window's outer edge. Light: the darkest line in the window, so the frame
+/// still reads as a frame instead of glowing brighter than the view it holds.
 pub fn border() -> Color32 {
-    c(27, 30, 33)
+    pair((27, 30, 33), (196, 204, 212))
 }
 /// The hairline between rows and columns.
 pub fn separator() -> Color32 {
-    c(53, 59, 64)
+    pair((53, 59, 64), (214, 221, 228))
 }
 /// The folder icon's body.
 pub fn folder() -> Color32 {
-    c(76, 148, 201)
+    pair((76, 148, 201), (58, 134, 187))
 }
-/// The folder icon's lit top edge.
+/// The folder icon's lit top edge. Lighter than the body in both modes: a
+/// highlight that flips to a shadow makes the icon read as a cut-out.
 pub fn folder_top() -> Color32 {
-    c(104, 172, 219)
+    pair((104, 172, 219), (91, 161, 208))
+}
+/// The folder icon's bottom shade. Darker than the body in both modes.
+pub fn folder_shade() -> Color32 {
+    pair((58, 122, 168), (43, 108, 153))
 }
 /// The document icon's page. Written out: `c()` would turn a white page into a
-/// black one, and a file is drawn on paper in either mode.
+/// black one, and a file is drawn on paper in either mode. Light: a warm
+/// off-white, not `#fff`, with `paper_edge` giving it its outline.
 pub fn paper() -> Color32 {
-    if light() {
-        Color32::from_rgba_unmultiplied(255, 255, 255, 255)
-    } else {
-        Color32::from_rgba_unmultiplied(226, 230, 233, 255)
-    }
+    pair((226, 230, 233), (255, 253, 248))
 }
 /// The fold and the page's edge.
 pub fn paper_shade() -> Color32 {
-    if light() {
-        Color32::from_rgba_unmultiplied(176, 184, 190, 255)
-    } else {
-        Color32::from_rgba_unmultiplied(188, 194, 199, 255)
-    }
+    pair((188, 194, 199), (176, 184, 190))
 }
 /// The glyph of a place in the side panel.
 pub fn place() -> Color32 {
-    c(150, 178, 198)
+    pair((150, 178, 198), (70, 100, 120))
 }
 
 /// The original's ceiling: `ZoomLevelInfo::maximumLevel()` @0x2a6370 returns 16,
@@ -400,24 +422,24 @@ pub fn apply_style(ctx: &egui::Context) {
     v.panel_fill = panel_bg();
     v.window_fill = toolbar_bg();
     v.window_stroke = Stroke::new(1.0, border());
-    v.extreme_bg_color = c(30, 33, 36);
-    v.faint_bg_color = c(48, 53, 58);
-    v.selection.bg_fill = c(42, 104, 143);
-    v.selection.stroke = Stroke::new(1.0, text());
+    v.extreme_bg_color = pair((30, 33, 36), (243, 246, 249));
+    v.faint_bg_color = pair((48, 53, 58), (236, 241, 246));
+    v.selection.bg_fill = row_sel_active();
+    v.selection.stroke = Stroke::new(1.0, on_band());
     v.hyperlink_color = accent();
     v.slider_trailing_fill = true;
     v.widgets.noninteractive.bg_fill = Color32::TRANSPARENT;
     v.widgets.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, separator());
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_dim());
-    v.widgets.inactive.bg_fill = c(56, 62, 68);
-    v.widgets.inactive.weak_bg_fill = c(56, 62, 68);
+    v.widgets.inactive.bg_fill = pair((56, 62, 68), (232, 237, 242));
+    v.widgets.inactive.weak_bg_fill = pair((56, 62, 68), (232, 237, 242));
     v.widgets.inactive.bg_stroke = Stroke::NONE;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, text());
-    v.widgets.hovered.bg_fill = c(70, 78, 85);
-    v.widgets.hovered.weak_bg_fill = c(70, 78, 85);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, c(84, 92, 99));
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, c(255, 255, 255));
+    v.widgets.hovered.bg_fill = pair((70, 78, 85), (219, 226, 233));
+    v.widgets.hovered.weak_bg_fill = pair((70, 78, 85), (219, 226, 233));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, pair((84, 92, 99), (190, 199, 208)));
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, pair((255, 255, 255), (26, 29, 32)));
     v.widgets.active.bg_fill = c(61, 174, 233);
     v.widgets.active.weak_bg_fill = c(61, 174, 233);
     // `RichText::strong()` takes its colour from the active widget visuals, so
@@ -426,8 +448,8 @@ pub fn apply_style(ctx: &egui::Context) {
     // the palette: left as a dark literal it turned near-white in light mode and
     // those names vanished.
     v.widgets.active.fg_stroke = Stroke::new(1.0, text());
-    v.widgets.open.bg_fill = c(70, 78, 85);
-    v.widgets.open.weak_bg_fill = c(70, 78, 85);
+    v.widgets.open.bg_fill = pair((70, 78, 85), (219, 226, 233));
+    v.widgets.open.weak_bg_fill = pair((70, 78, 85), (219, 226, 233));
     v.widgets.open.fg_stroke = Stroke::new(1.0, accent());
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
@@ -577,7 +599,7 @@ fn draw_folder(painter: &egui::Painter, rect: Rect, alpha: u8, tint: Option<Colo
         None => (
             folder(),
             folder_top(),
-            c(58, 122, 168),
+            folder_shade(),
         ),
     };
     let (w, h) = (rect.width(), rect.height());

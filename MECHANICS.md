@@ -2930,30 +2930,67 @@ The window had one palette, written as eighteen constants sampled from the
 reference window and used by roughly three hundred drawing calls, plus some
 ninety colour literals scattered through the same code. A second hand-written
 palette would have been a second thing to keep in step with every colour added
-later, and the first one to drift. So the colours are still written **once**, as
-the dark values, and light mode is *derived* from them.
+later, and the first one to drift, so the first light palette was *derived*: the
+colours were written once, as the dark values, and `theme::c()` flipped them.
+
+It looked washed out, and the measurements say why. `L' = 1 − L^1.6` maps the
+near-black surface ladder into about five RGB levels — view 243, panel 238,
+toolbar 235, so 1.05:1 and 1.09:1 apart where the dark window has 1.13 and 1.25 —
+turns the window border `(27,30,33)` into the *brightest* line in the window
+(`#f6f7f7`, 1.04 against the view), leaves the accent at 2.24:1 on paper so the
+focus ring, the sort arrow and the active toolbar icons all fall under the 3:1
+floor, and paints a filled button pastel under white text (2.49:1). One flip
+cannot hold a ladder, a hairline, a frame or an accent.
+
+So every **role** now declares a pair — its dark value and the light value
+written for paper — and `theme::c()` keeps the old rule only for the icon glyphs
+and one-off tints, whose mid-tones survive a flip.
 
 | what | how |
 | --- | --- |
 | the switch | app menu → **View** → *Light Mode* (`Panels::app_menu`). Config key `light`; absent from an older settings file it means dark, which is how the window has always looked. `--light` opens a window light for one session without touching the file |
-| the derivation | `theme::c(r, g, b)`: keep the hue, drop the saturation a touch (×0.92), and flip the lightness with a stretch — `L' = 1 − L^1.6`. Without the stretch a dark surface at L 0.15 comes out at 0.85, a muddy grey that reads as "dimmed", not as a light theme; with it the same surface lands at 0.95, the panel at 0.93, and the near-white text at 0.09 |
-| the palette | the eighteen colours are now functions (`theme::view_bg()`, `theme::text()`, …), each one line of `c(dark values)`; every drawing site that used the constants uses the functions, and every literal went through `c(…)` as well, so nothing anywhere can be left in the other mode's colour |
-| the exceptions | four colours are written out by hand because the derivation is wrong for them: `text_dim` and `text_faint`, which come out too pale to read on white, and `paper` / `paper_shade`, because a document icon is a white page with a grey edge in either mode and `c()` would paint it black |
+| the pairs | `theme::pair(dark, light)`. Light: view `#fbfcfd`, header `#eff3f6`, panel `#eef2f5`, toolbar `#e6ebf0`, hover `#e1e7ed`, selection band `#2f79ac` (inactive `#d0dbe5`), ink `#1a1d20`, dim `#565e64`, faint `#626b73`, accent `#1b6e9e`, window edge `#c4ccd4`, hairline `#d6dde4`, folder `#3a86bb` with a lighter top (`#5ba1d0`) and a darker shade (`#2b6c99`), paper `#fffdf8` with a grey edge, widget fills `#e8edf2` / `#dbe2e9` |
+| what still derives | `theme::c(r, g, b)`: hue kept, saturation ×0.92, `L' = 1 − L^1.6` — for the icon glyphs (the green hill in a picture, the red of a PDF) and the viewer's near-black scrims, where a flip is the right move |
+| what does not flip | the selection band, a filled button (`action_fill()`, `danger_fill()`) and the white text on either (`on_band()`), the viewer's black scrim (`on_scrim()`), and white itself |
 | egui's own colours | `theme::install` used to set the fonts *and* the whole `Visuals`; the style half is now `theme::apply_style`, which the switch calls again. A switch that only repainted the view would leave the menus, buttons and text fields in the old palette |
 | the startup order | the settings are read before anything is styled, so a light window is light on its first frame rather than opening dark and repainting |
 
-### What the derivation must **not** be used for
+### The targets both modes are held to
 
-Deriving the light palette from the dark one is only right for colours that mean
-"this surface" or "this text". A blanket conversion of every colour literal gets
-four kinds of site wrong, and each one was visible on screen before it was put
-right:
+`--selftest` *"both palettes hold the same contrast targets"* walks both palettes
+and fails on any of these:
+
+| pairing | target | light before |
+| --- | --- | --- |
+| view ↔ toolbar | ≥ 1.12:1 | 1.09 |
+| view ↔ panel | ≥ 1.05:1 | 1.05 |
+| ink on the view | ≥ 7:1 | 16.5 |
+| dim on the panel, faint on the panel | ≥ 4.5:1 | faint 3.72 |
+| faint on the toolbar | ≥ 4.0:1 | 3.5 |
+| hairline on the view | ≥ 1.18:1 | 1.12 |
+| window edge against the toolbar | ≥ 1.25:1 | 1.04 (it was brighter) |
+| hover against the view | ≥ 1.10:1 | 1.15 |
+| selection band against the view / white on the band | ≥ 1.9:1 / ≥ 4.5:1 | 1.42 / 12.5 on near-black text |
+| accent on the view | ≥ 3:1 | 2.24 |
+| white on a filled / destructive button | ≥ 4.5:1 | 2.49 |
+| any role | never `#000` or `#fff` | paper `#fff`, band text `#0a0a0a` |
+
+The same check also holds the folder's lit edge lighter than its body in both
+modes, and proves the switch reaches the settings signature, survives a round
+trip, and that a settings file without the key opens dark.
+
+### What `c()` must **not** be used for
+
+A derived colour is only right for a mid-tone icon. A surface, a text role or a
+fill that carries text needs its own light value; a blanket conversion of every
+literal got four kinds of site wrong, and each one was visible on screen before
+it was put right:
 
 | kind of site | what happened | the rule now |
 | --- | --- | --- |
 | **a picture's tint** | a thumbnail is drawn with `painter.image(.., tint)` and the tint *multiplies* the picture. The old code passed white; the sweep turned that into `c(255, 255, 255)`, which is near-white in dark and **black** in light — so every preview in the icons view, the gallery and the viewer came out black | image tints are `Color32::WHITE`, always |
 | **white or black used as maths** | `blend(base, white, 0.22)` (lifting a folder's own colour) and `blend(base, black, 0.20)` (its shaded edge) — in light mode the "white" end became black and the highlight turned into a shadow | `Color32::WHITE` / `Color32::BLACK` for the maths, never `c()` |
-| **text that inherits a widget's colour** | `RichText::strong()` takes its colour from `Visuals::widgets.active.fg_stroke`. That was a dark literal, which in light mode became near-white: the location bar's **current folder name** and every emphasised name (a file's name in its properties, the disk-space heading) were white on white — the bar looked empty | `active.fg_stroke` is `text()`, and text on a band or an accent fill is `on_band()` (white in dark, near-black in light) |
+| **text that inherits a widget's colour** | `RichText::strong()` takes its colour from `Visuals::widgets.active.fg_stroke`. That was a dark literal, which in light mode became near-white: the location bar's **current folder name** and every emphasised name (a file's name in its properties, the disk-space heading) were white on white — the bar looked empty | `active.fg_stroke` is `text()`, and text on a band or a filled button is `on_band()` — white in both modes, because the band and the button are dark in both |
 | **text on a dark scrim** | the viewer writes picture names on a `from_black_alpha` strip; that strip stays black in both modes, so its text must stay light in both | `on_scrim()` — a fixed light colour, never `c()` |
 
 Two smaller ones from the same pass: a document page was a white shape on a white
@@ -2963,13 +3000,11 @@ view with no edge, so most file types read as a floating glyph (the page now has
 were hard-coded dark surfaces carrying palette text, which made their labels
 dark-on-dark (both now take their fill from `c()`).
 
-`--selftest` *"the light palette is the dark one with its lightness flipped"* holds
-both modes to the palette they claim to be: in dark, view/panel/toolbar/header
-under 0.25 luminance and the text over 0.85; in light, the four surfaces over 0.85,
-the text under 0.25, and at least 0.55 of contrast between text and view; the
-folder icon still blue (`b > r + 20`) in both; the switch reaching the settings
-signature, surviving a round trip, and a settings file without the key opening
-dark.
+`--selftest` also holds the things a palette cannot derive: *"the band, the scrim
+and white itself do not change with the mode"* proves `on_band()` is white in both
+palettes, that a filled button no longer follows the accent's lightness, that the
+scrim's text stays light, that the document page has an edge in light mode and is
+not a pure white, and that `RichText::strong()` still lands on `text()`.
 
 ## Drag and drop with other programs
 

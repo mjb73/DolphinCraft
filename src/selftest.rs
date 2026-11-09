@@ -151,6 +151,36 @@ fn check_search_columns(
         {
             return Err(format!("{label} px: the columns overlap"));
         }
+        // The header labels must fit between the rules that close their
+        // columns: right-aligned ones keep HEAD_PAD of air, and the column
+        // being sorted also gives up the arrow's width. "Size" used to end at
+        // the column's right edge while the rule was drawn six pixels inside
+        // it, so the label straddled the line.
+        let head_font = egui::FontId::proportional(12.0);
+        let head_px = |s: &str| {
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap(s.to_owned(), head_font.clone(), crate::theme::text())
+                    .size()
+                    .x
+            })
+        };
+        for (col_label, col) in [("Size", c.size), ("Modified", c.date)] {
+            let need = head_px(col_label) + crate::views::HEAD_PAD + crate::views::SORT_ARROW_W;
+            if need > col.width() + 0.01 {
+                return Err(format!(
+                    "{label} px: the {col_label} header needs {need:.1} px (its text, 6 px of air \
+                     and the sort arrow) but the column is {:.1} px wide",
+                    col.width()
+                ));
+            }
+        }
+        let name_need = head_px("Name") + 6.0 + crate::views::SORT_ARROW_W;
+        if name_need > c.name.width() + 0.01 {
+            return Err(format!(
+                "{label} px: the Name header needs {name_need:.1} px but its column is {:.1} px",
+                c.name.width()
+            ));
+        }
         // The room each label actually gets: the name starts one icon and its
         // 8 px gap in, with 8 px to spare at the end; the folder has 6 px.
         let icon = pane.icon_size().clamp(16.0, crate::theme::MAX_ICON_PX) + 8.0;
@@ -3843,67 +3873,164 @@ pub fn run() -> i32 {
         })(),
     );
 
-    // The light palette is derived from the dark one, so both modes stay in step:
-    // every surface the dark window paints dark has to come out light, every
-    // piece of text has to invert, and the setting has to survive the file.
+    // Both palettes are held to the same contrast targets, measured rather than
+    // eyeballed. The light one is not the dark one with its lightness flipped: a
+    // single flip squashes the surface ladder into a few levels of near-white,
+    // turns the window's border into its brightest line and leaves the accent at
+    // 2.2:1 on the page. Every role therefore carries its own light value, and
+    // the numbers here are the ones both modes have to hit.
     r.check(
-        "the light palette is the dark one with its lightness flipped",
-        (|| {
+        "both palettes hold the same contrast targets",
+        (|| -> Result<String, String> {
             use crate::config::Config;
             use crate::theme;
             let lum = |c: egui::Color32| {
-                (0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32) / 255.0
+                let ch = |v: u8| {
+                    let v = v as f32 / 255.0;
+                    if v <= 0.03928 {
+                        v / 12.92
+                    } else {
+                        ((v + 0.055) / 1.055).powf(2.4)
+                    }
+                };
+                0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
             };
-            theme::set_light(false);
-            // Dark first: surfaces under 0.25, text over 0.85.
-            for (name, c) in [
-                ("view", theme::view_bg()),
-                ("panel", theme::panel_bg()),
-                ("toolbar", theme::toolbar_bg()),
-                ("header", theme::header_bg()),
-            ] {
-                if lum(c) > 0.25 {
-                    return Err(format!("the dark {name} is not dark ({:.2})", lum(c)));
-                }
-            }
-            if lum(theme::text()) < 0.85 {
-                return Err("the dark text is not light".into());
-            }
-            theme::set_light(true);
-            let light = [
-                ("view", theme::view_bg()),
-                ("panel", theme::panel_bg()),
-                ("toolbar", theme::toolbar_bg()),
-                ("header", theme::header_bg()),
-            ];
-            for (name, c) in light {
-                if lum(c) < 0.85 {
-                    theme::set_light(false);
-                    return Err(format!("the light {name} is not light ({:.2})", lum(c)));
-                }
-            }
-            // Text has to invert, and stay far enough from the surface behind it.
-            let ink = lum(theme::text());
-            let bg = lum(theme::view_bg());
-            let light_view = bg;
-            if ink > 0.25 {
+            let cr = |a: egui::Color32, b: egui::Color32| {
+                let (x, y) = (lum(a), lum(b));
+                (x.max(y) + 0.05) / (x.min(y) + 0.05)
+            };
+            let mut said = String::new();
+            for (mode, light) in [("dark", false), ("light", true)] {
+                theme::set_light(light);
+                let out = (|| -> Result<(), String> {
+                    let view = theme::view_bg();
+                    let panel = theme::panel_bg();
+                    let toolbar = theme::toolbar_bg();
+                    // A ladder you can see: the view, then the panel, then the
+                    // toolbar, each a step off the one before.
+                    if cr(toolbar, view) < 1.12 {
+                        return Err(format!(
+                            "{mode}: the toolbar is only {:.2}:1 from the view, so the window reads as one flat plane",
+                            cr(toolbar, view)
+                        ));
+                    }
+                    if cr(view, panel) < 1.05 {
+                        return Err(format!(
+                            "{mode}: the panel is only {:.2}:1 from the view",
+                            cr(view, panel)
+                        ));
+                    }
+                    // Ink, at body contrast on the surfaces it lands on.
+                    if cr(theme::text(), view) < 7.0 {
+                        return Err(format!(
+                            "{mode}: file names are only {:.2}:1 on the view",
+                            cr(theme::text(), view)
+                        ));
+                    }
+                    if cr(theme::text_dim(), panel) < 4.5 {
+                        return Err(format!(
+                            "{mode}: secondary text is only {:.2}:1 on the panel",
+                            cr(theme::text_dim(), panel)
+                        ));
+                    }
+                    if cr(theme::text_faint(), panel) < 4.5 {
+                        return Err(format!(
+                            "{mode}: counts and captions are only {:.2}:1 on the panel",
+                            cr(theme::text_faint(), panel)
+                        ));
+                    }
+                    if cr(theme::text_faint(), toolbar) < 4.0 {
+                        return Err(format!(
+                            "{mode}: counts and captions are only {:.2}:1 on the toolbar",
+                            cr(theme::text_faint(), toolbar)
+                        ));
+                    }
+                    // Hairlines that survive on their ground, a frame darker than
+                    // what it holds, and a hover you can tell from the row above.
+                    if cr(theme::separator(), view) < 1.18 {
+                        return Err(format!(
+                            "{mode}: the row hairline is only {:.2}:1 from the view",
+                            cr(theme::separator(), view)
+                        ));
+                    }
+                    if cr(theme::border(), toolbar) < 1.25 {
+                        return Err(format!(
+                            "{mode}: the window edge is only {:.2}:1 from the toolbar",
+                            cr(theme::border(), toolbar)
+                        ));
+                    }
+                    if cr(theme::row_hover(), view) < 1.10 {
+                        return Err(format!(
+                            "{mode}: the hovered row is only {:.2}:1 from the view",
+                            cr(theme::row_hover(), view)
+                        ));
+                    }
+                    // A selection band that reads as one, with text on it that
+                    // still reads as text.
+                    let band = theme::row_sel_active();
+                    if cr(band, view) < 1.9 {
+                        return Err(format!(
+                            "{mode}: the selection band is only {:.2}:1 from the view, so it reads as a hover",
+                            cr(band, view)
+                        ));
+                    }
+                    if cr(theme::on_band(), band) < 4.5 {
+                        return Err(format!(
+                            "{mode}: text on the selection band is only {:.2}:1",
+                            cr(theme::on_band(), band)
+                        ));
+                    }
+                    // Text on a filled button: the button is a dark plate in
+                    // both modes, so its label stays white in both.
+                    if cr(theme::on_band(), theme::action_fill()) < 4.5 {
+                        return Err(format!(
+                            "{mode}: white text on a filled button is only {:.2}:1",
+                            cr(theme::on_band(), theme::action_fill())
+                        ));
+                    }
+                    if cr(theme::on_band(), theme::danger_fill()) < 4.5 {
+                        return Err(format!(
+                            "{mode}: white text on a destructive button is only {:.2}:1",
+                            cr(theme::on_band(), theme::danger_fill())
+                        ));
+                    }
+                    // The accent carries the focus ring and the sort arrow.
+                    if cr(theme::accent(), view) < 3.0 {
+                        return Err(format!(
+                            "{mode}: the accent is only {:.2}:1 on the view, so the focus ring disappears",
+                            cr(theme::accent(), view)
+                        ));
+                    }
+                    // Never a pure absolute as a surface or as ink.
+                    for (name, col) in [
+                        ("view", view),
+                        ("panel", panel),
+                        ("toolbar", toolbar),
+                        ("text", theme::text()),
+                        ("paper", theme::paper()),
+                    ] {
+                        if col == egui::Color32::BLACK || col == egui::Color32::WHITE {
+                            return Err(format!("{mode}: {name} is a pure absolute"));
+                        }
+                    }
+                    // The folder keeps its hue, and its highlight stays a
+                    // highlight instead of flipping into a shadow.
+                    let folder = theme::folder();
+                    if !(folder.b() > folder.r() + 20) {
+                        return Err(format!("{mode}: the folder icon lost its blue"));
+                    }
+                    if lum(theme::folder_top()) <= lum(folder) {
+                        return Err(format!(
+                            "{mode}: the folder's lit edge is darker than its body"
+                        ));
+                    }
+                    said.push_str(&format!("{mode}: view {:.0}%, ", lum(view) * 100.0));
+                    Ok(())
+                })();
                 theme::set_light(false);
-                return Err(format!("the light text is not dark ({ink:.2})"));
+                out?;
             }
-            if bg - ink < 0.55 {
-                theme::set_light(false);
-                return Err(format!(
-                    "light text and view background are only {:.2} apart",
-                    bg - ink
-                ));
-            }
-            // Every icon colour keeps its hue: a blue folder stays blue.
-            let folder = theme::folder();
-            if !(folder.b() > folder.r() + 20) {
-                theme::set_light(false);
-                return Err("the light folder icon lost its blue".into());
-            }
-            theme::set_light(false);
+            // The switch itself still has to reach the settings file.
             if crate::settings_signature(&Config::default()) == crate::settings_signature(&{
                 let mut c = Config::default();
                 c.light = true;
@@ -3918,32 +4045,27 @@ pub fn run() -> i32 {
             if !back.light {
                 return Err("the light switch did not survive the settings file".into());
             }
-            let old: Config = serde_json::from_str("{\"last_dir\":\"/tmp\"}")
-                .map_err(|e| e.to_string())?;
+            let old: Config =
+                serde_json::from_str("{\"last_dir\":\"/tmp\"}").map_err(|e| e.to_string())?;
             if old.light {
                 return Err("a settings file without the key opened light".into());
             }
-            Ok(format!(
-                "light: view {light_view:.2}, text {ink:.2}, folder keeps its blue"
-            ))
+            Ok(format!("{said}both modes on the same targets"))
         })(),
     );
 
-    // The light palette must never stand in for *white* itself. A picture's tint is
-    // multiplied into the thumbnail, and a blend towards white has to stay a blend
-    // towards white, so those sites take `Color32::WHITE` — which in light mode is
-    // not what `c(255, 255, 255)` returns. The same for the colours that mean
-    // "readable on a band" or "readable on a black scrim", and for the colour
-    // `RichText::strong()` inherits from egui.
+    // The band and the filled button are the same dark plate in both modes, so
+    // the text on them does not change either; only the surfaces around them do.
+    // A picture's tint is still multiplied into the thumbnail, so the colours that
+    // mean "white itself" or "readable on a black scrim" stay put.
     r.check(
-        "the light palette does not stand in for white, black or a band's text",
+        "the band, the scrim and white itself do not change with the mode",
         (|| {
             use crate::theme;
             theme::set_light(false);
             if theme::c(255, 255, 255) != egui::Color32::WHITE {
                 return Err("dark mode: c(255,255,255) is not white".into());
             }
-            let on_band_dark = theme::on_band();
             let scrim_dark = theme::on_scrim();
             let edge_dark = theme::paper_edge();
             theme::set_light(true);
@@ -3953,8 +4075,11 @@ pub fn run() -> i32 {
                         "in light mode c(255,255,255) is still white, so nothing warns a tint away from it".to_string()
                     );
                 }
-                if theme::on_band() == on_band_dark {
-                    return Err("text on the selection band did not follow the band".to_string());
+                if theme::on_band() != egui::Color32::WHITE {
+                    return Err("the band's text is not white, on a band that stays dark".to_string());
+                }
+                if theme::action_fill() == theme::c(61, 174, 233) {
+                    return Err("the filled button still follows the accent's lightness".to_string());
                 }
                 if theme::on_scrim() != scrim_dark {
                     return Err("text on the viewer's black scrim changed with the mode".to_string());
@@ -3962,8 +4087,8 @@ pub fn run() -> i32 {
                 if theme::paper_edge() == edge_dark {
                     return Err("the document page has no edge in light mode".to_string());
                 }
-                if theme::paper() != egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255) {
-                    return Err("the document page is not paper in light mode".to_string());
+                if theme::paper() == egui::Color32::WHITE {
+                    return Err("the document page is a pure white in light mode".to_string());
                 }
                 // egui takes RichText::strong() from the active widget visuals.
                 let ctx = egui::Context::default();
@@ -3979,7 +4104,7 @@ pub fn run() -> i32 {
             })();
             theme::set_light(false);
             out?;
-            Ok("tints stay white, scrims stay light, the page keeps its edge, strong text follows the palette".into())
+            Ok("band and button stay dark, scrims stay light, the page keeps its edge, strong text follows the palette".into())
         })(),
     );
 

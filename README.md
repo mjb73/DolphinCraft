@@ -167,11 +167,14 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   leave together, and the same switch brings them back.
 - **Light mode**, from the app menu's **View** group: *Light Mode* switches the
   whole window — view, panel, toolbar, dialogs, icons, text — from the dark
-  palette to a light one, and back. The light palette is derived from the dark
-  one by flipping its lightness, so every colour keeps its hue (folders stay
-  blue, the accent stays blue) and anything added later is right in both. Your
-  choice is remembered; a window that has never been switched stays dark, which
-  is how it has always looked.
+  palette to a light one, and back. Each colour role carries its own light value
+  beside its dark one, so the light window is designed rather than flipped: paper
+  at #fbfcfd with panel and toolbar steps you can see, a hairline that survives,
+  a window frame darker than what it holds, an accent that still reads on white,
+  a filled button that stays a button, and a selection band that stays a band
+  under white text. `--selftest` holds both modes to the same contrast targets.
+  Your choice is remembered; a window that has never been switched stays dark,
+  which is how it has always looked.
 - **Two recent groups in the sidebar**, under your shortcuts: **Recent Files**
   lists what you have actually opened lately, newest visit first, read from the
   desktop's own recently-used list — a row opens the file, its menu can show it

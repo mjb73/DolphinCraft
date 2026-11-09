@@ -46,6 +46,21 @@ pub struct FindBarLayout {
     pub chips: Rect,
 }
 
+/// Air between a column's right edge and the text that ends there. The header's
+/// vertical rules are drawn on the column boundaries, so without this the label
+/// was flush to its own rule and the last letter straddled it.
+pub(crate) const HEAD_PAD: f32 = 6.0;
+
+/// Width the sort arrow takes out of its column's header when that column is
+/// the one being sorted.
+pub(crate) const SORT_ARROW_W: f32 = 11.0;
+
+/// What the inline name editor did this frame: a name to commit, or a cancel.
+pub struct EditOutcome {
+    pub commit: Option<String>,
+    pub cancel: bool,
+}
+
 impl Default for FindBarLayout {
     fn default() -> Self {
         Self {
@@ -112,6 +127,20 @@ fn tint_of(entry: &fsutil::Entry) -> Option<Color32> {
         return None;
     }
     entry.tint.map(|c| theme::c(c[0], c[1], c[2]))
+}
+
+/// The tint a row's icon takes: the folder colour the person gave it, or the
+/// palette's own while the row is marked. A marked row's folder is lifted
+/// towards white by `theme::selection_tint`, because a blue folder on the blue
+/// selection band is a smudge — the same lift a coloured place icon gets in the
+/// side panel.
+fn row_tint(entry: &fsutil::Entry, selected: bool) -> Option<Color32> {
+    match tint_of(entry) {
+        Some(c) if selected => Some(theme::selection_tint(c)),
+        Some(c) => Some(c),
+        None if selected && entry.is_dir => Some(theme::selection_tint(theme::folder())),
+        None => None,
+    }
 }
 
 /// Draw a preview texture inside `rect` the way the original fits a preview
@@ -640,7 +669,9 @@ impl Pane {
 
     fn column_rects(&self, rect: Rect) -> DetailsCols {
         let w = rect.width();
-        let mut date_w = (w * 0.28).clamp(64.0, 150.0);
+        // 66 px is the floor that holds the header, not a taste: "Modified"
+        // (48 px at 12 px) plus its 6 px of air and the sort arrow's 11 px.
+        let mut date_w = (w * 0.28).clamp(66.0, 150.0);
         let mut size_w = (w * 0.16).clamp(44.0, 88.0);
         // Only when the walk covers the folders *below* this one: a "This
         // folder" search has every row in the folder the bar already names, so
@@ -662,7 +693,7 @@ impl Pane {
             // give their slack back — down to what their own cells hold — rather
             // than have a name or a folder elided for the sake of empty space.
             if name_need + path_need > w - size_w - date_w {
-                date_w = (self.search_date_px + 16.0).max(64.0).min(date_w);
+                date_w = (self.search_date_px + 16.0).max(66.0).min(date_w);
                 size_w = (self.search_size_px + 14.0).max(44.0).min(size_w);
             }
         }
@@ -793,7 +824,7 @@ impl Pane {
         // ordered by folder, so a header that pretended to sort would lie.
         if let Some(path_c) = cols.path {
             ui.painter().text(
-                Pos2::new(path_c.left() + 2.0, path_c.center().y),
+                Pos2::new(path_c.left() + HEAD_PAD, path_c.center().y),
                 Align2::LEFT_CENTER,
                 "Path",
                 FontId::proportional(12.0),
@@ -813,18 +844,18 @@ impl Pane {
                 .fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), color))
                 .size()
                 .x;
-            let arrow_w = if sort_here { 11.0 } else { 0.0 };
+            let arrow_w = if sort_here { SORT_ARROW_W } else { 0.0 };
             let anchor = if align == Align2::LEFT_CENTER {
                 Pos2::new(rect.left(), rect.center().y)
             } else {
-                Pos2::new(rect.right() - arrow_w, rect.center().y)
+                Pos2::new(rect.right() - HEAD_PAD - arrow_w, rect.center().y)
             };
             ui.painter().text(anchor, align, label, font, color);
             if sort_here {
                 let cx = if align == Align2::LEFT_CENTER {
                     rect.left() + text_w + 6.0
                 } else {
-                    rect.right() - 5.0
+                    rect.right() - HEAD_PAD - 3.0
                 };
                 let cy = rect.center().y;
                 let tri = if self.asc {
@@ -855,9 +886,11 @@ impl Pane {
             }
         }
         // Vertical column separators, as in the original header.
-        let mut seps = vec![size_c.left() - 6.0, date_c.left() - 6.0];
+        // On the boundaries themselves: a rule drawn six pixels inside the column
+        // cut through the Size label, which ends at the boundary.
+        let mut seps = vec![size_c.left(), date_c.left()];
         if let Some(path_c) = cols.path {
-            seps.push(path_c.left() - 6.0);
+            seps.push(path_c.left());
         }
         for x in seps {
             ui.painter().line_segment(
@@ -900,6 +933,59 @@ impl Pane {
         let _ = scroll;
     }
 
+    /// The name editor, drawn where the name sits: centred in a details row, on
+    /// the label line of an icon or compact cell. `None` when nothing is being
+    /// renamed, or when another row is — every view shares one `rename`, so all
+    /// three draw the same field and any of them can commit it.
+    ///
+    /// The field takes the view's surface and the palette's ink instead of
+    /// egui's default well, so on a selected row it reads as an input laid on
+    /// the band rather than a dark bar punched through it, and it is as wide as
+    /// the room the name has (280 px, egui's default, ends halfway across a
+    /// details row). Its rect is centred by the caller, which is what keeps it
+    /// on the row's text line instead of against the row's top edge.
+    fn rename_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        font: egui::FontId,
+        idx: usize,
+    ) -> Option<EditOutcome> {
+        let rename = self.rename.as_mut()?;
+        if rename.index != idx {
+            return None;
+        }
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::left_to_right(Align::Center)),
+        );
+        let response = child.add(
+            egui::TextEdit::singleline(&mut rename.text)
+                .font(font)
+                .margin(egui::Margin::symmetric(4, 2))
+                .desired_width((rect.width() - 10.0).max(40.0))
+                .background_color(theme::view_bg())
+                .text_color(theme::text()),
+        );
+        if !rename.focus {
+            response.request_focus();
+            let len = rename.text.chars().count();
+            theme::select_all_text(&child.ctx(), response.id, len);
+            rename.focus = true;
+        }
+        let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
+        let escape = child.input(|i| i.key_pressed(egui::Key::Escape));
+        Some(EditOutcome {
+            commit: if enter {
+                Some(rename.text.trim().to_string())
+            } else {
+                None
+            },
+            cancel: escape,
+        })
+    }
+
     fn draw_details_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -926,6 +1012,14 @@ impl Pane {
         if bg != Color32::TRANSPARENT {
             ui.painter().rect_filled(rect, 0.0, bg);
         }
+        // Secondary columns keep their hierarchy on a selected row: `text_dim`
+        // on the band is grey-on-blue at about 2.9:1, so a selected row's size
+        // and date went muddy at the moment the row mattered most.
+        let dim = if selected {
+            theme::on_band().gamma_multiply(0.88)
+        } else {
+            theme::text_dim()
+        };
         ui.painter().line_segment(
             [Pos2::new(rect.left() + 4.0, rect.bottom()), Pos2::new(rect.right() - 4.0, rect.bottom())],
             Stroke::new(1.0, theme::separator().gamma_multiply(0.55)),
@@ -955,7 +1049,7 @@ impl Pane {
                 icon_rect,
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
-                tint_of(&entry),
+                row_tint(&entry, selected),
             );
         }
 
@@ -964,39 +1058,20 @@ impl Pane {
         let name_x = name_c.left() + icon_sz + 8.0;
         let max_w = (name_c.right() - name_x - 8.0).max(20.0);
 
+        let field = Rect::from_center_size(
+            Pos2::new(name_x + max_w * 0.5, rect.center().y),
+            Vec2::new(max_w, 22.0),
+        );
         let mut draw_label = true;
-        let mut commit_rename: Option<String> = None;
-        let mut cancel_rename = false;
-        if let Some(rename) = self.rename.as_mut() {
-            if rename.index == idx {
-                draw_label = false;
-                let edit_rect = Rect::from_min_size(
-                    Pos2::new(name_x, rect.top() + 2.0),
-                    Vec2::new(max_w, rect.height() - 4.0),
-                );
-                let mut child = ui.new_child(
-                    UiBuilder::new()
-                        .max_rect(edit_rect)
-                        .layout(Layout::top_down(Align::Min)),
-                );
-                let response = child.add(
-                    egui::TextEdit::singleline(&mut rename.text)
-                        .font(font.clone())
-                        .margin(egui::Margin::symmetric(3, 1)),
-                );
-                if !rename.focus {
-                    response.request_focus();
-                    let len = rename.text.chars().count();
-                    theme::select_all_text(&child.ctx(), response.id, len);
-                    rename.focus = true;
+        if let Some(edit) = self.rename_editor(ui, field, font.clone(), idx) {
+            draw_label = false;
+            if let Some(new_name) = edit.commit {
+                self.rename = None;
+                if !new_name.is_empty() && new_name != entry.name {
+                    vctx.reqs.push(Request::Rename(entry.path.clone(), new_name));
                 }
-                let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
-                let escape = child.input(|i| i.key_pressed(egui::Key::Escape));
-                if enter {
-                    commit_rename = Some(rename.text.trim().to_string());
-                } else if escape {
-                    cancel_rename = true;
-                }
+            } else if edit.cancel {
+                self.rename = None;
             }
         }
         if draw_label {
@@ -1010,14 +1085,8 @@ impl Pane {
                 font.clone(),
                 text_color,
             );
-        } else if let Some(new_name) = commit_rename {
-            self.rename = None;
-            if !new_name.is_empty() && new_name != entry.name {
-                vctx.reqs.push(Request::Rename(entry.path.clone(), new_name));
-            }
-        } else if cancel_rename {
-            self.rename = None;
         }
+
 
         // Added feature: the folder a search hit was found in, written relative
         // to the folder the search started from — the bar above already names
@@ -1034,28 +1103,28 @@ impl Pane {
             let max_w = (path_c.width() - 6.0).max(20.0);
             let label = theme::elide_name(ui, &folder, max_w, font.clone());
             ui.painter().text(
-                Pos2::new(path_c.left() + 2.0, rect.center().y),
+                Pos2::new(path_c.left() + HEAD_PAD, rect.center().y),
                 Align2::LEFT_CENTER,
                 label,
                 font,
-                theme::text_dim(),
+                dim,
             );
         }
 
         let size_text = size_label(&entry);
         ui.painter().text(
-            Pos2::new(size_c.right(), rect.center().y),
+            Pos2::new(size_c.right() - HEAD_PAD, rect.center().y),
             Align2::RIGHT_CENTER,
             size_text,
             FontId::proportional(12.0),
-            theme::text_dim(),
+            dim,
         );
         ui.painter().text(
-            Pos2::new(date_c.right(), rect.center().y),
+            Pos2::new(date_c.right() - HEAD_PAD, rect.center().y),
             Align2::RIGHT_CENTER,
             fsutil::short_date(entry.modified),
             FontId::proportional(12.0),
-            theme::text_dim(),
+            dim,
         );
 
         self.handle_row_interaction(ui, rect, resp, idx, vctx);
@@ -1342,7 +1411,7 @@ impl Pane {
                 Rect::from_center_size(icon_rect.center(), Vec2::splat(icon)),
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
-                tint_of(&entry),
+                row_tint(&entry, selected),
             );
         }
 
@@ -1354,8 +1423,32 @@ impl Pane {
         // size line under it.
         let font = crate::gallery::caption_font();
         let mut caption_y = label_y;
+        // Added feature: a cell being renamed gets the same inline editor the
+        // details view has, laid on its label line. Without it the "rename the
+        // new folder" step that follows Create New Folder set a rename nothing
+        // drew, so the new folder just sat there selected.
+        let mut editing = false;
+        if let Some(edit) = self.rename_editor(
+            ui,
+            Rect::from_center_size(
+                Pos2::new(rect.center().x, label_y + 11.0),
+                Vec2::new(max_w, 20.0),
+            ),
+            font.clone(),
+            idx,
+        ) {
+            editing = true;
+            if let Some(new_name) = edit.commit {
+                self.rename = None;
+                if !new_name.is_empty() && new_name != entry.name {
+                    vctx.reqs.push(Request::Rename(entry.path.clone(), new_name));
+                }
+            } else if edit.cancel {
+                self.rename = None;
+            }
+        }
         // Added feature: the Names switch hides the label under each picture.
-        if self.gallery_names {
+        if self.gallery_names && !editing {
             let mut lines = wrap_label(
                 ui,
                 &entry.name,
@@ -1505,20 +1598,42 @@ impl Pane {
                 icon_rect,
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
-                tint_of(&entry),
+                row_tint(&entry, selected),
             );
         }
         let font = FontId::proportional(12.5);
         let label_x = rect.left() + icon + 18.0;
         let max_w = (rect.right() - label_x - 8.0).max(20.0);
-        let label = theme::elide_name(ui, &entry.name, max_w, font.clone());
-        ui.painter().text(
-            Pos2::new(label_x, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            font,
-            if selected { theme::on_band() } else { theme::text() },
-        );
+        let mut editing = false;
+        if let Some(edit) = self.rename_editor(
+            ui,
+            Rect::from_center_size(
+                Pos2::new(label_x + max_w * 0.5, rect.center().y),
+                Vec2::new(max_w, 20.0),
+            ),
+            font.clone(),
+            idx,
+        ) {
+            editing = true;
+            if let Some(new_name) = edit.commit {
+                self.rename = None;
+                if !new_name.is_empty() && new_name != entry.name {
+                    vctx.reqs.push(Request::Rename(entry.path.clone(), new_name));
+                }
+            } else if edit.cancel {
+                self.rename = None;
+            }
+        }
+        if !editing {
+            let label = theme::elide_name(ui, &entry.name, max_w, font.clone());
+            ui.painter().text(
+                Pos2::new(label_x, rect.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                font,
+                if selected { theme::on_band() } else { theme::text() },
+            );
+        }
         self.handle_row_interaction(ui, rect, resp, idx, vctx);
     }
 
@@ -1535,6 +1650,14 @@ impl Pane {
         vctx: &mut ViewCtx,
     ) {
         if resp.clicked() {
+            // A press on any other row ends an open name editor: leaving it on
+            // the row the person just clicked away from left a field open with
+            // a different row marked.
+            if let Some(r) = &self.rename {
+                if r.index != idx {
+                    self.rename = None;
+                }
+            }
             let mods = ui.input(|i| i.modifiers);
             if mods.shift {
                 self.select_range(idx);

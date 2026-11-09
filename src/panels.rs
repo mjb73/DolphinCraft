@@ -911,8 +911,18 @@ impl App {
         };
         let mut undo_clicked = false;
         let screen = ctx.screen_rect();
+        // The plate hugs its message. A fixed 360 px card around "Folder created."
+        // read as an empty box with a word in one corner.
+        let toast_font = egui::FontId::proportional(12.5);
+        let text_w = ctx.fonts_mut(|f| {
+            f.layout_no_wrap(msg.clone(), toast_font.clone(), theme::text())
+                .size()
+                .x
+        });
+        let width = (text_w + if undo_live { 78.0 } else { 0.0 } + 30.0)
+            .clamp(170.0, (screen.width() * 0.7).max(170.0));
         egui::Area::new(Id::new("toast"))
-            .fixed_pos(Pos2::new(screen.center().x - 200.0, screen.bottom() - 74.0))
+            .fixed_pos(Pos2::new(screen.center().x - width * 0.5, screen.bottom() - 74.0))
             .show(ctx, |ui| {
                 // The toast follows the palette: a dark card in dark mode, a light
                 // one in light mode, so its own text (in the palette's text colour)
@@ -929,7 +939,7 @@ impl App {
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::symmetric(14, 8))
                     .show(ui, |ui| {
-                        ui.set_min_width(360.0);
+                        ui.set_min_width((width - 28.0).max(120.0));
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(msg)
@@ -943,7 +953,7 @@ impl App {
                                             .size(12.5)
                                             .color(theme::on_band()),
                                     )
-                                    .fill(theme::c(61, 130, 180))
+                                    .fill(theme::action_fill())
                                     .min_size(Vec2::new(64.0, 20.0));
                                     if ui
                                         .add(button)
@@ -2181,7 +2191,7 @@ impl App {
                             let resp = ui.add(
                                 egui::Button::new(label)
                                     .fill(if picked {
-                                        theme::c(61, 130, 180)
+                                        theme::action_fill()
                                     } else {
                                         Color32::TRANSPARENT
                                     })
@@ -2371,16 +2381,16 @@ impl App {
                         // kio 6.31.0; strings 0x21e94c and the two above).
                         let (label, color) = match &confirm.action {
                             ConfirmAction::Trash(_) => {
-                                ("Move to Trash", theme::c(61, 130, 180))
+                                ("Move to Trash", theme::action_fill())
                             }
                             ConfirmAction::Restore(_) => {
-                                ("Restore to Former Location", theme::c(61, 130, 180))
+                                ("Restore to Former Location", theme::action_fill())
                             }
                             ConfirmAction::EmptyTrash => {
-                                (crate::EMPTY_TRASH_LABEL, theme::c(170, 68, 62))
+                                (crate::EMPTY_TRASH_LABEL, theme::danger_fill())
                             }
                             ConfirmAction::Delete(_) => {
-                                (crate::DELETE_PERMANENT_LABEL, theme::c(170, 68, 62))
+                                (crate::DELETE_PERMANENT_LABEL, theme::danger_fill())
                             }
                         };
                         if ui

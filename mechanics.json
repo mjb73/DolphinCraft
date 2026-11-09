@@ -2111,8 +2111,14 @@
   {
    "name": "the light palette",
    "group": "colours",
-   "value": "derived from the dark values: hue kept, saturation x0.92, lightness L' = 1 - L^1.6; four colours written out by hand (text_dim, text_faint, paper, paper_shade)",
-   "source": "own rule, asked for by the person; one palette written once so both modes stay in step"
+   "value": "per-role pairs (theme::pair): a dark value and a light value written for paper - view #fbfcfd, panel #eef2f5, toolbar #e6ebf0, ink #1a1d20, accent #1b6e9e, band #2f79ac; theme::c() (hue kept, saturation x0.92, L' = 1 - L^1.6) is left for icon glyphs and the viewer's scrims",
+   "source": "own rule, asked for by the person; the derived palette squashed the ladder into 1.05:1 steps, made the border the brightest line in the window, and left the accent at 2.24:1"
+  },
+  {
+   "name": "the light palette's contrast targets",
+   "group": "colours",
+   "value": "both modes, asserted by --selftest: view<->toolbar >= 1.12:1; view<->panel >= 1.05:1; ink >= 7:1; dim and faint >= 4.5:1 on the panel (faint >= 4.0 on the toolbar); hairline >= 1.18:1; window edge >= 1.25:1 from the toolbar; hover >= 1.10:1; band >= 1.9:1 with white text >= 4.5:1; accent >= 3:1; white on a filled or destructive button >= 4.5:1; no role a pure #000 or #fff",
+   "source": "Hallmark's rule that a second mode is re-derived, never inverted, and held to the same contrast in both; the old check only proved surfaces were light and text was dark"
   },
   {
    "name": "the light palette switch",
@@ -2123,7 +2129,7 @@
   {
    "name": "light mode, colours the derivation must not touch",
    "group": "colours",
-   "value": "image tints are Color32::WHITE; white/black used in blend maths are the constants; strong text and text on a band are text()/on_band(); text on a black scrim is on_scrim()",
+   "value": "image tints are Color32::WHITE; white/black used in blend maths are the constants; strong text is text(); text on a band or a filled button is on_band(), white in both modes; text on a black scrim is on_scrim()",
    "source": "own fix: a blanket derivation turned every preview black, inverted the folder highlight into a shadow, and made every emphasised name white on white"
   },
   {

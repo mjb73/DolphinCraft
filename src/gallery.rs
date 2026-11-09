@@ -1587,9 +1587,9 @@ fn bar_button(ui: &mut egui::Ui, glyph: &str, label: &str, active: bool) -> egui
             rect,
             CornerRadius::same(3),
             if active {
-                theme::c(52, 60, 68)
+                theme::row_sel_active()
             } else {
-                theme::c(40, 46, 52)
+                theme::row_hover()
             },
         );
     }
