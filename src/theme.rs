@@ -4,7 +4,7 @@ use eframe::egui::{
     self, epaint::PathStroke, Align2, Color32, CornerRadius, FontData, FontDefinitions, FontFamily,
     FontId, Pos2, Rect, Stroke, TextStyle, Vec2,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 use crate::fsutil::Kind;
@@ -28,9 +28,117 @@ use crate::fsutil::Kind;
 /// lightness flip happens to be the right move.
 static LIGHT: AtomicBool = AtomicBool::new(false);
 
+/// Added feature, asked for by the person: how deep the light palette's shading
+/// goes, 0–100 %, from *View → Shading*. One monitor did not show the steps
+/// between the light window's surfaces, so the ladder is a control rather than a
+/// constant. At 0 every light surface is exactly the value written beside it;
+/// the slider widens each surface's distance from white, which deepens the panel,
+/// the toolbar, the hover and the hairlines while leaving the view (the paper)
+/// almost where it was. Dark mode is untouched: its surfaces are already the
+/// dark end of the range and deepening them would crush the ladder, not open it.
+static SHADE: AtomicU8 = AtomicU8::new(0);
+
 /// Is the light palette in use?
 pub fn light() -> bool {
     LIGHT.load(Ordering::Relaxed)
+}
+
+/// The shading strength of the light palette, 0–100.
+pub fn shade() -> u8 {
+    SHADE.load(Ordering::Relaxed)
+}
+
+/// Choose the shading strength. Like the palette switch, the window has to be
+/// restyled afterwards (`apply_style`), because egui's own widget fills were
+/// built from the last value.
+pub fn set_shade(percent: u8) {
+    SHADE.store(percent.min(100), Ordering::Relaxed);
+}
+
+/// A light surface, deepened by the shading slider.
+///
+/// The view is the anchor and does not move: it is the paper the files sit on, and
+/// lightening or darkening it only changes how bright the window is. Every other
+/// shading role is pulled *away from the view* by a factor of `1 + 2t`, so the
+/// steps between the surfaces grow from 13 levels (panel) and 21 (toolbar) to 39
+/// and 63 at 100 %. Scaling a surface's distance from white was not enough: the
+/// panel is only 13 levels down, so half again on that distance is 6 levels, which
+/// is exactly the difference a display that cannot show subtle tones swallows.
+/// Working from the view also keeps the ladder ordered and leaves each surface's
+/// hue intact, because all three channels are pulled by the same proportion.
+fn shade_light(light: (u8, u8, u8)) -> (u8, u8, u8) {
+    let t = shade() as f32 / 100.0;
+    if t <= 0.0 {
+        return light;
+    }
+    let amp = 1.0 + 2.0 * t;
+    let anchor = VIEW_LIGHT;
+    let ch = |v: u8, a: u8| -> u8 {
+        let step = a as f32 - v as f32;
+        (a as f32 - step * amp).clamp(0.0, 255.0).round() as u8
+    };
+    (
+        ch(light.0, anchor.0),
+        ch(light.1, anchor.1),
+        ch(light.2, anchor.2),
+    )
+}
+
+/// The light view, written once because `shade_light` measures every other
+/// surface against it. It is `view_bg()`'s light value; the selftest holds the two
+/// together.
+const VIEW_LIGHT: (u8, u8, u8) = (251, 252, 253);
+
+/// A channel as linear light, the space contrast is measured in.
+fn lin(c: u8) -> f32 {
+    let v = c as f32 / 255.0;
+    if v <= 0.03928 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn unlin(x: f32) -> u8 {
+    let v = if x <= 0.003_130_8 {
+        12.92 * x
+    } else {
+        1.055 * x.powf(1.0 / 2.4) - 0.055
+    };
+    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn luminance(rgb: (u8, u8, u8)) -> f32 {
+    0.2126 * lin(rgb.0) + 0.7152 * lin(rgb.1) + 0.0722 * lin(rgb.2)
+}
+
+/// A text role's light value, kept above a contrast floor against the surfaces it
+/// lands on while the shading deepens.
+///
+/// Deepening the panel and the toolbar spends the captions' contrast budget, so
+/// the secondary and tertiary ink darkens with them: the floor is the strictest
+/// one its grounds ask for, and the colour is scaled in linear light towards it, so
+/// the hue is kept and the text is never darker than it has to be. At 0 nothing
+/// moves at all — the designed values hold their own margins.
+fn ink_pair(dark: (u8, u8, u8), light: (u8, u8, u8), floors: &[(Color32, f32)]) -> Color32 {
+    if !self::light() {
+        return pair(dark, light);
+    }
+    let designed = luminance(light);
+    let mut target = designed;
+    if shade() > 0 {
+        for (ground, floor) in floors {
+            let need = (luminance((ground.r(), ground.g(), ground.b())) + 0.05) / floor - 0.05;
+            target = target.min(need.max(0.0));
+        }
+    }
+    if target >= designed {
+        return pair(dark, light);
+    }
+    let f = target / designed.max(f32::EPSILON);
+    let scale = |c: u8| unlin(lin(c) * f);
+    let (r, g, b) = (scale(light.0), scale(light.1), scale(light.2));
+    Color32::from_rgba_unmultiplied(r, g, b, 255)
 }
 
 /// Choose the palette. The window has to be restyled afterwards
@@ -115,23 +223,36 @@ fn hsl_to_colour(h: f32, s: f32, l: f32) -> Color32 {
 // keeps the ladder the dark palette has instead of flattening into one white.
 /// The view behind the file rows. Light: paper, not `#fff` — a tinted white.
 pub fn view_bg() -> Color32 {
-    pair((35, 38, 41), (251, 252, 253))
+    shade_pair((35, 38, 41), (251, 252, 253))
 }
 /// The side panel and the find bar's strip. One step under the view.
 pub fn panel_bg() -> Color32 {
-    pair((43, 47, 51), (238, 242, 245))
+    shade_pair((43, 47, 51), (238, 242, 245))
 }
 /// The toolbar and dialog chrome. Two steps under, the deepest surface.
 pub fn toolbar_bg() -> Color32 {
-    pair((49, 54, 59), (230, 235, 240))
+    shade_pair((49, 54, 59), (230, 235, 240))
 }
 /// The details view's column header. A hair under the panel, over the rows.
 pub fn header_bg() -> Color32 {
-    pair((46, 51, 56), (239, 243, 246))
+    shade_pair((46, 51, 56), (239, 243, 246))
+}
+/// The tab in front: its plate is a step **above** the strip it sits on, so the
+/// active tab reads as raised from the header behind it and not only from the
+/// blue line under it. (`header_bg` was three levels off the strip and the blue
+/// line was doing all the work.)
+pub fn tab_active_bg() -> Color32 {
+    shade_pair((60, 66, 72), (250, 251, 252))
+}
+/// An inactive tab under the pointer: a small lift on the strip, kept below the
+/// active plate so a hovered tab cannot be mistaken for the one in front. A
+/// shading role, not a fixed tint, because it sits on the strip the slider moves.
+pub fn tab_hover_bg() -> Color32 {
+    shade_pair((50, 55, 60), (231, 233, 235))
 }
 /// A row under the pointer.
 pub fn row_hover() -> Color32 {
-    pair((57, 63, 69), (225, 231, 237))
+    shade_pair((57, 63, 69), (225, 231, 237))
 }
 /// The selected row of the view the person is working in. In light mode the band
 /// stays a band — a mid blue the white text on it reads against — rather than
@@ -141,8 +262,20 @@ pub fn row_sel_active() -> Color32 {
 }
 /// The selected row of the view beside it.
 pub fn row_sel_inactive() -> Color32 {
-    pair((64, 72, 79), (208, 219, 229))
+    shade_pair((64, 72, 79), (208, 219, 229))
 }
+/// The plate behind a keyboard hint (a shortcut row's `Alt+3`, a menu row's key).
+/// Light: a hair above the panel, so it reads as a raised keycap; a shading role,
+/// because it sits *on* the panel and a fixed near-white chip was the one piece of
+/// the shortcuts panel that stayed put while the rest of it deepened.
+pub fn key_badge(selected: bool) -> Color32 {
+    if selected {
+        shade_pair((48, 57, 66), (239, 242, 244))
+    } else {
+        shade_pair((36, 42, 48), (242, 244, 245))
+    }
+}
+
 /// Text drawn on the selection band, or on a button filled with `accent()`:
 /// white in both palettes, because the band and the filled button are the same
 /// dark band in both. Only the surfaces around them change mode.
@@ -172,21 +305,44 @@ fn pair(dark: (u8, u8, u8), light: (u8, u8, u8)) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, 255)
 }
 
+/// A *shading* role: one whose light value the Shading slider may deepen.
+/// Surfaces, hairlines and the window edge take this; ink, the accent, the
+/// selection band, the folder icon and the document page do not, because they
+/// are not shading — deepening them would change what the window says rather
+/// than how its planes are stepped.
+fn shade_pair(dark: (u8, u8, u8), light: (u8, u8, u8)) -> Color32 {
+    let (r, g, b) = if self::light() {
+        shade_light(light)
+    } else {
+        dark
+    };
+    Color32::from_rgba_unmultiplied(r, g, b, 255)
+}
+
 /// File names and other primary text. Light: a tinted near-black at 16:1 on
 /// paper, never `#000`.
 pub fn text() -> Color32 {
     pair((239, 240, 241), (26, 29, 32))
 }
 /// Secondary text: sizes, dates, hints. Written out in light mode, where the
-/// derivation leaves it too pale to read on white.
+/// derivation leaves it too pale to read on white. Darkens with the shading
+/// slider, because the panel it sits on does.
 pub fn text_dim() -> Color32 {
-    pair((160, 168, 174), (86, 94, 100))
+    ink_pair(
+        (160, 168, 174),
+        (86, 94, 100),
+        &[(panel_bg(), 4.6), (toolbar_bg(), 4.6)],
+    )
 }
 /// Tertiary text: counts and captions. Likewise written out, and held at 4.5:1
 /// or better on the panel and the toolbar as well as on the view — a count in
 /// the side panel is still text.
 pub fn text_faint() -> Color32 {
-    pair((144, 152, 159), (98, 107, 115))
+    ink_pair(
+        (144, 152, 159),
+        (98, 107, 115),
+        &[(panel_bg(), 4.6), (toolbar_bg(), 4.1)],
+    )
 }
 /// The one accent: the active sort column, the chosen chip, the focus ring.
 /// Light: the same hue, dropped in lightness until it clears 3:1 on paper, so
@@ -206,11 +362,11 @@ pub fn danger_fill() -> Color32 {
 /// The window's outer edge. Light: the darkest line in the window, so the frame
 /// still reads as a frame instead of glowing brighter than the view it holds.
 pub fn border() -> Color32 {
-    pair((27, 30, 33), (196, 204, 212))
+    shade_pair((27, 30, 33), (196, 204, 212))
 }
 /// The hairline between rows and columns.
 pub fn separator() -> Color32 {
-    pair((53, 59, 64), (214, 221, 228))
+    shade_pair((53, 59, 64), (214, 221, 228))
 }
 /// The folder icon's body.
 pub fn folder() -> Color32 {
@@ -272,6 +428,42 @@ pub fn strip_slider(
             egui::Slider::new(value, range)
                 .show_value(false)
                 .step_by(1.0),
+        )
+    })
+    .inner
+}
+
+/// A labelled slider for a menu row, in the app's palette.
+///
+/// egui paints a slider's rail with the *inactive* fill and its knob with
+/// whatever state the pointer is in, with the knob's outline in `fg_stroke`. In
+/// this window those are the button's face — light 232/237/242 against a menu
+/// fill of 238/242/245, which is 1.03:1, so a slider dropped into a light menu
+/// was a knob and nothing else. Here the rail takes a surface you can see in both
+/// modes, the knob's ring takes the accent, and the filled part is the selection
+/// band the rest of the window uses.
+pub fn setting_slider(
+    ui: &mut egui::Ui,
+    value: &mut u8,
+    range: std::ops::RangeInclusive<u8>,
+    width: f32,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().slider_width = width;
+        ui.style_mut().visuals.handle_shape = egui::style::HandleShape::Circle;
+        {
+            let v = ui.visuals_mut();
+            v.widgets.inactive.bg_fill = shade_pair((66, 73, 80), (201, 209, 217));
+            v.widgets.inactive.fg_stroke = Stroke::new(1.5, accent());
+            v.widgets.hovered.bg_fill = shade_pair((88, 97, 106), (180, 190, 200));
+            v.widgets.hovered.fg_stroke = Stroke::new(1.5, accent());
+            v.widgets.active.bg_fill = shade_pair((104, 176, 226), (32, 118, 168));
+            v.widgets.active.fg_stroke = Stroke::new(1.5, on_band());
+        }
+        ui.add(
+            egui::Slider::new(value, range)
+                .text("Shading")
+                .suffix("%"),
         )
     })
     .inner
@@ -422,8 +614,8 @@ pub fn apply_style(ctx: &egui::Context) {
     v.panel_fill = panel_bg();
     v.window_fill = toolbar_bg();
     v.window_stroke = Stroke::new(1.0, border());
-    v.extreme_bg_color = pair((30, 33, 36), (243, 246, 249));
-    v.faint_bg_color = pair((48, 53, 58), (236, 241, 246));
+    v.extreme_bg_color = shade_pair((30, 33, 36), (243, 246, 249));
+    v.faint_bg_color = shade_pair((48, 53, 58), (236, 241, 246));
     v.selection.bg_fill = row_sel_active();
     v.selection.stroke = Stroke::new(1.0, on_band());
     v.hyperlink_color = accent();
@@ -432,13 +624,13 @@ pub fn apply_style(ctx: &egui::Context) {
     v.widgets.noninteractive.weak_bg_fill = Color32::TRANSPARENT;
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, separator());
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_dim());
-    v.widgets.inactive.bg_fill = pair((56, 62, 68), (232, 237, 242));
-    v.widgets.inactive.weak_bg_fill = pair((56, 62, 68), (232, 237, 242));
+    v.widgets.inactive.bg_fill = shade_pair((56, 62, 68), (232, 237, 242));
+    v.widgets.inactive.weak_bg_fill = shade_pair((56, 62, 68), (232, 237, 242));
     v.widgets.inactive.bg_stroke = Stroke::NONE;
     v.widgets.inactive.fg_stroke = Stroke::new(1.0, text());
-    v.widgets.hovered.bg_fill = pair((70, 78, 85), (219, 226, 233));
-    v.widgets.hovered.weak_bg_fill = pair((70, 78, 85), (219, 226, 233));
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, pair((84, 92, 99), (190, 199, 208)));
+    v.widgets.hovered.bg_fill = shade_pair((70, 78, 85), (219, 226, 233));
+    v.widgets.hovered.weak_bg_fill = shade_pair((70, 78, 85), (219, 226, 233));
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, shade_pair((84, 92, 99), (190, 199, 208)));
     v.widgets.hovered.fg_stroke = Stroke::new(1.0, pair((255, 255, 255), (26, 29, 32)));
     v.widgets.active.bg_fill = c(61, 174, 233);
     v.widgets.active.weak_bg_fill = c(61, 174, 233);
@@ -448,8 +640,8 @@ pub fn apply_style(ctx: &egui::Context) {
     // the palette: left as a dark literal it turned near-white in light mode and
     // those names vanished.
     v.widgets.active.fg_stroke = Stroke::new(1.0, text());
-    v.widgets.open.bg_fill = pair((70, 78, 85), (219, 226, 233));
-    v.widgets.open.weak_bg_fill = pair((70, 78, 85), (219, 226, 233));
+    v.widgets.open.bg_fill = shade_pair((70, 78, 85), (219, 226, 233));
+    v.widgets.open.weak_bg_fill = shade_pair((70, 78, 85), (219, 226, 233));
     v.widgets.open.fg_stroke = Stroke::new(1.0, accent());
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
@@ -459,13 +651,68 @@ pub fn apply_style(ctx: &egui::Context) {
     style.spacing.button_padding = Vec2::new(7.0, 3.0);
     style.spacing.interact_size = Vec2::new(24.0, 24.0);
     style.spacing.scroll = egui::style::ScrollStyle::solid();
-    style.spacing.scroll.bar_width = 9.0;
+    // A solid bar reserves `bar_width` and paints itself between the inside
+    // edge plus `bar_inner_margin` and the outside edge, so 12-3 leaves the
+    // 9 px handle this window uses. At 9/4 it left 5 px, which is not much
+    // wider than the hairline that closes a column.
+    style.spacing.scroll.bar_width = 12.0;
+    style.spacing.scroll.bar_inner_margin = 3.0;
+    style.spacing.scroll.bar_outer_margin = 0.0;
+    // A handle you can take hold of: a bar for 60 rows in a 1,000-row folder is
+    // a few pixels tall at 12, which the pointer cannot catch.
+    style.spacing.scroll.handle_min_length = 28.0;
     style.text_styles.insert(TextStyle::Body, FontId::proportional(13.0));
     style.text_styles.insert(TextStyle::Button, FontId::proportional(13.0));
     style.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
     style.text_styles.insert(TextStyle::Heading, FontId::proportional(15.5));
     style.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.0));
     ctx.set_style(style);
+}
+
+/// The scroll bar's own colours.
+///
+/// egui paints a solid bar's trough with `extreme_bg_color` and its handle
+/// with `widgets.{inactive,hovered,active}.bg_fill` — that is the text field's
+/// well and the button's face. Both are surface tones here, so a bar built
+/// from them came out 1.5:1 against the view in dark and 1.06:1 in light: five
+/// pixels the same colour as the window, which reads as no scroll bar at all.
+/// These four keep the handle above 3:1 on its trough in both modes, and the
+/// handle blue whether or not the pointer is near it.
+pub fn scroll_trough() -> Color32 {
+    shade_pair((24, 27, 30), (238, 241, 244))
+}
+
+/// The handle in its resting state is the window's blue, not a grey: a grey
+/// handle only announced itself when the pointer was on it, which is the one
+/// moment the bar does not need to be found.
+pub fn scroll_handle() -> Color32 {
+    pair((74, 140, 186), (40, 108, 156))
+}
+
+pub fn scroll_handle_hover() -> Color32 {
+    pair((100, 166, 210), (28, 92, 138))
+}
+
+pub fn scroll_handle_active() -> Color32 {
+    pair((132, 192, 232), (20, 76, 120))
+}
+
+/// Run `add` with the bar's fills in place, so the scroll areas inside it draw
+/// a legible bar without every button and text field in the window changing
+/// colour. A fill is what egui reads for the handle, so it has to be set where
+/// the scroll area is built rather than once for the whole window.
+pub fn scroll_bars<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        {
+            let v = ui.visuals_mut();
+            v.extreme_bg_color = scroll_trough();
+            v.widgets.inactive.bg_fill = scroll_handle();
+            v.widgets.hovered.bg_fill = scroll_handle_hover();
+            v.widgets.active.bg_fill = scroll_handle_active();
+        }
+        add(ui)
+    })
+    .inner
 }
 
 /// Cut a string to fit `max_w`, appending an ellipsis.
@@ -1258,6 +1505,42 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: &str, tint: Color3
         "close" => {
             painter.line_segment([Pos2::new(c.x - s * 0.6, c.y - s * 0.6), Pos2::new(c.x + s * 0.6, c.y + s * 0.6)], st);
             painter.line_segment([Pos2::new(c.x + s * 0.6, c.y - s * 0.6), Pos2::new(c.x - s * 0.6, c.y + s * 0.6)], st);
+        }
+        // The three window buttons the merged title row draws itself, now that
+        // the compositor's own title bar is gone.
+        "minimize" => {
+            painter.line_segment(
+                [Pos2::new(c.x - s * 0.7, c.y), Pos2::new(c.x + s * 0.7, c.y)],
+                st,
+            );
+        }
+        "maximize" => {
+            painter.rect_stroke(
+                Rect::from_center_size(c, Vec2::splat(s * 1.5)),
+                CornerRadius::same(1),
+                st,
+                egui::StrokeKind::Inside,
+            );
+        }
+        "restore" => {
+            painter.rect_stroke(
+                Rect::from_min_max(
+                    Pos2::new(c.x - s * 0.65, c.y - s * 0.65),
+                    Pos2::new(c.x + s * 0.45, c.y + s * 0.45),
+                ),
+                CornerRadius::same(1),
+                st,
+                egui::StrokeKind::Inside,
+            );
+            painter.rect_stroke(
+                Rect::from_min_max(
+                    Pos2::new(c.x - s * 0.15, c.y - s * 0.15),
+                    Pos2::new(c.x + s * 0.65, c.y + s * 0.65),
+                ),
+                CornerRadius::same(1),
+                st,
+                egui::StrokeKind::Inside,
+            );
         }
         "plus" => {
             painter.line_segment([Pos2::new(c.x - s * 0.7, c.y), Pos2::new(c.x + s * 0.7, c.y)], st);

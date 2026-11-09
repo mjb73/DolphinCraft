@@ -15,7 +15,7 @@ use crate::findtext;
 use crate::copymove;
 use crate::space;
 use crate::theme;
-use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewItem, NewKind, Props, Quick, ShortcutEdit};
+use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewKind, Props, Quick, ShortcutEdit};
 
 /// A quiet heading inside the app menu, so its rows read as groups ("New",
 /// "Tools", "View", "Help") instead of one long list.
@@ -78,23 +78,17 @@ impl App {
                 });
             });
         }
-        if crate::menu_row(ui, "New Folder…", "F10").clicked() {
-            self.new_item = Some(NewItem {
-                kind: NewKind::Folder,
-                name: NewKind::Folder.default_name().to_string(),
-                focus: false,
-            });
+        // Both kinds are made at once in the folder on show, under a free name,
+        // and their name opens for editing in place (`App::make_new`) — the same
+        // one-step flow as *Create New* on the view's own space.
+        if crate::menu_row(ui, "New Folder", "F10").clicked() {
+            self.make_new(NewKind::Folder, &dir);
             ui.close();
         }
         // The other half of the original's *Create New* menu: an empty text
-        // file. It is made through the same window, and opens in the editor
-        // like any other file once it is on disk.
-        if crate::menu_row(ui, "New Text File…", "").clicked() {
-            self.new_item = Some(NewItem {
-                kind: NewKind::TextFile,
-                name: NewKind::TextFile.default_name().to_string(),
-                focus: false,
-            });
+        // file, which opens in the editor like any other file once it is on disk.
+        if crate::menu_row(ui, "New Text File", "").clicked() {
+            self.make_new(NewKind::TextFile, &dir);
             ui.close();
         }
         if crate::menu_row(ui, "Add Shortcut…", "Ctrl+Shift+S").clicked() {
@@ -413,6 +407,26 @@ impl App {
             crate::theme::set_light(light);
             crate::theme::apply_style(ui.ctx());
             ui.ctx().request_repaint();
+        }
+        // Added feature, asked for by the person: one of their displays did not
+        // show the steps between the light window's surfaces, so the depth of
+        // that shading is a control instead of a constant. Shown only in the
+        // light palette — the dark one already sits at the dark end of the range,
+        // where deepening the surfaces closes the ladder rather than opening it.
+        if self.config.light {
+            let mut shade = self.config.shade.min(100);
+            let resp = crate::theme::setting_slider(ui, &mut shade, 0..=100, 104.0);
+            if resp.changed() {
+                self.config.shade = shade;
+                self.config_dirty = true;
+                crate::theme::set_shade(shade);
+                crate::theme::apply_style(ui.ctx());
+                ui.ctx().request_repaint();
+            }
+            resp.on_hover_text(
+                "How deep the light palette's shading goes: the panel, the toolbar, \
+                 the hovered row and the hairlines. 0 keeps the values the palette was designed with",
+            );
         }
         let mut info = self.info_panel;
         if ui.checkbox(&mut info, "Show Information Panel").changed() {
@@ -983,7 +997,6 @@ impl App {
         self.bulk_dialog(ctx);
         self.dups_dialog(ctx);
         self.quick_dialog(ctx);
-        self.new_item_dialog(ctx);
         self.open_with_dialog(ctx);
         self.space_dialog(ctx);
         self.findtext_dialog(ctx);
@@ -3214,88 +3227,6 @@ impl App {
             return;
         }
         self.quick = Some(quick);
-    }
-
-    /// Added feature, asked for: the window behind *New Folder…* and
-    /// *New Text File…*. One window, two kinds — the original's *Create New*
-    /// menu lists them side by side, so the wording of the title and the field
-    /// is the only thing that changes.
-    fn new_item_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut ni) = self.new_item.take() else { return };
-        let mut win_open = true;
-        let mut create = false;
-        let mut close = false;
-        window_style(ni.kind.title())
-            .open(&mut win_open)
-            .show(ctx, |ui| {
-                ui.set_min_width(380.0);
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut ni.name)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(ni.kind.hint()),
-                );
-                if !ni.focus {
-                    resp.request_focus();
-                    theme::select_all_text(ctx, resp.id, ni.name.chars().count());
-                    ni.focus = true;
-                }
-                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    create = true;
-                }
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Create").clicked() {
-                            create = true;
-                        }
-                    });
-                });
-            });
-        if create {
-            let dir = self.pane().current_dir();
-            let name = ni.name.trim().to_string();
-            if name.is_empty() {
-                ni.focus = true;
-                self.new_item = Some(ni);
-                return;
-            }
-            let kind = ni.kind;
-            match kind.create(&dir, &name) {
-                Ok(target) => {
-                    self.pane_mut().reload();
-                    if let Some(idx) = self.pane().entries.iter().position(|e| e.path == target) {
-                        self.pane_mut().select_single(idx);
-                        self.pane_mut().scroll_to = Some(idx);
-                        // A folder's own name is what is usually being fixed
-                        // next ("New Folder"), so it opens for renaming. A file
-                        // is left alone: the name is already the one typed.
-                        if kind == NewKind::Folder {
-                            self.pane_mut().rename = Some(crate::state::RenameState {
-                                index: idx,
-                                text: name.clone(),
-                                focus: false,
-                            });
-                        }
-                    }
-                    self.toast(kind.done_message());
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    self.toast("An item with that name already exists.");
-                    ni.focus = true;
-                    self.new_item = Some(ni);
-                    return;
-                }
-                Err(e) => self.toast(&format!("{}: {}", kind.failed_message(), e)),
-            }
-            return;
-        }
-        if close || !win_open {
-            return;
-        }
-        self.new_item = Some(ni);
     }
 
     fn shortcut_dialog(&mut self, ctx: &egui::Context) {

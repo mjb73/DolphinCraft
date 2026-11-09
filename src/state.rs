@@ -144,6 +144,26 @@ pub enum ViewMode {
     Details,
 }
 
+/// The four views that each remember their own zoom.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ZoomKind {
+    Icons,
+    Compact,
+    Details,
+    Pictures,
+}
+
+impl ZoomKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            ZoomKind::Icons => "icons",
+            ZoomKind::Compact => "compact",
+            ZoomKind::Details => "details",
+            ZoomKind::Pictures => "picture view",
+        }
+    }
+}
+
 impl ViewMode {
     pub fn index(self) -> usize {
         match self {
@@ -413,6 +433,13 @@ pub enum Request {
     /// A Ctrl+wheel zoom changed the size inside a pane; remember it for the
     /// next start.
     ZoomChanged,
+    /// The empty space's *View* submenu: show this view in the pane it was asked
+    /// from. Choosing a list view also leaves the picture view, as the toolbar
+    /// buttons do.
+    SetView(ViewMode),
+    /// The empty space's *Sort By* submenu. Choosing the key already in force
+    /// turns the order round, which is what the same row does in Explorer.
+    SetSort(SortKey),
     Toast(String),
 }
 
@@ -498,6 +525,15 @@ pub struct Pane {
     pub location_select: bool,
     pub rename: Option<RenameState>,
     pub search: Option<SearchSession>,
+    /// The widest file name in the listing, in the compact cell's own font, and
+    /// the cell width it bought. The compact view is a list of names, so its
+    /// columns are as wide as the longest name on show rather than a fixed five
+    /// font-heights that cut every name off at the same place. `compact_stamp` is
+    /// what the measurement was taken of (how many entries, how many bytes of
+    /// names), so a new listing or a rename measures again and nothing else does.
+    pub compact_name_px: f32,
+    pub compact_cell_px: f32,
+    pub compact_stamp: (usize, usize),
     /// The widest name and the widest folder in the current search result, in
     /// pixels, measured with the details row's own fonts as the results arrive.
     /// The two text columns are sized from these and from nothing else, so a
@@ -512,6 +548,27 @@ pub struct Pane {
     pub search_date_px: f32,
     pub search_measured: usize,
     pub scroll_to: Option<usize>,
+    /// How many entries the view put in its window on the last frame it drew: one
+    /// page of the cursor. `show_rows` hands each view the range it is showing, so
+    /// Page Up and Page Down move by a screenful of whatever is on show rather than
+    /// by a number guessed at in the key handler — a page of 400 px cards and a page
+    /// of details rows are not the same count.
+    pub per_page: usize,
+    /// A page scroll waiting to be applied by the view: `+1` scrolls the window
+    /// down by its own height, `-1` up. A page moves the cursor *and* the view, and
+    /// the cursor alone is not enough — on the picture wall a page of the cursor is
+    /// a screenful of pictures, so the new row is off-screen and the window looks
+    /// as if the key did nothing.
+    pub scroll_pages: Option<f32>,
+    /// Where the view's scroll area sat on the last frame it drew, in pixels from
+    /// the top of its content. The page keys add a window's height to this.
+    pub scroll_offset: f32,
+    /// Home and End: scroll the window to its very top (`Some(true)`) or its very
+    /// bottom (`Some(false)`), whatever is in range. The cursor has already been put
+    /// on the first or the last item, and that item is only drawn once the window
+    /// has moved — which is why these keys used to do nothing visible from anywhere
+    /// but the top of a long folder.
+    pub scroll_edge: Option<bool>,
     pub last_click: Option<(usize, std::time::Instant)>,
     pub loading: bool,
     pub selected_size: Option<u64>,
@@ -565,6 +622,13 @@ impl Pane {
             search_date_px: 0.0,
             search_measured: 0,
             scroll_to: None,
+            per_page: 12,
+            scroll_pages: None,
+            scroll_offset: 0.0,
+            scroll_edge: None,
+            compact_name_px: 0.0,
+            compact_cell_px: 0.0,
+            compact_stamp: (usize::MAX, usize::MAX),
             last_click: None,
             loading: false,
             selected_size: None,
@@ -922,6 +986,56 @@ impl Pane {
         shown
     }
 
+    /// Move the cursor through what the view actually shows — the wall's
+    /// pictures, never the documents between them — and bring it into view. The
+    /// count is one row for an arrow key and one page for Page Up and Page Down;
+    /// either way the move stops at the ends rather than wrapping, which is what a
+    /// list does.
+    pub fn step_cursor(&mut self, delta: i32) {
+        let shown = self.shown_indices();
+        if shown.is_empty() {
+            return;
+        }
+        let at = self.cursor;
+        let pos = shown.iter().position(|i| *i == at);
+        let next = match pos {
+            Some(p) => shown[(p as i32 + delta).clamp(0, shown.len() as i32 - 1) as usize],
+            None if delta > 0 => shown[0],
+            None => *shown.last().unwrap(),
+        };
+        self.select_single(next);
+        self.scroll_to = Some(next);
+    }
+
+    /// Home and End: the first or the last entry the view actually shows, with the
+    /// window taken to its top or its bottom. `shown_indices` is what the arrows walk,
+    /// so on the picture wall End lands on the last *picture* rather than on whatever
+    /// document happens to sort last.
+    pub fn jump_cursor(&mut self, first: bool) {
+        let shown = self.shown_indices();
+        if shown.is_empty() {
+            return;
+        }
+        let target = if first { shown[0] } else { *shown.last().unwrap() };
+        self.select_single(target);
+        self.scroll_edge = Some(first);
+        self.scroll_to = None;
+    }
+
+    /// One page of the cursor, up or down: `per_page` is what the view reported
+    /// from its own visible range, so a page of the picture wall is the pictures in
+    /// the window and a page of details rows is the rows in it — never a fixed
+    /// number that is right in one view and wrong in the other three.
+    pub fn page_cursor(&mut self, dir: i32) {
+        let page = self.per_page.max(1) as i32;
+        self.step_cursor(dir * page);
+        // The window moves with the cursor, by exactly its own height: on the wall
+        // the cursor's new row is a screenful below the old one, so without this the
+        // page key looked like it did nothing.
+        self.scroll_pages = Some(dir as f32);
+        self.scroll_to = None;
+    }
+
     /// Turn the picture wall on or off. Anything marked that the wall does not
     /// show is unmarked at the same moment, so switching to the wall and pressing
     /// Delete cannot remove a file that was never on screen.
@@ -990,6 +1104,58 @@ impl Pane {
             self.zoom[i] = level;
         } else {
             self.zoom_plain[i] = level;
+        }
+    }
+
+    /// Which of the four views is on show. Each keeps its own zoom, and the wall is
+    /// a kind of its own because it is measured in pixels of thumbnail height rather
+    /// than in steps of the icon ladder.
+    pub fn zoom_kind(&self) -> ZoomKind {
+        if self.pictures {
+            return ZoomKind::Pictures;
+        }
+        match self.view {
+            ViewMode::Compact => ZoomKind::Compact,
+            ViewMode::Details => ZoomKind::Details,
+            ViewMode::Icons => ZoomKind::Icons,
+        }
+    }
+
+    /// The size the view on show draws at, in pixels: the wall's thumbnails, or the
+    /// icon of the list view.
+    pub fn view_zoom_px(&self) -> f32 {
+        if self.pictures {
+            self.thumb_px
+        } else {
+            self.icon_size()
+        }
+    }
+
+    /// One zoom step for the view on show. The wall walks 25 px at a time between 50
+    /// and 400; the list views walk their ladder. Kept here so the zoom keys and the
+    /// wheel cannot act on a view that is not on screen — before this the picture
+    /// view's keys moved the hidden list view's ladder and the wall did not change.
+    pub fn view_zoom_by(&mut self, steps: i32) {
+        if self.pictures {
+            self.thumb_by(steps as f32 * 25.0);
+        } else {
+            self.zoom_by(steps);
+        }
+    }
+
+    /// Reset the zoom of the view on show only — the other three keep what they
+    /// were set to, which is the whole point of four memories.
+    pub fn view_zoom_reset(&mut self) {
+        if self.pictures {
+            self.thumb_px = crate::gallery::THUMB_DEFAULT;
+            return;
+        }
+        let i = self.view.index();
+        let d = theme::default_zoom(self.previews);
+        if self.previews {
+            self.zoom[i] = d[i];
+        } else {
+            self.zoom_plain[i] = d[i];
         }
     }
 

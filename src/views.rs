@@ -165,6 +165,153 @@ fn draw_preview(painter: &egui::Painter, tex: &egui::TextureHandle, rect: Rect) 
     Some(target)
 }
 
+/// Whether a click on a row is the *second* click on that row — the request to
+/// rename it, as Explorer and Finder answer it. `marked` is the mark as it stood
+/// before the press (so the press that marks the item is never this one), `plain`
+/// is a press without Shift/Ctrl, `double` says the press is the second of a
+/// double click (which opens instead), and `pictures` is the picture wall, which
+/// draws no name field to open.
+pub(crate) fn click_asks_for_rename(
+    marked: bool,
+    plain: bool,
+    double: bool,
+    pictures: bool,
+) -> bool {
+    marked && plain && !double && !pictures
+}
+
+/// The menu the folder's own empty space offers: *Create New*, as the original
+/// does. Shared by the background and by the column header, because both are
+/// places the person reads as "not on a file".
+/// What the empty space's menu needs to know about the view it was opened on. A
+/// `context_menu` closure cannot borrow the pane it belongs to, so the few facts
+/// are copied out before the menu opens.
+pub struct BackgroundMenu {
+    pub dir: std::path::PathBuf,
+    pub view: ViewMode,
+    pub pictures: bool,
+    pub sort: SortKey,
+    pub asc: bool,
+    /// How many items are marked, which is what Cut and Copy act on.
+    pub marked: usize,
+    /// Whether the clipboard holds something to paste into this folder.
+    pub can_paste: bool,
+}
+
+/// Right-clicking the folder's own background: the same list Explorer puts there
+/// — *View*, *Sort By*, *Refresh*, *Cut*, *Copy*, *Paste*, *Create New*,
+/// *Copy Location*, *Open in Terminal*, *Properties*.
+///
+/// *Cut* and *Copy* take the marked items (they are greyed out with nothing
+/// marked); *Paste* puts the clipboard into this folder; *Properties* is this
+/// folder's own. The two submenus carry a tick on what is in force, so the menu
+/// also answers "where am I".
+fn background_menu(ui: &mut egui::Ui, st: &BackgroundMenu, reqs: &mut Vec<Request>) {
+    ui.set_min_width(208.0);
+    ui.set_max_width(240.0);
+    ui.menu_button("View", |ui| {
+        ui.set_min_width(200.0);
+        // The same four views as the toolbar, in the person's own words.
+        for (label, mode, pictures_row) in [
+            ("Icons", ViewMode::Icons, false),
+            ("Compact", ViewMode::Compact, false),
+            ("Details", ViewMode::Details, false),
+            ("Picture View", ViewMode::Details, true),
+        ] {
+            let checked = if pictures_row {
+                st.pictures
+            } else {
+                !st.pictures && st.view == mode
+            };
+            if ui.selectable_label(checked, label).clicked() {
+                if pictures_row {
+                    reqs.push(Request::Toast("__pictures__".into()));
+                } else {
+                    reqs.push(Request::SetView(mode));
+                }
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button("Sort By", |ui| {
+        ui.set_min_width(200.0);
+        for key in [
+            SortKey::Name,
+            SortKey::Size,
+            SortKey::Type,
+            SortKey::Modified,
+        ] {
+            if ui
+                .selectable_label(!st.pictures && st.sort == key, key.label())
+                .clicked()
+            {
+                reqs.push(Request::SetSort(key));
+                ui.close();
+            }
+        }
+        ui.separator();
+        // Picking the key already in force turns the order round, so the row that
+        // is ticked is the one that does nothing.
+        for (desc, label) in [(false, "Ascending"), (true, "Descending")] {
+            let checked = !st.pictures && st.asc != desc;
+            if ui.selectable_label(checked, label).clicked() {
+                if !checked {
+                    reqs.push(Request::SetSort(st.sort));
+                }
+                ui.close();
+            }
+        }
+    });
+    ui.separator();
+    if crate::menu_row(ui, "Refresh", "F5").clicked() {
+        reqs.push(Request::Toast("__refresh__".into()));
+        ui.close();
+    }
+    ui.separator();
+    if crate::menu_row_with(ui, "Cut", "Ctrl+X", st.marked > 0).clicked() {
+        reqs.push(Request::Cut);
+        ui.close();
+    }
+    if crate::menu_row_with(ui, "Copy", "Ctrl+C", st.marked > 0).clicked() {
+        reqs.push(Request::Copy);
+        ui.close();
+    }
+    if crate::menu_row_with(ui, "Paste", "Ctrl+V", st.can_paste).clicked() {
+        reqs.push(Request::Paste);
+        ui.close();
+    }
+    ui.separator();
+    ui.menu_button("Create New", |ui| {
+        // A submenu's `ui` reports the whole window's width, so a row that
+        // measures `available_width` would make this popup ~600 px wide and
+        // push it over to the left of its parent. Both bounds are set, as the
+        // other submenus get from the widgets they draw with.
+        ui.set_min_width(200.0);
+        ui.set_max_width(200.0);
+        if crate::menu_row(ui, "Folder", "F10").clicked() {
+            reqs.push(Request::NewItem(NewKind::Folder, st.dir.clone()));
+            ui.close();
+        }
+        if crate::menu_row(ui, "Text File", "").clicked() {
+            reqs.push(Request::NewItem(NewKind::TextFile, st.dir.clone()));
+            ui.close();
+        }
+    });
+    ui.separator();
+    if crate::menu_row(ui, "Copy Location", "").clicked() {
+        ui.ctx().copy_text(st.dir.display().to_string());
+        ui.close();
+    }
+    if crate::menu_row(ui, "Open in Terminal", "").clicked() {
+        reqs.push(Request::OpenTerminal(st.dir.clone()));
+        ui.close();
+    }
+    if crate::menu_row(ui, "Properties", "").clicked() {
+        reqs.push(Request::Properties(vec![st.dir.clone()]));
+        ui.close();
+    }
+}
+
 /// Corner radius for a thumbnail drawn at `icon` px. The gallery's own frame
 /// uses 10 px at its 400 px ceiling (`PICTURE_CORNER`); this keeps the same
 /// look at smaller sizes instead of rounding a 32 px icon into a circle.
@@ -211,20 +358,18 @@ impl Pane {
         let bg_rect = child.available_rect_before_wrap();
         if !in_trash && bg_rect.width() > 8.0 && bg_rect.height() > 8.0 {
             let bg = child.interact(bg_rect, Id::new(("dir_background", self.id)), Sense::click());
-            bg.context_menu(|ui| {
-                ui.set_min_width(200.0);
-                ui.menu_button("Create New", |ui| {
-                    ui.set_min_width(220.0);
-                    if crate::menu_row(ui, "Folder…", "F10").clicked() {
-                        vctx.reqs.push(Request::NewItem(NewKind::Folder, dir.clone()));
-                        ui.close();
-                    }
-                    if crate::menu_row(ui, "Text File…", "").clicked() {
-                        vctx.reqs.push(Request::NewItem(NewKind::TextFile, dir.clone()));
-                        ui.close();
-                    }
-                });
-            });
+            // What the menu needs, copied out of the pane and the clipboard before
+            // the closure borrows both.
+            let menu = BackgroundMenu {
+                dir: dir.clone(),
+                view: self.view,
+                pictures: self.pictures,
+                sort: self.sort,
+                asc: self.asc,
+                marked: self.sel.len(),
+                can_paste: !vctx.clipboard.paths.is_empty(),
+            };
+            bg.context_menu(|ui| background_menu(ui, &menu, vctx.reqs));
         }
 
         // Ctrl + wheel zooms the view, the same one-step-per-notch change the
@@ -810,11 +955,39 @@ impl Pane {
         self.search_measured = total;
     }
 
+    /// The view's scroll area, with any page scroll waiting applied.
+    ///
+    /// A page moves the window by its own height on top of where it already was, so
+    /// Page Down advances exactly one screenful of the view instead of jumping to
+    /// the top: the cursor has already moved a screenful (`Pane::page_cursor`), and
+    /// on the wall or the grid that puts it off the bottom edge, which is why a page
+    /// that moved only the cursor looked like a key that did nothing.
+    fn page_area(&mut self, _ui: &egui::Ui, view_h: f32, content_h: f32) -> egui::ScrollArea {
+        let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if let Some(to_top) = self.scroll_edge.take() {
+            // Home and End: the ends of the content itself, not a step from where
+            // the window is. The offset is clamped by the scroll area, so the bottom
+            // is simply the content height minus the window.
+            let want = if to_top {
+                0.0
+            } else {
+                (content_h - view_h).max(0.0)
+            };
+            area = area.vertical_scroll_offset(want);
+        } else if let Some(pages) = self.scroll_pages.take() {
+            let want = (self.scroll_offset + pages * view_h).max(0.0);
+            area = area.vertical_scroll_offset(want);
+        }
+        area
+    }
+
     fn ui_details(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
         // Before any column is placed: what the two text columns have to hold.
         self.measure_search_columns(ui);
         let width = ui.available_width().max(200.0);
         let header_h = 25.0;
+        // Still `hover()`: the pane's own background answers the right button for
+        // this strip, and a click-sense header would only swallow the left one.
         let (hrect, _) = ui.allocate_exact_size(Vec2::new(width, header_h), Sense::hover());
         ui.painter().rect_filled(hrect, 0.0, theme::header_bg());
         let cols = self.details_columns(hrect);
@@ -910,23 +1083,31 @@ impl Pane {
             self.empty_message(ui, vctx);
             return;
         }
-        let scroll = egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, row_h, count, |ui, range| {
-                for idx in range {
-                    let (rect, resp) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width(), row_h),
-                        Sense::click(),
-                    );
-                    if !ui.is_rect_visible(rect) {
-                        continue;
+        let view_h = ui.available_height();
+        let content_h = count as f32 * row_h;
+        let area = self.page_area(ui, view_h, content_h);
+        let scroll = theme::scroll_bars(ui, |ui| {
+            let out = area
+                .show_rows(ui, row_h, count, |ui, range| {
+                    // What the window holds is what a page is (Page Up / Page Down).
+                    self.per_page = range.len().max(1);
+                    for idx in range {
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), row_h),
+                            Sense::click(),
+                        );
+                        if !ui.is_rect_visible(rect) {
+                            continue;
+                        }
+                        if self.scroll_to == Some(idx) {
+                            ui.scroll_to_rect(rect, Some(Align::Center));
+                        }
+                        self.draw_details_row(ui, rect, &resp, idx, vctx);
                     }
-                    if self.scroll_to == Some(idx) {
-                        ui.scroll_to_rect(rect, Some(Align::Center));
-                    }
-                    self.draw_details_row(ui, rect, &resp, idx, vctx);
-                }
-            });
+                });
+            self.scroll_offset = out.state.offset.y;
+            out
+        });
         if self.scroll_to.is_some() {
             self.scroll_to = None;
         }
@@ -1211,29 +1392,42 @@ impl Pane {
         if rows.len() as f32 * (cell_h + 4.0) > view_h {
             rows = pack_icon_rows(&widths, (avail - 14.0).max(120.0), ICON_CELL_GAP);
         }
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, cell_h, rows.len(), |ui, range| {
-                for row in range {
-                    let (start, end) = rows[row];
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = ICON_CELL_GAP;
-                        for idx in start..end {
-                            let (rect, resp) = ui.allocate_exact_size(
-                                Vec2::new(widths[idx], cell_h),
-                                Sense::click(),
-                            );
-                            if !ui.is_rect_visible(rect) {
-                                continue;
+        let content_h = rows.len() as f32 * cell_h;
+        let area = self.page_area(ui, view_h, content_h);
+        theme::scroll_bars(ui, |ui| {
+            let out = area
+                .show_rows(ui, cell_h, rows.len(), |ui, range| {
+                    // A page of the grid is every cell in the window, not one row:
+                    // the rows are packed to different widths, so the count is the
+                    // cells they actually carry.
+                    self.per_page = range
+                        .clone()
+                        .map(|row| rows[row].1 - rows[row].0)
+                        .sum::<usize>()
+                        .max(1);
+                    for row in range {
+                        let (start, end) = rows[row];
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = ICON_CELL_GAP;
+                            for idx in start..end {
+                                let (rect, resp) = ui.allocate_exact_size(
+                                    Vec2::new(widths[idx], cell_h),
+                                    Sense::click(),
+                                );
+                                if !ui.is_rect_visible(rect) {
+                                    continue;
+                                }
+                                if self.scroll_to == Some(idx) {
+                                    ui.scroll_to_rect(rect, Some(Align::Center));
+                                }
+                                self.draw_icon_cell(ui, rect, &resp, idx, icon, vctx);
                             }
-                            if self.scroll_to == Some(idx) {
-                                ui.scroll_to_rect(rect, Some(Align::Center));
-                            }
-                            self.draw_icon_cell(ui, rect, &resp, idx, icon, vctx);
-                        }
-                    });
-                }
-            });
+                        });
+                    }
+                });
+            self.scroll_offset = out.state.offset.y;
+            out
+        });
         if self.scroll_to.is_some() {
             self.scroll_to = None;
         }
@@ -1244,7 +1438,10 @@ impl Pane {
     /// Size walks the original's zoom ladder, now continued to 400 px.
     fn picture_options_bar(&mut self, ui: &mut egui::Ui, vctx: &mut ViewCtx) {
         let vi = self.view.index();
-        let mut zoom = self.zoom[vi] as f32;
+        // The ladder the view is drawing with — previews on or off — so dragging
+        // this size always changes the size on screen, and it is the same memory
+        // the status-bar slider and the zoom keys use.
+        let mut zoom = self.zoom_level() as f32;
         let mut zoom_changed = false;
         let mut changed = false;
         let mut names = self.gallery_names;
@@ -1325,7 +1522,8 @@ impl Pane {
             });
 
         if zoom_changed {
-            self.zoom[vi] = (zoom.round() as i32).clamp(0, theme::MAX_ZOOM as i32) as u8;
+            let _ = vi;
+            self.set_zoom_level((zoom.round() as i32).clamp(0, theme::MAX_ZOOM as i32) as u8);
             vctx.reqs.push(Request::ZoomChanged);
         }
         if changed {
@@ -1508,36 +1706,76 @@ impl Pane {
         let icon = self.icon_size().clamp(16.0, theme::MAX_ICON_PX);
         let row_h = (icon + 6.0).max(22.0);
         // Compact cell width from `DolphinItemListView::updateGridSize`
-        // @0x26d940: iconSize + 8 + 5 * fontHeight.
+        // @0x26d940: iconSize + 8 + 5 * fontHeight. That is the *least* a cell can
+        // be, though, and on its own it cuts every name off at the same place: a
+        // folder of photographs and backups showed four characters and an ellipsis
+        // on every row. The compact view is a list of names, so the cell is made as
+        // wide as the longest name in the listing (see measure_name_width) and the
+        // columns are counted from that. Only when a single name is wider than the
+        // whole view does anything elide, and then it cannot be helped.
         let font_h = ui.text_style_height(&egui::TextStyle::Body);
-        let cell_w = theme::compact_cell_width(icon, font_h);
+        let min_w = theme::compact_cell_width(icon, font_h);
         let avail = ui.available_width();
+        let (stamp, measured) = {
+            let entries = self.display_entries();
+            let stamp = (
+                entries.len(),
+                entries.iter().map(|e| e.name.len()).sum::<usize>(),
+            );
+            let measured = if stamp != self.compact_stamp {
+                Some(measure_name_width(ui, entries))
+            } else {
+                None
+            };
+            (stamp, measured)
+        };
+        if let Some(px) = measured {
+            self.compact_name_px = px;
+            self.compact_stamp = stamp;
+        }
+        // label_x is rect.left + icon + 18 and the label keeps 8 px from the right
+        // edge, so a cell of name + icon + 26 leaves the name its whole width; two
+        // more pixels cover the rounding of the layout.
+        let want = self.compact_name_px + icon + 28.0;
+        let cell_w = want.max(min_w).min((avail - 8.0).max(min_w));
+        self.compact_cell_px = cell_w;
         let cols = ((avail - 8.0) / cell_w).floor().max(1.0) as usize;
         let rows = (count + cols - 1) / cols;
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show_rows(ui, row_h, rows, |ui, range| {
-                for row in range {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        for col in 0..cols {
-                            let idx = row * cols + col;
-                            if idx >= count {
-                                break;
+        let view_h = ui.available_height();
+        let content_h = rows as f32 * row_h;
+        let area = self.page_area(ui, view_h, content_h);
+        theme::scroll_bars(ui, |ui| {
+            let out = area
+                .show_rows(ui, row_h, rows, |ui, range| {
+                    self.per_page = range
+                        .clone()
+                        .map(|row| cols.min(count - (row * cols).min(count)))
+                        .sum::<usize>()
+                        .max(1);
+                    for row in range {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            for col in 0..cols {
+                                let idx = row * cols + col;
+                                if idx >= count {
+                                    break;
+                                }
+                                let (rect, resp) =
+                                    ui.allocate_exact_size(Vec2::new(cell_w, row_h), Sense::click());
+                                if !ui.is_rect_visible(rect) {
+                                    continue;
+                                }
+                                if self.scroll_to == Some(idx) {
+                                    ui.scroll_to_rect(rect, Some(Align::Center));
+                                }
+                                self.draw_compact_cell(ui, rect, &resp, idx, vctx);
                             }
-                            let (rect, resp) =
-                                ui.allocate_exact_size(Vec2::new(cell_w, row_h), Sense::click());
-                            if !ui.is_rect_visible(rect) {
-                                continue;
-                            }
-                            if self.scroll_to == Some(idx) {
-                                ui.scroll_to_rect(rect, Some(Align::Center));
-                            }
-                            self.draw_compact_cell(ui, rect, &resp, idx, vctx);
-                        }
-                    });
-                }
-            });
+                        });
+                    }
+                });
+            self.scroll_offset = out.state.offset.y;
+            out
+        });
         if self.scroll_to.is_some() {
             self.scroll_to = None;
         }
@@ -1649,6 +1887,10 @@ impl Pane {
         idx: usize,
         vctx: &mut ViewCtx,
     ) {
+        // The mark as it stood before this press: a click that lands on the one
+        // item already marked is a second click on it, not a new selection.
+        let marked_already = self.sel.len() == 1 && self.sel.contains(&idx);
+        let editing_here = self.rename.as_ref().is_some_and(|r| r.index == idx);
         if resp.clicked() {
             // A press on any other row ends an open name editor: leaving it on
             // the row the person just clicked away from left a field open with
@@ -1665,6 +1907,24 @@ impl Pane {
                 self.toggle_select(idx);
             } else {
                 self.select_single(idx);
+            }
+            // Clicking the marked item again asks to rename it, as Explorer and
+            // Finder answer that click: the row is the thing meant, and the name
+            // is the only thing left to change. Not the press that marks it, not
+            // with Shift or Ctrl (that extends the mark), not the second press of
+            // a double click (that opens it), not while its own field is already
+            // open, and not on the picture wall, which draws no name field.
+            let plain = !mods.shift && !mods.ctrl && !mods.command;
+            if click_asks_for_rename(marked_already, plain, resp.double_clicked(), self.pictures)
+                && !editing_here
+            {
+                if let Some(name) = self.display_entries().get(idx).map(|e| e.name.clone()) {
+                    self.rename = Some(crate::state::RenameState {
+                        index: idx,
+                        text: name,
+                        focus: false,
+                    });
+                }
             }
         }
         if resp.double_clicked() {
@@ -2129,6 +2389,46 @@ pub const ICON_CELL_GAP: f32 = 2.0;
 /// called from `KStandardItemListWidget::drawPixmap` @0x135bb0: the aspect is
 /// kept and the pixmap is centred in the square box. A picture that is taller
 /// than it is wide therefore only fills `aspect * icon` of the box's width.
+/// The width of the widest name in the listing, measured in the compact cell's
+/// own font. The compact view is a list of names, so the column is sized from this
+/// rather than from a fixed label width.
+///
+/// Measuring every name is not free (each one is shaped), so a listing of more
+/// than `CAP` entries measures the `CAP` longest by character count and no others:
+/// a name shorter than fifteen hundred others is not the one setting the width in
+/// any real folder, and if a long-but-narrow name is missed by a pixel the name
+/// beside it elides — the one case where this cannot be exact is a name of narrow
+/// letters that is wider than everything longer than it, which does not occur in
+/// practice. The measurement is cached on the pane against the listing it was
+/// taken of, so scrolling costs nothing.
+fn measure_name_width(ui: &egui::Ui, entries: &[crate::fsutil::Entry]) -> f32 {
+    const CAP: usize = 1500;
+    let font = FontId::proportional(12.5);
+    let mut width: f32 = 0.0;
+    if entries.len() <= CAP {
+        for e in entries {
+            width = width.max(
+                ui.painter()
+                    .layout_no_wrap(e.name.clone(), font.clone(), theme::text())
+                    .size()
+                    .x,
+            );
+        }
+        return width;
+    }
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    order.sort_by_key(|i| std::cmp::Reverse(entries[*i].name.len()));
+    for i in order.into_iter().take(CAP) {
+        width = width.max(
+            ui.painter()
+                .layout_no_wrap(entries[i].name.clone(), font.clone(), theme::text())
+                .size()
+                .x,
+        );
+    }
+    width
+}
+
 pub fn thumb_size(icon: f32, aspect: f32) -> Vec2 {
     let icon = icon.clamp(16.0, theme::MAX_ICON_PX);
     let aspect = if aspect.is_finite() && aspect > 0.0 {

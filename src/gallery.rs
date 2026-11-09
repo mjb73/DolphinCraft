@@ -753,11 +753,31 @@ impl Pane {
             theme::row_sel_inactive()
         };
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
+        let area = {
+            let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+            if let Some(to_top) = self.scroll_edge.take() {
+                // Home and End on the wall: the top of the wall, or its last row.
+                let want = if to_top {
+                    0.0
+                } else {
+                    (total - view_h).max(0.0)
+                };
+                area = area.vertical_scroll_offset(want);
+            } else if let Some(pages) = self.scroll_pages.take() {
+                let want = (self.scroll_offset + pages * view_h).max(0.0);
+                area = area.vertical_scroll_offset(want);
+            }
+            area
+        };
+        theme::scroll_bars(ui, |ui| {
+        let out = area
             .show(ui, |ui| {
                 ui.add_space(GRID_PAD * 0.5);
                 let clip = ui.clip_rect();
+                // One page of the wall is the pictures the window is showing: the
+                // rows below are counted as they are drawn, and the ones skipped
+                // as out of sight are not (Page Up / Page Down use this).
+                let mut in_view = 0usize;
                 for row in &rows {
                     let row_h = row.pic_h + caption + THUMB_GAP;
                     // Rows out of sight keep their place without being drawn or
@@ -770,6 +790,7 @@ impl Pane {
                         ui.add_space(row_h);
                         continue;
                     }
+                    in_view += row.end - row.start;
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(THUMB_GAP, 0.0);
                         ui.add_space(GRID_PAD * 0.5);
@@ -807,8 +828,12 @@ impl Pane {
                     });
                     ui.add_space(THUMB_GAP);
                 }
+                self.per_page = in_view.max(1);
                 ui.add_space(GRID_PAD * 0.5);
             });
+        self.scroll_offset = out.state.offset.y;
+        out
+        });
         if self.scroll_to.is_some() {
             self.scroll_to = None;
         }
@@ -1470,7 +1495,27 @@ impl Viewer {
             return;
         }
         let n = self.items.len() as i32;
-        self.index = (((self.index as i32 + delta) % n + n) % n) as usize;
+        let target = (((self.index as i32 + delta) % n + n) % n) as usize;
+        self.go_to(target);
+    }
+
+    /// Jump to one picture by its place in the strip: Home takes the first and
+    /// End the last, the way they do in every other viewer. Unlike `step` this
+    /// does not wrap, and a place past the end is the last picture rather than an
+    /// empty pane.
+    pub fn jump(&mut self, index: usize) {
+        if self.items.is_empty() {
+            return;
+        }
+        let target = index.min(self.items.len() - 1);
+        self.go_to(target);
+    }
+
+    /// Put one picture on screen and reset what belongs to the picture: zoom,
+    /// pan and the slideshow's next tick.
+    fn go_to(&mut self, index: usize) {
+        let n = self.items.len() as i32;
+        self.index = index;
         self.zoom = 1.0;
         self.pan = Vec2::ZERO;
         self.fit = true;
@@ -1715,6 +1760,23 @@ impl crate::App {
                 }
                 if i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft) {
                     viewer.step(-1);
+                }
+                // The four keys every picture viewer has: Page Down and Page Up
+                // are one picture on, one picture back (the arrows without the
+                // wrap), and Home and End take the first and the last picture of
+                // the strip.
+                if i.consume_key(egui::Modifiers::NONE, Key::PageDown) {
+                    viewer.step(1);
+                }
+                if i.consume_key(egui::Modifiers::NONE, Key::PageUp) {
+                    viewer.step(-1);
+                }
+                if i.consume_key(egui::Modifiers::NONE, Key::Home) {
+                    viewer.jump(0);
+                }
+                if i.consume_key(egui::Modifiers::NONE, Key::End) {
+                    let last = viewer.items.len().saturating_sub(1);
+                    viewer.jump(last);
                 }
                 if i.consume_key(egui::Modifiers::NONE, Key::Space) {
                     if viewer.slide.is_some() {
@@ -2258,7 +2320,7 @@ impl crate::App {
                 );
 
                 if viewer.show_help {
-                    let help = "Esc close   ← → page   Space slideshow   + − zoom   0 fit   I details   P prompt   F full screen   C compare";
+                    let help = "Esc close   ← → page   PgUp PgDn page   Home End first/last   Space slideshow   + − zoom   0 fit   I details   P prompt   F full screen   C compare";
                     ui.painter().text(
                         Pos2::new(canvas.center().x, canvas.top() + 18.0),
                         Align2::CENTER_CENTER,

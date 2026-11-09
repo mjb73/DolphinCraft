@@ -1813,6 +1813,262 @@ Two faults found while photographing it, both fixed in the same pass:
 
 `mechanics.json` repeats these under the `picture viewer` group.
 
+## Paging keys: one screenful, in the viewer and in the views (asked for by the person)
+
+The person's words, twice: *"add the usual behaviour for home, end, page up and
+down for the picture view"*, then *"it should not be one image down but one page
+down"*. The viewer only had the arrows (which wrap) and Space for the slideshow,
+and the file views had no page keys at all — Home and End were the only two.
+
+**In the viewer** (`app/src/gallery.rs`, `Viewer::viewer_keys`):
+
+| key | what it does |
+| --- | --- |
+| ← / → | one picture back / on, wrapping — unchanged, because holding an arrow through the end of a folder is what a viewer is for |
+| Page Down / Page Up | the same step: in a viewer one picture *is* the page |
+| Home / End | the first and the last picture of the folder, clamped rather than wrapped — End on the last picture stays there instead of jumping back to the first |
+| Space | still the slideshow |
+
+`Viewer::step` and the new `Viewer::jump` share one `go_to`, so a jump resets
+zoom, pan, fit and the slideshow's next tick exactly as a page does — otherwise
+End would land on a picture still framed for the one before it.
+
+**In the file views** (`app/src/state.rs`, `app/src/views.rs`, `app/src/gallery.rs`)
+Page Down and Page Up move the cursor one *page* and the window with it:
+
+* a page is **not a constant**. Each view records how many items it put in its
+  window on the last frame (`Pane::per_page`): `show_rows` hands the details,
+  icon and compact views the range they are showing, and the picture wall counts
+  the pictures of the rows it actually drew. In a 900 × 500 window that is 9
+  details rows, 72 icon cells and 8 wall cards — the same key, three different
+  page sizes, each one a screenful;
+* the **window moves too** (`Pane::scroll_pages`, applied by
+  `Pane::page_area`): the scroll area is set to where it was plus its own
+  height. This is the part that was wrong first. Moving only the cursor left the
+  new row a screenful below the bottom edge, nothing was drawn differently, and
+  the key looked dead — which is exactly what the person reported;
+* the cursor still stops at the ends rather than wrapping, like every other
+  key in the listing, and `step_cursor` is now shared by the arrows (one row),
+  the page keys (one page) and `move_cursor` in `main.rs`;
+* **Home and End had the same fault** (`Pane::jump_cursor`): they put the cursor
+  on the first or the last entry and asked the view to scroll to it, but that
+  request only lands if the entry is drawn, and on a long folder it is not — so
+  from anywhere but the top they did nothing visible. They now take the window to
+  the top or the bottom of the content itself (`Pane::scroll_edge`, applied in
+  `Pane::page_area` from the content height each view knows), and the last entry
+  is the last entry the view *shows*: on the picture wall that is the last
+  picture, not whichever document sorts last.
+
+`--selftest` *"Page Up and Page Down move one screenful of the view, not one row"*
+draws all three views into real egui frames at 900 × 500, reads back the page
+each reports, pages down, and fails unless the window's own scroll offset moved
+by at least half a viewport, then pages up and fails unless it moved back; End
+must move the window more than half a viewport and Home must bring it back to the
+top. The
+viewer's bindings were proved in a live window — `--viewer
+testdata/pics400/landscape-16x9.jpg` on Xvfb, then End, Home, Page Down twice and
+Page Up once, reading the bar's `n / 5`: 1/5 → 5/5 → 1/5 → 3/5 → 2/5 — and the
+views' by paging a 200-picture folder: one Page Down took the wall from
+`pic-000` to `pic-128` and scrolled the window a screenful.
+
+`mechanics.json` records both under the `picture viewer` and `view` groups.
+
+
+## Tabs, one session each (asked for by the person)
+
+The person's words: *"it should be possible to add multiple tabs to the app
+representing different sessions. This feature is available in windows
+explorer."*
+
+Tabs existed (`App.tabs`, `Ctrl+T`, the `+` on the strip, `Ctrl+W`), but a tab was
+a folder and little else: it did not keep its view, its picture mode did not come
+back, and nothing walked or managed the tabs. It is now a session.
+
+| what | how |
+| --- | --- |
+| open | `Ctrl+T`, the **+**, a double click on the empty strip, the folder's menu |
+| walk | `Ctrl+Tab` / `Ctrl+Shift+Tab`, `Ctrl+Page Down` / `Ctrl+Page Up` — `cycle_tab_index` wraps both ways, one tab stays put |
+| close | `Ctrl+W`, the tab's ✕, a middle click, or **Close Tab** / **Close Other Tabs** / **Close Tabs to the Right** in its right-click menu |
+| duplicate | **Duplicate Tab** — `duplicate_tab` copies folder, sort, view and picture mode |
+| reopen | `Ctrl+Shift+T`, or **Reopen Closed Tab** — the ten-deep `closed_tabs` list |
+| remember | `SavedTab { path, sort_key, sort_desc, view, pictures }` per tab, plus `session_tab` |
+
+The strip is the window's topmost row: `tab_strip` is added to the `egui::Context`
+**before** `top_toolbar`, and a `TopBottomPanel::top` stack puts the first one
+added at the top. Drawn after, it sat under the toolbar — the address bar above
+the tabs that own it.
+
+**The strip is the title bar.** Asked for exactly like that: *"can these 2 lines be
+presented as one?"* — the compositor's bar (the window's name, minimize, maximize,
+close) and the tab strip were two rows of chrome above one toolbar. The window is
+now created with `.with_decorations(false)`, so the compositor draws no bar, and the
+tab strip carries what that bar carried:
+
+* the **window's name** (`APP_NAME`, 12.5 px, `text()`) at its left end, before the
+  first tab, with ten pixels of padding either side of the word — it drags and
+  double-clicks like the strip's empty space, being part of the same bar;
+* the **three window buttons** at its right end (`WINDOW_BUTTON_W` = 34 px each,
+  glyphs `minimize` / `maximize` / `restore` added to `theme::draw_glyph`, the close
+  one on `danger_fill` under the pointer) sending `ViewportCommand::Minimized`,
+  `Maximized(!now)` and `Close`;
+* **dragging**: a press-and-move on the strip's empty space *or on a tab* sends
+  `ViewportCommand::StartDrag` (both responses are `Sense::click_and_drag`; a press
+  and release is still a click, because egui only calls it a drag past its own
+  threshold);
+* **a double click on the empty space maximizes or restores** — this replaces the
+  old double click that opened a tab, because the strip is a title bar now, and
+  Ctrl+T and the `+` still open tabs;
+* `App::window_frame`, drawn last in the foreground layer: a one-pixel `border()`
+  edge round the window (none when maximized) and the eight six-pixel bands that
+  send `ViewportCommand::BeginResize` — a frameless window has no edge of its own,
+  so without them it could not be resized at all.
+
+What that costs: the window loses the compositor's shadow, its rounded corners and,
+on a narrow window, its title text; the name lives in the task switcher still
+(`with_title(APP_NAME)`). The frame and the bands are drawn over the window, so the
+outermost six pixels of the content are the edge's.
+
+**A tab's own view was the piece that made it a session.** `SavedTab` used to
+carry only the folder and the sort, so a window with details in one tab and the
+picture wall in the next came back all icons. The session file now keeps `view`
+and `pictures` per tab and `App::new` puts them back on that tab's pane, so the
+pair of tabs in the picture above returns as it was left: `nametest` in details,
+`walltest` on the wall.
+
+**Closing must not lose the tab in front.** `index_after_close(len, active,
+closed)` moves the front tab down when a tab to its left closes, leaves it when
+one to its right does, and lands on the neighbour (the new last tab when the
+closed one was last) when it closes itself. The old code only clamped
+`active_tab` against the new length, so closing *Close Tabs to the Right* from
+the front tab jumped to a tab that had nothing to do with the one in front.
+
+**The tab in front carries a plate, not just a line.** Inactive tabs have no fill
+of their own — they are the strip, `panel_bg` — so the active tab used to differ
+from them by `header_bg`'s three levels (46 against 43) and the blue line was
+doing all the work. `theme::tab_active_bg` is a step **above** the strip
+(60,66,72 dark / 250,251,252 light: 1.33:1 and 1.09:1 on it) and
+`theme::tab_hover_bg` stays under it (50,55,60 — the tint that was spelled
+`c(50,55,60)` by hand, now a shading role so the light slider moves it with the
+strip it lies on). Both are `shade_pair`, so the plate keeps its distance from
+the view as the shading deepens; the `--selftest` palette check now fails if the
+active tab stops being lighter than the strip, if the two are less than 1.06:1
+apart, or if a hovered tab comes out as bright as the one in front.
+
+**A context menu's `ui` does not constrain its width.** `menu_row` fills
+`ui.available_width()`, which inside a context menu is the window's, so the row —
+and the `Ctrl+W` hint drawn at its right edge — went past the popup and was
+clipped. `set_min_width` alone does not fix it; the tab menus set both
+`set_min_width(210.0)` and `set_max_width(210.0)`.
+
+`--selftest` *"Ctrl+Tab walks the tabs both ways, and closing one keeps the front
+tab"* holds both rules to six close cases and three steps each way, and the
+session check now also fails if a tab's `view` or `pictures` is lost or leaks
+into the tab beside it.
+
+Driven live under Xvfb: `Ctrl+T` on `/tmp/nametest`, navigate the second tab to
+`/tmp/walltest`, `Ctrl+Tab` back (each shows its own folder); the tab menu on the
+last tab lists four rows and on the first lists five; *Duplicate Tab* made a
+third; a double click on the strip made a fourth; *Close Tabs to the Right* left
+one; `Ctrl+W` then `Ctrl+Shift+T` closed and brought it back. A written session
+file (`view: 2, pictures: false` / `view: 0, pictures: true`) opened as details
+in tab one and the picture wall in tab two (`app/shots/tabs-sessions.png`).
+
+## Compact view: columns as wide as the longest name (asked for by the person)
+
+The person's words: *"in the compact view - find a way so that the filenames are
+not truncated."*
+
+The compact cell was a fixed width from the original's `updateGridSize`
+(`DolphinItemListView` @0x26d940: `iconSize + 8 + 5 * fontHeight`) and the name
+was elided into it, so every row in a folder of photographs or backups showed
+four characters and an ellipsis — the same four for every file, which tells you
+nothing.
+
+**What it does now** (`app/src/views.rs`, `ui_compact` and `measure_name_width`):
+
+* the column is as wide as the widest name in the listing, measured in the
+  cell's own font (12.5 pt proportional) and cached on the pane
+  (`compact_name_px`, invalidated by `compact_stamp` — the entry count and the
+  total bytes of names, so a reload, a filter or a rename measures again);
+* a cell is `name + icon + 28` px: `label_x` is `left + icon + 18` and the label
+  keeps 8 px off the right edge, so the name has its whole width, and the two
+  spare pixels absorb layout rounding. The columns are counted from that width;
+* **a short folder pays nothing**: the cell is `max(five-font-height, name + icon
+  + 28)`, so `pic-000.png` keeps the dense 8-column grid it had;
+* a name wider than the whole view cannot be helped — the cell stops at the view
+  width and that one name elides in the middle (`theme::elide_name`), leaving the
+  start and the extension visible.
+
+Measuring is not free (each name is shaped), so a listing of more than 1500
+entries measures the 1500 longest by character count and no others.
+
+`--selftest` *"the compact view widens a column to the longest name instead of
+cutting it"* draws the view at 900 × 500 with a 58-character name in the folder,
+lays that name out with the same font, and fails unless the cell leaves it room
+(`cell - icon - 26 >= name`); it also draws a folder of short names and fails if
+the cell grew past the narrow width there. Measured: the name is 328 px, its cell
+404 px — 2.2 columns at 900 px, and the short folder keeps 141 px cells.
+
+Photographed (`app/shots/compact-names.png`) on a folder of fourteen names from
+`db` to the 53-character one: two columns, every name complete.
+
+## A zoom memory per view (asked for by the person)
+
+The person's words: *"the zoom slider should have a different memory for the
+different view types (icons view, compact view, Details View & Picture View) the
+last user settings should be persistent across different sessions."*
+
+**Four memories, one per view** (`app/src/state.rs`, `ZoomKind`):
+
+| view | what is remembered | settings key |
+| --- | --- | --- |
+| icons | ladder step 0–25 | `zoom[0]` |
+| compact | ladder step 0–25 | `zoom[1]` |
+| details | ladder step 0–25 | `zoom[2]` |
+| picture view | thumbnail height 50–400 px | `thumb_px` |
+
+The three list views share the ladder but not the value; the wall is measured in
+pixels, so it has a key of its own. All four are written the moment they change
+(`App::sync_zoom_config` — every slider, the −/+ buttons, Ctrl+= / Ctrl+- and
+Ctrl+wheel go through it) and read back at start-up by `pane_from_config`, so a
+session starts with each view the size it was left.
+
+**What was actually wrong**, found by driving the real window while reading
+`config.json` after each step:
+
+* **the view buttons copied the saved array over the pane's.** Choosing a view
+  ran `pane.zoom = self.config.zoom`, so any memory the pane held that the
+  settings file did not was thrown away — visible in a split window, where the
+  second pane's sizes were replaced by the first pane's;
+* **the picture view was a layer, not a view.** Clicking Icons while the wall was
+  up left the wall up: the button did nothing, and the size bar went on editing
+  the wall's thumbnails. Choosing a list view now leaves the picture view
+  (`pane.set_pictures(false)`), and the wall is entered and left by its own
+  button, as Details is by its own;
+* **the zoom keys and Reset Zoom ignored the view on show.** They always moved
+  the *list* ladder, so in the picture view Ctrl+= changed a size nobody could
+  see, and Ctrl+0 reset all three list views at once. They now go through
+  `Pane::view_zoom_by` / `Pane::view_zoom_reset`, which act on the view on show —
+  the wall's 25 px steps included — and reset only that one;
+* **the "Pictures:" size bar edited the previews-on ladder whatever was in
+  force.** With thumbnails switched off it moved a value the view was not
+  drawing with, so dragging it did nothing. It now sets the ladder in force
+  (`set_zoom_level`).
+
+`--selftest` *"each of the four views remembers its own zoom through a restart"*
+sets icons 9, compact 5, details 1 and the wall 275 px, switches between all four
+(the step that used to lose them), steps the zoom and checks only the view on
+show moved, resets the compact view and checks the other three are untouched, and
+takes the whole set through the settings file and `pane_from_config`.
+
+Measured in a live window (`XDG_CONFIG_HOME` fresh, `config.json` read after each
+step): three Ctrl+= in the icons view wrote `zoom [7,3,3]`; two in Details wrote
+`[7,3,5]`; one in the picture view wrote `thumb_px 225` and left the ladder alone.
+After quitting and starting again the bars read **icons 112 px, details 80 px,
+picture view 225 px** — each its own, all three restored from the file.
+
+`mechanics.json` records it under the `view` group.
+
 ## The side-by-side comparison: zoom and pan (reported by the person)
 
 The person's words: *"in the side by side comparison view, the zoom and pan
@@ -2987,6 +3243,7 @@ and one-off tints, whose mid-tones survive a flip.
 | what does not flip | the selection band, a filled button (`action_fill()`, `danger_fill()`) and the white text on either (`on_band()`), the viewer's black scrim (`on_scrim()`), and white itself |
 | egui's own colours | `theme::install` used to set the fonts *and* the whole `Visuals`; the style half is now `theme::apply_style`, which the switch calls again. A switch that only repainted the view would leave the menus, buttons and text fields in the old palette |
 | the startup order | the settings are read before anything is styled, so a light window is light on its first frame rather than opening dark and repainting |
+| the shading slider | app menu → **View** → *Shading*, shown while the light palette is on (config key `shade`, 0–100, remembered). The view is the anchor; every other shading role is pulled further away from it by `1 + 2t`, so the panel's step below the paper grows from 13 levels to 39 and the toolbar's from 21 to 63 (panel `#eef2f5` → `#d4dee5`, toolbar `#e6ebf0` → `#bcc9d6`, hairline `#d6dde4` → `#8c9fb2`, window edge `#c4ccd4` → `#566c82`). Scaling a surface's distance *from white* was the first try and it was invisible: half again on the panel's 13 levels is 6. Because deepening the panel spends the captions' contrast, `theme::ink_pair` darkens `text_dim` and `text_faint` in linear light until the strictest of their grounds' floors is met (dim `#565e64` → `#4c5459`, faint `#626b73` → `#535b62`) — never darker than needed, and at 0 not at all. Nothing that is not shading — ink, the accent, the band, the folder icon, the document page — takes part. A *shading* role is `theme::shade_pair`; the rest stay `theme::pair`. The shortcuts panel is not a special case: its fill is `panel_bg()`, its rows `row_hover()`, its selected pill the band at 75 % alpha (so it darkens with the panel it lies on), and its keycaps `theme::key_badge()` — the last was the one piece left at a fixed near-white, and it now deepens with the panel while staying a step above it |
 
 ### The targets both modes are held to
 
@@ -3104,9 +3361,9 @@ draws KIO's new-file menu; the action names are in `/usr/bin/dolphin`):
 | string | meaning |
 | --- | --- |
 | `@item:inmenu Create New` | the submenu's label |
-| `Create New Folder` | the folder window's title |
-| `Create New File` | the file window's title |
-| `Enter file name` | the file field's own hint |
+| `Create New Folder` | the folder window's title (recorded; this build has no such window) |
+| `Create New File` | the file window's title (likewise) |
+| `Enter file name` | the file field's own hint (the field is the view's own now) |
 | `Name=Text File...` | the file row in the menu, from the embedded template |
 | `create_dir`, `create_file` | the two action names, next to each other in the binary |
 
@@ -3120,20 +3377,55 @@ the second row runs.
   registered *before* the rows. egui hands a click to the topmost widget of the
   same kind, so a row keeps its own menu and only a press that lands on nothing
   reaches the background. It is not offered in the Trash.
-* The menu is the original's shape: **Create New ▸ Folder… / Text File…** —
+* The menu is the original's shape: **Create New ▸ Folder / Text File** —
   `crate::menu_row`, so the shortcut column works like every other menu here.
-  `Folder…` carries `F10`, the key the app menu's *New Folder…* row already shows.
-* One window serves both kinds (`NewKind`): title, suggested name
-  (`New Folder` / `New Text File.txt`), field hint and the created object all
-  come from the kind. The name is selected on opening, as in the original.
-* A file is created with `create_new(true)`, so a name that is already taken is
-  refused with "An item with that name already exists." rather than emptied —
-  the folder case had the same rule, and it has to hold for a file, where
-  `create` would truncate.
-* A folder still opens for renaming in place after it is made (its suggested
-  name is what is usually being replaced); a file is selected but not renamed,
-  because the name typed *is* the name.
-* The app menu's *New* group gained **New Text File…**, so neither kind is
-  reachable only by right-click; `--selftest` covers the making, the emptiness
-  of the file, and the refusal of a taken name (`Create New makes an empty text
-  file and a folder, and never reuses a name`).
+  `Folder` carries `F10`, the key the app menu's *New Folder* row already shows.
+  The submenu sets **both** `set_min_width` and `set_max_width` (200 px, the width
+  the *View* and *Sort By* popups come out at): a submenu's `ui` answers
+  `available_width` with the whole window, so `menu_row` sized this one at ~600 px,
+  put the `F10` hint at the far edge, and made egui flip it to the left of its
+  parent. `menu_row` in a top-level menu is safe because that menu already sets its
+  own two bounds.
+* **Neither row opens a window** (the person's second word on it: *"no additional
+  popup window is needed … just created in the current folder with an editable
+  filename"*). `App::make_new` makes the thing at once, marks it, scrolls to it and
+  sets `Pane::rename` on it, so the row is the whole of the asking and the name is
+  the only thing left to type. That is the flow the folder case already had, now
+  for both kinds; the editor is the one every view draws, so it works in icons,
+  compact and details alike.
+* **The name is picked, not asked for.** `NewKind::create_here` takes
+  `copymove::free_target`'s suggestion — `New Folder`, then `New Folder (1)`,
+  `New Folder (2)`; `New Text File.txt`, then `New Text File (1).txt` — so a second
+  *Create New* never collides and never refuses. `create_new(true)` is still what
+  makes the file, so a name taken between the check and the write is reported
+  rather than the existing file being emptied.
+* Escape leaves the name it was made with; the toast (*Folder created.* / *Text
+  file created.*) says it is on disk while the editor is still open.
+* The app menu's *New* group carries both rows and runs the same `make_new`, and
+  `F10` is the folder one; neither is reachable only by right-click.
+* `--selftest` covers the making, the emptiness of the file, and the free-name
+  rule — `Create New makes an empty text file and a folder, and the second one
+  picks a free name` reads both names off the disk.
+
+**Clicking the marked item again renames it.** The person's words: *"if you
+highlight a file and then click it again the app should interpret this as a
+request for renaming the file"* — Explorer's and Finder's own rule. One place
+answers it, `views::handle_row_interaction`, which every view (details, icons,
+compact and the wall) goes through, so the four cannot drift; the decision itself
+is `views::click_asks_for_rename(marked, plain, double, pictures)`. Four things
+have to hold:
+
+* **`marked`** is the mark *as it stood before the press*, one item and it is this
+  one — so the press that marks a file is never the press that renames it, and a
+  plain click that collapses a multiple mark only collapses it.
+* **`plain`** — no Shift, no Ctrl; those extend the mark.
+* **not `double`** — a double click still opens the file or folder, which is why
+  the rename is `!resp.double_clicked()` in the same frame the click is read. A
+  quick second click therefore opens, and a slower one (past egui's double-click
+  window) renames.
+* **not `pictures`** — the picture wall draws captions, not the name field, so the
+  row would set an editor nothing renders.
+
+The field is the one every view draws (`rename_editor`), with the whole name
+selected, and `--selftest` holds the truth table (`a second click on the marked
+item is a rename, not a double click and not a fresh mark`).

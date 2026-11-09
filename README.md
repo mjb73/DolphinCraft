@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 
 `install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
 `~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
-release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.5` to pin a
+release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.6` to pin a
 release.
 
 The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,
@@ -32,13 +32,44 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   Group…*, then drag shortcuts onto the group or use *Move to Group*. A group
   folds with a click and shows the same flag as the shortcuts it holds; removing
   it keeps them.
-- **Tabs** with a path bar you can click through, and an address field (Ctrl+L).
+- **Tabs**, one per browsing session, in the window's own title row across the very
+  top — the tab strip *is* the title bar, so there is one line where there used to be
+  two: the window's name sits at its left end, before the first tab; drag the bar to
+  move the window, double-click its empty space to maximize, and the
+  minimize/maximize/close buttons sit at its right end (the toolbar below it belongs
+  to the tab in front): **Ctrl+T** opens
+  one on the folder you are looking at, **Ctrl+W** closes it, **Ctrl+Tab** and
+  **Ctrl+Shift+Tab** walk them (Ctrl+Page Down / Page Up do the same), a
+  double-click on the empty part of the strip opens one, and the **+** at its
+  right end always does. Each tab keeps its own folder, sort, view and picture
+  mode, so details in one and the picture wall in the next do not argue — and
+  all of that comes back next session, in the order it was left. Right-clicking
+  a tab offers *Close Tab*, *Close Other Tabs*, *Close Tabs to the Right*,
+  *Duplicate Tab* and *Reopen Closed Tab*; hovering one shows the full path
+  behind the elided name. The tab in front sits on a lighter plate than the strip
+  behind it, so it reads as raised even before the blue line under it is noticed.
   Closing a tab is never final: *File → Recently Closed Tabs* lists the ten
-  folders closed since the window opened, newest first, and **Ctrl+Shift+T**
-  brings the last one straight back where it was.
-- **Three view modes**: icons, details and columns, each with its own zoom
-  level and sort order. The measured ladder is 0–16 zoom steps (16–256 px);
+  folders closed since the window opened, newest first, and
+  **Ctrl+Shift+T** brings the last one straight back where it was.
+- **Three view modes**: icons, details and compact (a column of names), each with
+  its own zoom level and sort order. Compact sizes its columns from the longest
+  name in the listing, so a name is not cut off at a fixed five-font-height cell —
+  a short folder keeps its narrow columns, and only a name wider than the whole
+  view has to elide. The measured ladder is 0–16 zoom steps (16–256 px);
   the icons and compact views continue the same ladder to level 25 = 400 px.
+  **Every view keeps its own zoom** — icons, compact, details and the picture
+  view — so switching to Details does not shrink the grid you sized for
+  photographs, and the wall's thumbnail height (50–400 px) is a memory of its
+  own, apart from the icon ladder. All four are written to the settings as you
+  change them, so the next session opens with each view at the size you left it.
+  The zoom keys and the −/+ buttons act on the view on show, and *View → Reset
+  Zoom* (Ctrl+0) resets only that one.
+  The arrow keys walk the listing one row at a time, **Home** and **End** take
+  the first and the last item, and **Page Down** / **Page Up** move one *page* —
+  a screenful of whatever the view is showing, measured from the view itself, so
+  a page of the picture wall is the pictures in the window and a page of details
+  rows is the rows in it. The window moves with the cursor every time: by exactly
+  its own height for a page, and to its top or its bottom for Home and End.
 - **Video previews**: a video shows its **first frame** wherever a picture shows
   itself — the icon grid, the compact and details rows, and the picture wall —
   instead of a generic film icon. The frame is taken by `ffmpeg` (the one your
@@ -84,7 +115,10 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   info button in the bar, **I**, or **P** opens it when you want it. The
   slideshow fills the screen,
   moves on every 1.5 seconds to start (a number you can change while it plays)
-  and cross-fades over 300 ms; the fade can be switched off.
+  and cross-fades over 300 ms; the fade can be switched off. Paging works the way
+  it does in every viewer: the arrows step and wrap, **Page Down** and **Page Up**
+  step one picture (in the viewer a picture *is* the page), and **Home** and
+  **End** take the first and the last picture of the folder.
 - **Compare two pictures** side by side, split or overlaid, with synced zoom.
   Each picture zooms where the mouse is pointing and can be dragged to its edges
   but never out of its half; **Sync** locks the two together (Split and Overlay
@@ -177,6 +211,15 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   a window frame darker than what it holds, an accent that still reads on white,
   a filled button that stays a button, and a selection band that stays a band
   under white text. `--selftest` holds both modes to the same contrast targets.
+  Under *Light Mode* the menu carries a **Shading** slider: it deepens the steps
+  between the light window's surfaces — the shortcuts panel and everything drawn
+  on it (its headings, rows, hover, the selected row and its keycaps), the toolbar,
+  the hovered row, the column header, the hairlines and the window edge — so they
+  stay visible on a display that does not show subtle tones. The file view is the
+  anchor and does not move; everything below it is pulled further away, up to three
+  times its designed step at 100 % (the panel goes from 13 levels below the view to
+  39), and the sizes, dates and counts darken with the surfaces they sit on so they
+  keep their contrast. 0 % is the designed palette exactly.
   Your choice is remembered; a window that has never been switched stays dark,
   which is how it has always looked.
 - **Two recent groups in the sidebar**, under your shortcuts: **Recent Files**
@@ -187,14 +230,17 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   the six folders you have walked into this window, newest first, so the way back
   to a deep folder is one click; either heading folds away when you don't need it.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
-  properties, all with the shortcuts you already know from Dolphin.
+  properties, all with the shortcuts you already know from Dolphin. Clicking a
+  file that is already marked asks to rename it — the name opens in place with
+  its text selected — while a double click still opens it.
 - **Create New, on the folder itself**: right-click the empty space in the view
   — or anywhere in a folder that has nothing in it yet — and the menu offers
-  *Create New → Folder…* and *Create New → Text File…*. Both open one small
-  window with the suggested name already selected, so typing replaces it; the
-  folder can be renamed in place straight after, and the text file is made empty
-  and opens in your editor from there. F10 still makes a folder, and the app
-  menu's *New* group carries *New Text File…* too.
+  *Create New → Folder* and *Create New → Text File*. Neither asks anything: the
+  folder or the empty text file appears at once in the folder on show and its
+  name opens for editing in place, already selected, so typing replaces it and
+  Enter keeps it (Escape keeps the suggestion). A second one takes the next free
+  name (`New Folder`, `New Folder (1)`) instead of refusing. F10 makes a folder
+  the same way, and the app menu's *New* group carries both kinds.
 - **Deleting asks nothing first** (as you asked): mark the pictures — or any
   files — and press Delete; they are in the Trash before you let go of the key.
   Shift+Delete removes them for good the same way. What replaces the question is

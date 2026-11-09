@@ -277,6 +277,13 @@ pub struct SavedTab {
     pub sort_key: Option<usize>,
     #[serde(default)]
     pub sort_desc: Option<bool>,
+    /// The view this tab was showing (0 icons, 1 compact, 2 details). `None` in a
+    /// file written before a tab kept its own view.
+    #[serde(default)]
+    pub view: Option<usize>,
+    /// Whether this tab had the picture view up.
+    #[serde(default)]
+    pub pictures: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -398,6 +405,12 @@ pub struct Config {
     /// the window has always drawn.
     #[serde(default)]
     pub light: bool,
+    /// Added feature, asked for by the person: how deep the light palette's
+    /// shading goes, 0–100 %. Written down because a slider that is back at 0
+    /// after a restart is worse than no slider: a display with poor shadow
+    /// separation would have to be corrected at every launch.
+    #[serde(default)]
+    pub shade: u8,
     /// Added feature: whether the *Network* group is drawn at all. A desktop
     /// with no shares shows an empty heading and one row of apology, so the
     /// menu carries a switch to take the group off the panel and put it back.
@@ -565,6 +578,7 @@ impl Default for Config {
             network_visible: true,
             tools_expanded: false,
             light: false,
+            shade: 0,
             recent_files_shown: 8,
             recent_locations: Vec::new(),
 

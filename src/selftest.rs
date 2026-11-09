@@ -249,7 +249,7 @@ pub fn run() -> i32 {
     let made = base.join("made");
     let _ = fs::create_dir_all(&made);
     r.check(
-        "Create New makes an empty text file and a folder, and never reuses a name",
+        "Create New makes an empty text file and a folder, and the second one picks a free name",
         (|| {
             if crate::NewKind::TextFile.default_name() != "New Text File.txt"
                 || crate::NewKind::Folder.default_name() != "New Folder"
@@ -283,7 +283,62 @@ pub fn run() -> i32 {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(format!("unexpected error {e:?}")),
             }
-            Ok("2 made, the taken name refused".into())
+            // The one-step flow (no window) names the next thing itself, so a
+            // second *Create New* neither asks nor collides: `New Folder`, then
+            // `New Folder (1)`; `New Text File.txt`, then `New Text File (1).txt`.
+            let fresh = made.join("fresh");
+            fs::create_dir_all(&fresh).map_err(|e| e.to_string())?;
+            let name_of = |p: &std::path::Path| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            let a = crate::NewKind::Folder.create_here(&fresh).map_err(|e| e.to_string())?;
+            let b = crate::NewKind::Folder.create_here(&fresh).map_err(|e| e.to_string())?;
+            let t1 = crate::NewKind::TextFile.create_here(&fresh).map_err(|e| e.to_string())?;
+            let t2 = crate::NewKind::TextFile.create_here(&fresh).map_err(|e| e.to_string())?;
+            if name_of(&a) != "New Folder" || name_of(&b) != "New Folder (1)" {
+                return Err(format!("folders came out {} and {}", name_of(&a), name_of(&b)));
+            }
+            if name_of(&t1) != "New Text File.txt" || name_of(&t2) != "New Text File (1).txt" {
+                return Err(format!("files came out {} and {}", name_of(&t1), name_of(&t2)));
+            }
+            for p in [&a, &b] {
+                if !p.is_dir() {
+                    return Err(format!("{} is not a folder on disk", p.display()));
+                }
+            }
+            for p in [&t1, &t2] {
+                if !p.is_file() || fs::metadata(p).map_err(|e| e.to_string())?.len() != 0 {
+                    return Err(format!("{} is not an empty file on disk", p.display()));
+                }
+            }
+            Ok("2 made by hand, 4 named free".into())
+        })(),
+    );
+
+    // ---- clicking a marked item again asks to rename it -----------------
+    r.check(
+        "a second click on the marked item is a rename, not a double click and not a fresh mark",
+        (|| {
+            use crate::views::click_asks_for_rename;
+            let cases = [
+                // marked, plain, double, pictures, expected
+                (true, true, false, false, true),
+                (false, true, false, false, false), // the press that marks
+                (true, false, false, false, false), // Shift/Ctrl extends the mark
+                (true, true, true, false, false),   // a double click opens instead
+                (true, true, false, true, false),   // the wall has no name field
+            ];
+            for (marked, plain, double, pictures, want) in cases {
+                if click_asks_for_rename(marked, plain, double, pictures) != want {
+                    return Err(format!(
+                        "marked {marked}, plain {plain}, double {double}, pictures {pictures} answered {}",
+                        click_asks_for_rename(marked, plain, double, pictures)
+                    ));
+                }
+            }
+            Ok("5 clicks answered".into())
         })(),
     );
 
@@ -2602,6 +2657,223 @@ pub fn run() -> i32 {
         })(),
     );
 
+    // Page Up and Page Down move one *page*: the cursor goes a screenful and the
+    // window follows it, because a page that moved only the cursor would leave it
+    // off the bottom edge and look like a key that did nothing. A page is whatever
+    // the view put in its window, so the check draws the details list, the icon
+    // grid and the picture wall into real egui frames at a known size, reads back
+    // what each reported, pages with it and measures where the window ended up.
+    r.check(
+        "Page Up and Page Down move one screenful of the view, Home and End its ends",
+        (|| -> Result<String, String> {
+            use crate::search::ThumbCache;
+            use crate::state::{Clipboard, Pane, Request, ViewMode};
+            let root = base.join("paging");
+            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+            // Pictures, not text files: the wall shows pictures only, so a folder
+            // of documents would report an empty page and prove nothing.
+            for i in 0..200 {
+                write(&root.join(format!("picture-{i:03}.png")), &png_with_prompt(""))?;
+            }
+            let size = (900.0f32, 500.0f32);
+            let mut said = Vec::new();
+            for (name, view, pictures) in [
+                ("details", ViewMode::Details, false),
+                ("icons", ViewMode::Icons, false),
+                ("picture wall", ViewMode::Icons, true),
+            ] {
+                let mut pane = Pane::new(20, root.clone());
+                pane.view = view;
+                pane.pictures = pictures;
+                pane.load(root.clone());
+                let ctx = egui::Context::default();
+                let mut raw = egui::RawInput::default();
+                raw.screen_rect = Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(size.0, size.1),
+                ));
+                let mut draw = |pane: &mut Pane, raw: egui::RawInput| {
+                    let _ = ctx.run(raw, |ctx| {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE)
+                            .show(ctx, |ui| {
+                                let mut thumbs = ThumbCache::new();
+                                let clip = Clipboard::new();
+                                let mut reqs: Vec<Request> = Vec::new();
+                                let mut vctx = crate::views::ViewCtx {
+                                    thumbs: &mut thumbs,
+                                    clipboard: &clip,
+                                    reqs: &mut reqs,
+                                    split: false,
+                                    active: true,
+                                    show_location_bar: false,
+                                    other_dir: None,
+                                };
+                                pane.ui(ui, &mut vctx);
+                            });
+                    });
+                };
+                // Two frames, so the scroll area has settled before anything is
+                // measured.
+                draw(&mut pane, raw.clone());
+                draw(&mut pane, raw.clone());
+                let page = pane.per_page;
+                if page < 4 {
+                    return Err(format!(
+                        "{name}: a page in a {}×{} window is only {page} item(s)",
+                        size.0, size.1
+                    ));
+                }
+                if page >= 200 {
+                    return Err(format!(
+                        "{name}: a page is {page} of 200 items, so the view reported everything"
+                    ));
+                }
+                let at_top = pane.scroll_offset;
+                pane.cursor = 0;
+                pane.page_cursor(1);
+                if pane.cursor < page {
+                    return Err(format!(
+                        "{name}: Page Down from the first item stopped at {} with a page of {page}",
+                        pane.cursor
+                    ));
+                }
+                if pane.scroll_pages != Some(1.0) {
+                    return Err(format!(
+                        "{name}: Page Down did not leave a page scroll for the view"
+                    ));
+                }
+                draw(&mut pane, raw.clone());
+                if pane.scroll_pages.is_some() {
+                    return Err(format!("{name}: the view never took the page scroll"));
+                }
+                let down = pane.scroll_offset - at_top;
+                if down < size.1 * 0.5 {
+                    return Err(format!(
+                        "{name}: the window moved {down:.0} px of a {} px page",
+                        size.1
+                    ));
+                }
+                // Up again: the cursor goes back a screenful and so does the window.
+                let at_page = pane.scroll_offset;
+                pane.page_cursor(-1);
+                draw(&mut pane, raw.clone());
+                if pane.scroll_offset >= at_page {
+                    return Err(format!(
+                        "{name}: Page Up left the window at {:.0} px, where the page put it",
+                        pane.scroll_offset
+                    ));
+                }
+                // And the keys stop at the ends rather than wrapping.
+                for _ in 0..40 {
+                    pane.page_cursor(1);
+                }
+                if pane.cursor != 199 {
+                    return Err(format!("{name}: paging past the end stopped at {}", pane.cursor));
+                }
+                // Home and End take the first and the last entry *and* the window
+                // with them: the far end of a long folder is not drawn, so a key
+                // that only moved the cursor left the screen untouched.
+                pane.jump_cursor(false);
+                if pane.cursor != 199 {
+                    return Err(format!("{name}: End landed on {} of 200", pane.cursor));
+                }
+                draw(&mut pane, raw.clone());
+                if pane.scroll_offset < at_top + size.1 * 0.5 {
+                    return Err(format!(
+                        "{name}: End left the window at {:.0} px of {:.0} px of content",
+                        pane.scroll_offset, size.1
+                    ));
+                }
+                let at_end = pane.scroll_offset;
+                pane.jump_cursor(true);
+                if pane.cursor != 0 {
+                    return Err(format!("{name}: Home landed on {} of 200", pane.cursor));
+                }
+                draw(&mut pane, raw.clone());
+                if pane.scroll_offset >= at_end {
+                    return Err(format!(
+                        "{name}: Home left the window at {:.0} px, where End put it",
+                        pane.scroll_offset
+                    ));
+                }
+                if pane.scroll_offset > at_top + 1.0 {
+                    return Err(format!(
+                        "{name}: Home stopped {:.0} px below the top",
+                        pane.scroll_offset - at_top
+                    ));
+                }
+                said.push(format!("{name} {page}"));
+            }
+            Ok(format!(
+                "a page is {} items, and the window moves with it",
+                said.join(", ")
+            ))
+        })(),
+    );
+
+    // The four keys the person asked for in the picture viewer: Page Up and Page
+    // Down are one picture back and one on, Home is the first picture and End the
+    // last. The arrows must keep wrapping (that is what a viewer does when you hold
+    // one), and a jump has to reset zoom, pan and fit exactly like a page does, or
+    // End would land on a picture still framed for the one before it.
+    r.check(
+        "Home and End take the first and the last picture, and paging still wraps",
+        (|| -> Result<String, String> {
+            use crate::gallery::Viewer;
+            let dir = base.join("viewer/keys");
+            let items: Vec<PathBuf> = (0..5)
+                .map(|i| dir.join(format!("picture-{i}.png")))
+                .collect();
+            let mut v = Viewer::new(dir.clone(), items.clone(), 2, false);
+            v.zoom = 3.0;
+            v.pan = egui::Vec2::new(10.0, 4.0);
+            v.fit = false;
+
+            v.jump(0);
+            if v.index != 0 {
+                return Err(format!("Home landed on picture {}", v.index));
+            }
+            if v.zoom != 1.0 || v.pan != egui::Vec2::ZERO || !v.fit {
+                return Err("Home left the zoom and pan of the picture before it".into());
+            }
+            v.zoom = 2.0;
+            v.fit = false;
+            v.jump(items.len() - 1);
+            if v.index != items.len() - 1 {
+                return Err(format!("End landed on picture {}", v.index));
+            }
+            if v.zoom != 1.0 || !v.fit {
+                return Err("End left the zoom of the picture before it".into());
+            }
+            // A place past the end is the last picture, not an empty pane.
+            v.jump(usize::MAX);
+            if v.index != items.len() - 1 {
+                return Err("a jump past the end did not stop at the last picture".into());
+            }
+            // The arrows keep their wrap-around, in both directions.
+            v.step(1);
+            if v.index != 0 {
+                return Err(format!(
+                    "stepping on from the last picture landed on {} instead of wrapping to the first",
+                    v.index
+                ));
+            }
+            v.step(-1);
+            if v.index != items.len() - 1 {
+                return Err("stepping back from the first picture did not wrap to the last".into());
+            }
+            // An empty strip is not a panic.
+            let mut empty = Viewer::new(dir, Vec::new(), 0, false);
+            empty.jump(0);
+            empty.step(1);
+            if empty.index != 0 {
+                return Err("an empty strip moved somewhere".into());
+            }
+            Ok("0 ↔ 4 by Home/End and by the arrows, each jump resetting the view".into())
+        })(),
+    );
+
     r.check(
         "the prompt text can be dragged over and copied with Ctrl+C",
         (|| {
@@ -3330,6 +3602,230 @@ pub fn run() -> i32 {
     );
 
     // ---- settings that survive the next start ---------------------------
+    // The compact view is a list of names, so a fixed five-font-height cell cut
+    // every one of them off at the same place. The cell is now as wide as the
+    // longest name in the listing; the check draws the view at a known width and
+    // fails unless the label has room for that name in full.
+    r.check(
+        "the compact view widens a column to the longest name instead of cutting it",
+        (|| -> Result<String, String> {
+            use crate::search::ThumbCache;
+            use crate::state::{Clipboard, Pane, Request, ViewMode};
+            let root = base.join("compactnames");
+            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+            let long = "a-rather-long-file-name-that-would-have-been-cut-short.txt";
+            for name in ["short.txt", "notes.md", "budget-2026.xlsx", long] {
+                write(&root.join(name), b"x")?;
+            }
+            let mut pane = Pane::new(41, root.clone());
+            pane.view = ViewMode::Compact;
+            pane.load(root.clone());
+            let ctx = egui::Context::default();
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(900.0, 500.0),
+            ));
+            let mut measured: Option<f32> = None;
+            for _ in 0..2 {
+                measured = None;
+                let _ = ctx.run(raw.clone(), |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| {
+                            let mut thumbs = ThumbCache::new();
+                            let clip = Clipboard::new();
+                            let mut reqs: Vec<Request> = Vec::new();
+                            let mut vctx = crate::views::ViewCtx {
+                                thumbs: &mut thumbs,
+                                clipboard: &clip,
+                                reqs: &mut reqs,
+                                split: false,
+                                active: true,
+                                show_location_bar: false,
+                                other_dir: None,
+                            };
+                            pane.ui(ui, &mut vctx);
+                            measured = Some(
+                                ui.painter()
+                                    .layout_no_wrap(
+                                        long.to_owned(),
+                                        egui::FontId::proportional(12.5),
+                                        crate::theme::text(),
+                                    )
+                                    .size()
+                                    .x,
+                            );
+                        });
+                });
+            }
+            let want = measured.ok_or("the view never drew")?;
+            if pane.compact_name_px + 0.5 < want {
+                return Err(format!(
+                    "the widest name is {want:.1} px but the view measured {:.1}",
+                    pane.compact_name_px
+                ));
+            }
+            // label_x is left + icon + 18 and the label keeps 8 px from the right
+            // edge, so the cell must hold name + icon + 26 at the least.
+            let icon = pane.icon_size();
+            let room = pane.compact_cell_px - icon - 26.0;
+            if room + 0.5 < want {
+                return Err(format!(
+                    "a {:.0} px cell leaves {room:.1} px for names of {want:.1} px",
+                    pane.compact_cell_px
+                ));
+            }
+            // A folder of short names must not pay for the long one: the cell stays
+            // at the original five-font-height width.
+            let short = base.join("compactshort");
+            std::fs::create_dir_all(&short).map_err(|e| e.to_string())?;
+            for i in 0..20 {
+                write(&short.join(format!("f{i}.txt")), b"x")?;
+            }
+            let mut pane2 = Pane::new(42, short.clone());
+            pane2.view = ViewMode::Compact;
+            pane2.load(short);
+            let _ = ctx.run(raw.clone(), |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        let mut thumbs = ThumbCache::new();
+                        let clip = Clipboard::new();
+                        let mut reqs: Vec<Request> = Vec::new();
+                        let mut vctx = crate::views::ViewCtx {
+                            thumbs: &mut thumbs,
+                            clipboard: &clip,
+                            reqs: &mut reqs,
+                            split: false,
+                            active: true,
+                            show_location_bar: false,
+                            other_dir: None,
+                        };
+                        pane2.ui(ui, &mut vctx);
+                    });
+            });
+            let min_w = crate::theme::compact_cell_width(
+                pane2.icon_size(),
+                17.0,
+            );
+            if pane2.compact_cell_px > min_w.max(pane2.compact_name_px + pane2.icon_size() + 28.0) + 1.0 {
+                return Err(format!(
+                    "a folder of short names got {:.0} px cells",
+                    pane2.compact_cell_px
+                ));
+            }
+            Ok(format!(
+                "the longest name is {want:.0} px, its cell {:.0} px, {:.1} columns at 900 px — short names keep their narrow cells",
+                pane.compact_cell_px,
+                (900.0f32 - 8.0) / pane.compact_cell_px
+            ))
+        })(),
+    );
+
+    // The person asked for a memory per view: icons, compact, details and the
+    // picture view each keep their own size, and all four come back next session.
+    // The check sets each one differently, switches between the views (which is
+    // where the old code copied the saved array over the pane's and lost the other
+    // sizes), resets one, and takes the whole set through the settings file.
+    r.check(
+        "each of the four views remembers its own zoom through a restart",
+        (|| -> Result<String, String> {
+            use crate::config::Config;
+            use crate::state::{Pane, ViewMode};
+            let dir = base.join("persist");
+            let mut pane = Pane::new(30, dir.clone());
+            pane.previews = true;
+            // Four different sizes: icons 128 px, compact 40 px, details 24 px, and
+            // the wall at 275 px.
+            pane.view = ViewMode::Icons;
+            pane.set_zoom_level(9);
+            pane.view = ViewMode::Compact;
+            pane.set_zoom_level(5);
+            pane.view = ViewMode::Details;
+            pane.set_zoom_level(1);
+            pane.pictures = true;
+            pane.thumb_px = 275.0;
+            let want = ([9u8, 5, 1], 275.0f32);
+            if (pane.zoom, pane.thumb_px) != want {
+                return Err(format!(
+                    "setting the four sizes gave {:?} and {} px",
+                    pane.zoom, pane.thumb_px
+                ));
+            }
+            // Switching views shows each one's own size, and never disturbs the others.
+            pane.pictures = false;
+            for (mode, level) in [
+                (ViewMode::Icons, 9u8),
+                (ViewMode::Compact, 5),
+                (ViewMode::Details, 1),
+            ] {
+                pane.view = mode;
+                if pane.zoom_level() != level {
+                    return Err(format!(
+                        "the {} view came back at {} instead of {level}",
+                        mode.label(),
+                        pane.zoom_level()
+                    ));
+                }
+            }
+            pane.pictures = true;
+            if pane.view_zoom_px() != 275.0 {
+                return Err(format!(
+                    "the picture view came back at {} px instead of 275",
+                    pane.view_zoom_px()
+                ));
+            }
+            if pane.zoom != [9, 5, 1] {
+                return Err("switching views changed the list views' sizes".into());
+            }
+            // The zoom keys move the view on show, and only it.
+            pane.view_zoom_by(1);
+            if pane.thumb_px != 300.0 || pane.zoom != [9, 5, 1] {
+                return Err(format!(
+                    "a zoom step in the picture view gave {} px and {:?} on the ladder",
+                    pane.thumb_px, pane.zoom
+                ));
+            }
+            pane.pictures = false;
+            pane.view = ViewMode::Compact;
+            pane.view_zoom_by(-1);
+            if pane.zoom != [9, 4, 1] {
+                return Err(format!(
+                    "a zoom step in the compact view gave {:?}",
+                    pane.zoom
+                ));
+            }
+            // Resetting the view on show leaves the other three alone.
+            pane.view_zoom_reset();
+            let d = crate::theme::default_zoom(true);
+            if pane.zoom != [9, d[1], 1] {
+                return Err(format!(
+                    "resetting the compact view changed the others: {:?}",
+                    pane.zoom
+                ));
+            }
+            // Through the settings file and back, the way a restart does it.
+            pane.zoom = [9, 5, 1];
+            pane.thumb_px = 275.0;
+            let mut cfg = Config::default();
+            cfg.zoom = pane.zoom;
+            cfg.zoom_plain = pane.zoom_plain;
+            cfg.thumb_px = pane.thumb_px;
+            cfg.view = ViewMode::Details.index();
+            let text = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
+            let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            let again = crate::pane_from_config(31, dir, &back);
+            if again.zoom != [9, 5, 1] || again.thumb_px != 275.0 {
+                return Err(format!(
+                    "the next start opened with {:?} and {} px",
+                    again.zoom, again.thumb_px
+                ));
+            }
+            Ok("icons 128 px, compact 40 px, details 24 px, wall 275 px — each its own, all four restored".into())
+        })(),
+    );
+
     // The person asked for exactly this: a sort or a tab chosen now should be
     // the one the app opens with next time.
     let persist = base.join("persist");
@@ -3366,6 +3862,51 @@ pub fn run() -> i32 {
             Ok("Size / descending from the file, big.txt first".into())
         })(),
     );
+    // Tabs are the window's sessions, so walking them and closing them must not
+    // lose the one in front. Both rules are pure functions on the tab list.
+    r.check(
+        "Ctrl+Tab walks the tabs both ways, and closing one keeps the front tab",
+        (|| -> Result<String, String> {
+            use crate::{cycle_tab_index, index_after_close};
+            // Forwards and backwards, wrapping at both ends.
+            let mut i = 0usize;
+            for want in [1usize, 2, 0] {
+                i = cycle_tab_index(3, i, 1);
+                if i != want {
+                    return Err(format!("Ctrl+Tab landed on {i}, not {want}"));
+                }
+            }
+            for want in [2usize, 1, 0] {
+                i = cycle_tab_index(3, i, -1);
+                if i != want {
+                    return Err(format!("Ctrl+Shift+Tab landed on {i}, not {want}"));
+                }
+            }
+            if cycle_tab_index(1, 0, 1) != 0 || cycle_tab_index(1, 0, -1) != 0 {
+                return Err("a window with one tab moved off it".into());
+            }
+            // Closing a tab to the left shifts the front tab down; closing one to
+            // the right leaves it; closing the front one lands on its neighbour,
+            // and on the new last tab when it was the last.
+            for (len, active, closed, want) in [
+                (4usize, 2usize, 0usize, 1usize),
+                (4, 2, 3, 2),
+                (4, 2, 2, 2),
+                (4, 3, 3, 2),
+                (2, 1, 0, 0),
+                (1, 0, 0, 0),
+            ] {
+                let got = index_after_close(len, active, closed);
+                if got != want {
+                    return Err(format!(
+                        "{len} tabs, front {active}, closed {closed}: landed on {got}, not {want}"
+                    ));
+                }
+            }
+            Ok("wraps both ways; the front tab stays put when its neighbours go".into())
+        })(),
+    );
+
     r.check(
         "the tabs of the last run come back, and folders that have gone are skipped",
         (|| {
@@ -3378,16 +3919,22 @@ pub fn run() -> i32 {
                     path: one.clone(),
                     sort_key: Some(3),
                     sort_desc: Some(true),
+                    view: Some(2),
+                    pictures: true,
                 },
                 crate::config::SavedTab {
                     path: gone,
                     sort_key: None,
                     sort_desc: None,
+                    view: None,
+                    pictures: false,
                 },
                 crate::config::SavedTab {
                     path: two.clone(),
                     sort_key: Some(1),
                     sort_desc: Some(true),
+                    view: Some(0),
+                    pictures: false,
                 },
             ];
             cfg.session_tab = 2;
@@ -3401,6 +3948,16 @@ pub fn run() -> i32 {
             }
             if tabs[0].sort_key != Some(3) || tabs[1].sort_desc != Some(true) {
                 return Err("a tab's own sort was lost".into());
+            }
+            // A tab is a session: its view and picture mode travel with it.
+            if tabs[0].view != Some(2) || !tabs[0].pictures {
+                return Err(format!(
+                    "a tab's own view was lost: {:?} pictures {}",
+                    tabs[0].view, tabs[0].pictures
+                ));
+            }
+            if tabs[1].view != Some(0) || tabs[1].pictures {
+                return Err("tab two took tab one's view".into());
             }
             if back.session_tab != 2 {
                 return Err("the tab that was in front was not remembered".into());
@@ -4077,6 +4634,25 @@ pub fn run() -> i32 {
                             cr(theme::row_hover(), view)
                         ));
                     }
+                    // The tab strip: the tab in front stands off the strip by its
+                    // plate, and a hovered tab stays under it.
+                    let tab = theme::tab_active_bg();
+                    if lum(tab) <= lum(panel) {
+                        return Err(format!(
+                            "{mode}: the active tab is no lighter than the strip behind it"
+                        ));
+                    }
+                    if cr(tab, panel) < 1.06 {
+                        return Err(format!(
+                            "{mode}: the active tab's plate is only {:.2}:1 from the strip, so the blue line does all the work",
+                            cr(tab, panel)
+                        ));
+                    }
+                    if lum(theme::tab_hover_bg()) >= lum(tab) {
+                        return Err(format!(
+                            "{mode}: a hovered tab is as bright as the tab in front"
+                        ));
+                    }
                     // A selection band that reads as one, with text on it that
                     // still reads as text.
                     let band = theme::row_sel_active();
@@ -4163,6 +4739,222 @@ pub fn run() -> i32 {
                 return Err("a settings file without the key opened light".into());
             }
             Ok(format!("{said}both modes on the same targets"))
+        })(),
+    );
+
+    // The Shading slider was asked for because one display did not show the steps
+    // between the light window's surfaces. It must be a no-op at 0 (the designed
+    // palette is still exactly what the check above measures), it must open the
+    // ladder as it is turned up, and it must not be able to break the contrast
+    // targets on the way — the panel deepens, so the captions on it darken with it.
+    // Dark mode is not a light palette with deeper shading: it is left alone.
+    r.check(
+        "the shading slider deepens the light palette without breaking it",
+        (|| -> Result<String, String> {
+            use crate::config::Config;
+            use crate::theme;
+            let lum = |c: egui::Color32| {
+                let ch = |v: u8| {
+                    let v = v as f32 / 255.0;
+                    if v <= 0.03928 {
+                        v / 12.92
+                    } else {
+                        ((v + 0.055) / 1.055).powf(2.4)
+                    }
+                };
+                0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+            };
+            let cr = |a: egui::Color32, b: egui::Color32| {
+                let (x, y) = (lum(a), lum(b));
+                (x.max(y) + 0.05) / (x.min(y) + 0.05)
+            };
+            let out = (|| -> Result<String, String> {
+                // At 0 the values are the ones written beside the dark ones.
+                theme::set_light(true);
+                theme::set_shade(0);
+                let at_0 = [
+                    theme::view_bg(),
+                    theme::panel_bg(),
+                    theme::toolbar_bg(),
+                    theme::row_hover(),
+                    theme::separator(),
+                    theme::border(),
+                    theme::text(),
+                    theme::text_dim(),
+                    theme::text_faint(),
+                ];
+                let designed = [
+                    (251, 252, 253),
+                    (238, 242, 245),
+                    (230, 235, 240),
+                    (225, 231, 237),
+                    (214, 221, 228),
+                    (196, 204, 212),
+                    (26, 29, 32),
+                    (86, 94, 100),
+                    (98, 107, 115),
+                ];
+                for (i, (got, want)) in at_0.iter().zip(designed.iter()).enumerate() {
+                    let want = egui::Color32::from_rgb(want.0, want.1, want.2);
+                    if *got != want {
+                        return Err(format!(
+                            "at 0 role {i} is {got:?}, not the designed {want:?}"
+                        ));
+                    }
+                }
+                let view_0 = at_0[0];
+                let step_0 = cr(at_0[2], view_0);
+
+                // Turned up, every surface is pulled further away from the view:
+                // the step below the paper grows by about three, which is a
+                // difference no display can swallow. The order stays.
+                theme::set_shade(100);
+                for (name, was, now) in [
+                    ("the panel", at_0[1], theme::panel_bg()),
+                    ("the toolbar", at_0[2], theme::toolbar_bg()),
+                    ("the hovered row", at_0[3], theme::row_hover()),
+                    ("the row hairline", at_0[4], theme::separator()),
+                    ("the window edge", at_0[5], theme::border()),
+                ] {
+                    let levels = |c: egui::Color32, v: egui::Color32| {
+                        ((v.r() as i32 - c.r() as i32) + (v.g() as i32 - c.g() as i32)
+                            + (v.b() as i32 - c.b() as i32)) as f32
+                            / 3.0
+                    };
+                    if lum(now) >= lum(was) {
+                        return Err(format!(
+                            "{name} did not get darker: {:.0}% -> {:.0}%",
+                            lum(was) * 100.0,
+                            lum(now) * 100.0
+                        ));
+                    }
+                    let grew = levels(now, theme::view_bg()) / levels(was, view_0);
+                    if grew < 2.5 {
+                        return Err(format!(
+                            "{name} is only {grew:.2}× its step below the view, which is not a difference you can see"
+                        ));
+                    }
+                }
+                if !(lum(theme::view_bg()) > lum(theme::panel_bg())
+                    && lum(theme::panel_bg()) > lum(theme::toolbar_bg())
+                    && lum(theme::toolbar_bg()) > lum(theme::row_hover())
+                    && lum(theme::row_hover()) > lum(theme::separator())
+                    && lum(theme::separator()) > lum(theme::border()))
+                {
+                    return Err("shading reordered the ladder".into());
+                }
+                let step_100 = cr(theme::toolbar_bg(), theme::view_bg());
+                if step_100 <= step_0 * 1.3 {
+                    return Err(format!(
+                        "the ladder barely opened: {step_0:.2}:1 -> {step_100:.2}:1"
+                    ));
+                }
+
+                // And the window still reads. The captions darken with the panel
+                // they sit on, so they keep their floors; the ink stays the darkest
+                // of the three text roles and none of them turns into a pure black.
+                let view = theme::view_bg();
+                let panel = theme::panel_bg();
+                let toolbar = theme::toolbar_bg();
+                for (what, got, want) in [
+                    ("file names on the view", cr(theme::text(), view), 7.0),
+                    ("secondary text on the panel", cr(theme::text_dim(), panel), 4.5),
+                    ("captions on the panel", cr(theme::text_faint(), panel), 4.5),
+                    ("captions on the toolbar", cr(theme::text_faint(), toolbar), 4.0),
+                    ("the row hairline", cr(theme::separator(), view), 1.18),
+                    ("the window edge", cr(theme::border(), toolbar), 1.25),
+                    ("the hovered row", cr(theme::row_hover(), view), 1.10),
+                    ("the accent on the view", cr(theme::accent(), view), 3.0),
+                ] {
+                    if got < want {
+                        return Err(format!("at 100 % shading, {what} is only {got:.2}:1"));
+                    }
+                }
+                if !(lum(theme::text()) < lum(theme::text_dim())
+                    && lum(theme::text_dim()) < lum(theme::text_faint()))
+                {
+                    return Err("shading lost the order of ink, dim and faint".into());
+                }
+                // The shortcuts panel's keycaps deepen with the panel and stay a
+                // raised plate on it — a chip left at near-white was the one part
+                // of that panel that did not join in.
+                let badge_0 = {
+                    theme::set_shade(0);
+                    theme::key_badge(false)
+                };
+                if badge_0 != egui::Color32::from_rgb(242, 244, 245) {
+                    return Err(format!("at 0 the key badge is {badge_0:?}"));
+                }
+                theme::set_shade(100);
+                let badge = theme::key_badge(false);
+                let badge_sel = theme::key_badge(true);
+                if lum(badge) >= lum(badge_0) {
+                    return Err("the shortcuts panel's keycaps did not follow the shading".into());
+                }
+                for (name, plate) in [("keycap", badge), ("selected keycap", badge_sel)] {
+                    if lum(plate) <= lum(panel) {
+                        return Err(format!(
+                            "at 100 % shading the {name} sank into the panel instead of standing on it"
+                        ));
+                    }
+                }
+                if cr(theme::text_faint(), badge) < 4.5 {
+                    return Err(format!(
+                        "at 100 % shading a keycap's hint is only {:.2}:1",
+                        cr(theme::text_faint(), badge)
+                    ));
+                }
+                for (name, col) in [
+                    ("the view", view),
+                    ("the panel", panel),
+                    ("the toolbar", toolbar),
+                    ("the window edge", theme::border()),
+                    ("the captions", theme::text_faint()),
+                ] {
+                    if col == egui::Color32::BLACK || col == egui::Color32::WHITE {
+                        return Err(format!("at 100 % shading, {name} is a pure absolute"));
+                    }
+                }
+                // Dark mode is not shaded at all, and neither is its ink.
+                let (dark_view, dark_dim) = {
+                    theme::set_light(false);
+                    (theme::view_bg(), theme::text_dim())
+                };
+                theme::set_shade(0);
+                if theme::view_bg() != dark_view || theme::text_dim() != dark_dim {
+                    return Err("the slider moved a dark-mode colour".into());
+                }
+                theme::set_light(true);
+
+                // The setting has to be written down, or the display it was set
+                // for is corrected again at every launch.
+                let mut saved = Config::default();
+                saved.light = true;
+                saved.shade = 65;
+                let text = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
+                let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                if back.shade != 65 {
+                    return Err("the shading did not survive the settings file".into());
+                }
+                let old: Config =
+                    serde_json::from_str("{\"light\":true}").map_err(|e| e.to_string())?;
+                if old.shade != 0 {
+                    return Err("a settings file without the key opened shaded".into());
+                }
+                if crate::settings_signature(&Config::default())
+                    == crate::settings_signature(&saved)
+                {
+                    return Err("the shading never reaches the settings file".into());
+                }
+                Ok(format!(
+                    "panel {} levels below the view at 0, {} at 100 % ({step_0:.2}:1 -> {step_100:.2}:1)",
+                    view_0.r() as i32 - at_0[1].r() as i32,
+                    view.r() as i32 - panel.r() as i32
+                ))
+            })();
+            theme::set_shade(0);
+            theme::set_light(false);
+            out
         })(),
     );
 

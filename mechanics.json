@@ -871,7 +871,7 @@
   {
    "name": "window title",
    "group": "window",
-   "value": "DolphinCraft",
+   "value": "DolphinCraft - drawn at the left end of the tab strip, before the first tab, and shown by the task switcher; the bar a window manager would draw is gone, because the tab strip is the window's title bar (decorations off, three buttons, drag, double click to maximize, 6 px resize edge)",
    "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
   },
   {
@@ -2127,6 +2127,42 @@
    "source": "Hallmark's rule that a second mode is re-derived, never inverted, and held to the same contrast in both; the old check only proved surfaces were light and text was dark"
   },
   {
+   "name": "the light palette's shading slider",
+   "group": "colours",
+   "value": "app menu > View > Shading, shown while the light palette is on, 0-100, config key shade, remembered. The view is the anchor and every other shading role is pulled further from it by 1 + 2t: the panel's step below the paper grows from 13 levels to 39, the toolbar's from 21 to 63 (panel #eef2f5 -> #d4dee5, toolbar #e6ebf0 -> #bcc9d6, hairline #d6dde4 -> #8c9fb2, window edge #c4ccd4 -> #566c82, keycap #f2f4f5 -> #e0e4e5). text_dim and text_faint darken with the surfaces they sit on (theme::ink_pair, in linear light, to the strictest floor) so captions keep 4.5:1. The shortcuts panel is included whole - fill, rows, hover, the selected pill (band at 75% alpha, so it darkens with the panel) and its keycaps (theme::key_badge); ink, accent, band, folder icon and page do not take part",
+   "source": "asked for by the person: one of their displays did not show the steps between the light window's surfaces, and scaling the distance from white (half again) was still 6 levels on the panel - invisible"
+  },
+  {
+   "name": "the picture viewer's paging keys",
+   "group": "picture viewer",
+   "value": "Left/Right step one picture and wrap at the ends (unchanged); Page Up/Page Down step one picture back and on (in a viewer a picture is the page); Home is the first picture and End the last, clamped rather than wrapped; a jump resets zoom, pan, fit and the slideshow tick exactly as a page does",
+   "source": "asked for by the person: the usual Home/End/Page Up/Page Down behaviour"
+  },
+  {
+   "name": "Page Up and Page Down in the file views",
+   "group": "view",
+   "value": "one page of the cursor and the window moves with it: Pane::per_page is what the view reported from its own visible range (9 details rows, 72 icon cells, 8 picture-wall cards in a 900x500 window), Pane::scroll_pages is applied by Pane::page_area as the last scroll offset plus one viewport height; Home and End use Pane::jump_cursor + Pane::scroll_edge to reach the first/last shown entry and the top/bottom of the content; the cursor stops at the ends, as the arrows do",
+   "source": "asked for by the person - should be one page down, not one image; the first attempt moved only the cursor, which put the new row below the window and made the key look dead. Home and End had the same fault, reported next: they asked the view to scroll to an entry that was not being drawn"
+  },
+  {
+   "name": "tabs, one browsing session each",
+   "group": "view",
+   "value": "App.tabs holds one Tab { panes, active } per session; SavedTab { path, sort_key, sort_desc, view, pictures } is written for every tab and restored by App::new, with session_tab naming the tab in front. Keys: Ctrl+T new, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+Page Down / Page Up walk (cycle_tab_index wraps; one tab stays put), Ctrl+Shift+T reopens. The tab's right-click menu carries Close Tab (Ctrl+W), Close Other Tabs, Close Tabs to the Right, Duplicate Tab, Reopen Closed Tab (Ctrl+Shift+T); index_after_close keeps the front tab in front; a double click on the empty strip opens a tab; hovering a tab shows its full path; the strip is the window's top row (tab_strip is added to the Context before top_toolbar)",
+   "source": "asked for by the person: multiple tabs representing different sessions, as Windows Explorer has. Tabs existed but kept only a folder and a sort; a tab now returns with its own view mode and picture mode, and the tab strip has walking, closing, duplicating and reopening"
+  },
+  {
+   "name": "the compact view's column width",
+   "group": "view",
+   "value": "cell = max(iconSize + 8 + 5*fontHeight, longest_name_px + icon + 28); the longest name is measured in the cell's 12.5 pt font and cached on the pane (compact_name_px, invalidated by compact_stamp = entry count + total bytes of names), listings over 1500 entries measure the 1500 longest by characters; the label gets cell - icon - 26 px, so every name shows in full unless one name is wider than the view, which elides in the middle",
+   "source": "asked for by the person: filenames must not be truncated in the compact view. The old fixed five-font-height cell showed four characters and an ellipsis on every row of a folder of photographs"
+  },
+  {
+   "name": "a zoom memory for each of the four views",
+   "group": "view",
+   "value": "icons zoom[0], compact zoom[1], details zoom[2] on the 0-25 ladder, and the picture view's thumbnail height in thumb_px (50-400 px) - four independent values, written as they change by App::sync_zoom_config and restored by pane_from_config. The zoom keys, the -/+ buttons and Reset Zoom (Ctrl+0) act on the view on show only (Pane::view_zoom_by / view_zoom_reset), and choosing a list view leaves the picture view",
+   "source": "asked for by the person: a different memory per view type, persistent across sessions. Found by driving the window and reading config.json: the view buttons overwrote the pane's array with the saved one, the picture view stayed up when a list view was chosen, and the zoom keys resized the hidden list ladder instead of the wall"
+  },
+  {
    "name": "the light palette switch",
    "group": "colours",
    "value": "app menu > View > Light Mode; config key light, absent = dark; --light for one session",
@@ -2153,7 +2189,7 @@
   {
    "name": "create new menu",
    "group": "controls",
-   "value": "a right-click on the folder's own space (not on an item) opens Create New -> Folder… / Text File…; the app menu's New group carries New Folder… (F10) and New Text File…; both kinds share one window whose name is preselected",
+   "value": "a right-click on the folder's own space (not on an item) opens Create New -> Folder / Text File; either row makes the thing at once under the first free name (New Folder, New Folder (1); New Text File.txt, New Text File (1).txt) and opens the in-place name editor on it with the name selected - no window; the app menu's New group carries New Folder (F10) and New Text File the same way",
    "source": "libKF6KIOFileWidgets.so.6 strings '@item:inmenu Create New', 'Create New Folder', 'Create New File', 'Enter file name', template 'Name=Text File...'; /usr/bin/dolphin action names 'create_dir' and 'create_file'"
   },
   {

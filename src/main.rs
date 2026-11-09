@@ -7,7 +7,7 @@
 pub const APP_NAME: &str = "DolphinCraft";
 
 /// The release this build came from. `Cargo.toml`'s `version` is the number on
-/// the GitHub release tag (`v0.1.5`), so About names the download the person
+/// the GitHub release tag (`v0.1.6`), so About names the download the person
 /// actually has — no network call, no guessing from a commit hash.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -51,6 +51,17 @@ use config::{Config, SavedTab};
 use search::{DupScan, ThumbCache};
 use state::{Clipboard, Pane, Request, ViewMode, TRASH_URI};
 use views::ViewCtx;
+
+/// The width of one of the window's three buttons in the merged title row. 34 px
+/// keeps the close button near the top-right corner without crowding the `+`.
+pub const WINDOW_BUTTON_W: f32 = 34.0;
+
+/// Maximize or restore the window, whichever it is not: what the middle button in
+/// the title row does, and what a double click on the strip's empty space does.
+fn toggle_maximized(ctx: &egui::Context) {
+    let now = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+    ctx.send_viewport_cmd(ViewportCommand::Maximized(!now));
+}
 
 /// How many folders the navigation panel's *Recent Locations* group keeps. The
 /// group is a way back to somewhere the person was, not a history browser; six
@@ -279,6 +290,38 @@ pub struct UndoTrash {
 /// short would be gone before the eye finds it.
 pub const UNDO_SECS: f32 = 8.0;
 
+/// Where the front tab goes after tab `closed` is removed from `len` tabs. The
+/// tab that was in front stays in front: closing one to its left shifts it down,
+/// closing one to its right leaves it alone, and closing it moves to the tab that
+/// takes its place (the last one if the closed tab was the last).
+pub fn index_after_close(len: usize, active: usize, closed: usize) -> usize {
+    let left = len.saturating_sub(1);
+    if left == 0 {
+        return 0;
+    }
+    if closed < active {
+        active - 1
+    } else if closed == active {
+        active.min(left - 1)
+    } else {
+        active.min(left - 1)
+    }
+}
+
+/// The tab Ctrl+Tab (`step` 1) and Ctrl+Shift+Tab (`step` -1) land on, wrapping at
+/// both ends; an empty or single-tab window stays put.
+pub fn cycle_tab_index(len: usize, active: usize, step: isize) -> usize {
+    if len <= 1 {
+        return 0;
+    }
+    let n = len as isize;
+    let mut i = active as isize + step;
+    while i < 0 {
+        i += n;
+    }
+    (i % n) as usize
+}
+
 /// How many closed tabs the menu remembers. The original's list is a
 /// `KRecentFilesAction` (its subtitle "Recently Closed Tabs", 0x12d8ff in
 /// /usr/bin/dolphin, feeding a `DolphinRecentTabsMenu` at 0x13d9a0), which keeps
@@ -326,9 +369,9 @@ pub struct OpenWith {
     pub focus: bool,
 }
 
-/// What the small "make something new here" window makes: a folder, or an
-/// empty text file. The original's own *Create New* menu offers both (plus
-/// whatever template types the desktop has), so the two share one window.
+/// What *Create New* makes: a folder, or an empty text file. The original's own
+/// menu offers both (plus whatever template types the desktop has), so the two
+/// share one rule for how they are made and named.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NewKind {
     Folder,
@@ -336,17 +379,8 @@ pub enum NewKind {
 }
 
 impl NewKind {
-    /// The window's title. The original's own strings: `Create New Folder`
-    /// (the folder dialog) and `Create New File` (the file dialog), both in
-    /// `libKF6KIOFileWidgets.so.6`.
-    pub fn title(self) -> &'static str {
-        match self {
-            NewKind::Folder => "Create New Folder",
-            NewKind::TextFile => "Create New File",
-        }
-    }
-
-    /// The name the field opens with, selected, so typing replaces it.
+    /// The name the thing is made with — and the name its editor opens on, all
+    /// of it selected, so typing replaces it.
     pub fn default_name(self) -> &'static str {
         match self {
             NewKind::Folder => "New Folder",
@@ -354,17 +388,24 @@ impl NewKind {
         }
     }
 
-    /// The field's greyed-out hint. `Enter file name` is the original's own
-    /// wording for the file dialog's field.
-    pub fn hint(self) -> &'static str {
-        match self {
-            NewKind::Folder => "Folder name",
-            NewKind::TextFile => "Enter file name",
-        }
+    /// Make it, in `dir`, under the first free name: `New Folder`, then
+    /// `New Folder (1)`, `New Folder (2)` — `copymove::free_target`'s rule, so a
+    /// second Create New never asks and never refuses.
+    ///
+    /// A file is created empty and *new*: `create_new` refuses a name that is
+    /// already taken rather than emptying the file that has it. The name here is
+    /// free by construction, so a refusal means something changed on disk between
+    /// picking the name and making it.
+    pub fn create_here(self, dir: &std::path::Path) -> std::io::Result<PathBuf> {
+        let target = crate::copymove::free_target(dir, &dir.join(self.default_name()));
+        let name = target
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.default_name().to_string());
+        self.create(dir, &name)
     }
 
-    /// Make it, in `dir`. A file is created empty and *new*: `create_new` refuses
-    /// a name that is already taken rather than emptying the file that has it.
+    /// Make it, in `dir`, under exactly this name.
     pub fn create(self, dir: &std::path::Path, name: &str) -> std::io::Result<PathBuf> {
         let target = dir.join(name);
         match self {
@@ -394,14 +435,6 @@ impl NewKind {
             NewKind::TextFile => "Could not create file",
         }
     }
-}
-
-/// The window behind *New Folder…* / *New Text File…*: a name, and what kind of
-/// thing the name is for.
-pub struct NewItem {
-    pub kind: NewKind,
-    pub name: String,
-    pub focus: bool,
 }
 
 /// The little editor behind "Add Shortcut" / "Rename Shortcut": a name and the
@@ -485,8 +518,6 @@ pub struct App {
     pub pending_compress: Option<PathBuf>,
     pub pending_extract: Option<PathBuf>,
     pub quick: Option<Quick>,
-    /// The *New Folder…* / *New Text File…* window, when it is open.
-    pub new_item: Option<NewItem>,
     /// Added feature, as asked for this round: the chooser behind "Open With…",
     /// and the folders of the tabs that were closed, newest last, so a tab
     /// closed by mistake can come back (`Recently Closed Tabs`, 0x12d8ff in
@@ -678,6 +709,7 @@ impl App {
         // so a light window is light on its first frame rather than opening dark
         // and repainting.
         theme::set_light(cfg.light);
+        theme::set_shade(cfg.shade);
         theme::install(&cc.egui_ctx);
         if shot.is_some() {
             // The picture is taken without a pointer of our own, so whatever
@@ -772,6 +804,13 @@ impl App {
                             pane.asc = !tab.sort_desc.unwrap_or(false);
                             pane.sort_entries();
                         }
+                        // A tab is a session: it comes back with the view it was
+                        // showing and with its picture view still up, not with
+                        // whatever the tab beside it was using.
+                        if let Some(v) = tab.view {
+                            pane.view = state::ViewMode::from_index(v);
+                        }
+                        pane.set_pictures(tab.pictures);
                         Tab {
                             panes: vec![pane],
                             active: 0,
@@ -819,7 +858,6 @@ impl App {
             pending_compress: None,
             pending_extract: None,
             quick: None,
-            new_item: None,
             open_with: None,
             closed_tabs: Vec::new(),
             shortcut_edit: None,
@@ -1034,9 +1072,56 @@ impl App {
         if let Some(path) = self.tabs.get(idx).map(|t| t.panes[t.active].path.clone()) {
             remember_closed_tab(&mut self.closed_tabs, path, CLOSED_TAB_MEMORY);
         }
+        let active = index_after_close(self.tabs.len(), self.active_tab, idx);
         self.tabs.remove(idx);
-        if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
+        self.active_tab = active;
+    }
+
+    /// Move the front tab `step` places along, wrapping at both ends — Ctrl+Tab
+    /// and Ctrl+Shift+Tab. A window with one tab stays on it.
+    pub fn cycle_tab(&mut self, step: isize) {
+        self.active_tab = cycle_tab_index(self.tabs.len(), self.active_tab, step);
+    }
+
+    /// Close every tab but `keep`, the way a browser's *Close Other Tabs* does.
+    pub fn close_other_tabs(&mut self, keep: usize) {
+        if keep >= self.tabs.len() {
+            return;
+        }
+        for i in (0..self.tabs.len()).rev() {
+            if i != keep {
+                self.close_tab(i);
+            }
+        }
+        self.active_tab = 0;
+    }
+
+    /// Close the tabs to the right of `idx` — *Close Tabs to the Right*.
+    pub fn close_tabs_after(&mut self, idx: usize) {
+        if idx >= self.tabs.len() {
+            return;
+        }
+        for i in (idx + 1..self.tabs.len()).rev() {
+            self.close_tab(i);
+        }
+        self.active_tab = self.active_tab.min(idx);
+    }
+
+    /// A second tab on the same folder with the same sort and view, so a tab can
+    /// be kept while the other walks off somewhere else.
+    pub fn duplicate_tab(&mut self, idx: usize) {
+        let Some(tab) = self.tabs.get(idx) else { return };
+        let pane = &tab.panes[tab.active];
+        let (dir, sort, asc, view, pictures) =
+            (pane.current_dir(), pane.sort, pane.asc, pane.view, pane.pictures);
+        self.new_tab_public(dir);
+        if let Some(t) = self.tabs.last_mut() {
+            let p = &mut t.panes[0];
+            p.sort = sort;
+            p.asc = asc;
+            p.view = view;
+            p.sort_entries();
+            p.set_pictures(pictures);
         }
     }
 
@@ -1245,11 +1330,26 @@ impl App {
                                 .on_hover_text(format!("{} view", mode.label()))
                                 .clicked()
                             {
-                                let zoom = self.config.zoom;
-                                let pane = self.pane_mut();
-                                pane.view = mode;
-                                pane.zoom = zoom;
+                                // Each view keeps its own size; switching only
+                                // changes which memory is in force. This used to
+                                // copy the saved array over the pane's, which threw
+                                // away the other views' sizes in a split window.
+                                let (zooms, plains) = {
+                                    let pane = self.pane_mut();
+                                    pane.view = mode;
+                                    // Choosing a list view leaves the picture view,
+                                    // the way choosing Details leaves Icons: the
+                                    // wall is one of the four views, not a layer
+                                    // over them. It used to stay up, so the button
+                                    // did nothing and the size bar kept editing the
+                                    // wall's thumbnails.
+                                    pane.set_pictures(false);
+                                    (pane.zoom, pane.zoom_plain)
+                                };
+                                self.config.pictures = false;
                                 self.config.view = mode.index();
+                                self.config.zoom = zooms;
+                                self.config.zoom_plain = plains;
                                 // The view is one of the choices the next start
                                 // opens with, so it is written straight away; the
                                 // whole-settings comparison would catch it too.
@@ -1463,9 +1563,74 @@ impl App {
         });
     }
 
+    /// The frame the compositor no longer draws, now that the tab strip is the
+    /// title bar: a one-pixel edge round the window, and the eight bands that
+    /// resize it. Both live in the foreground layer so they sit over the window's
+    /// own drawing. The bands are six pixels wide (twelve in the corners) — narrow
+    /// enough that a press inside the window still lands on the widget under it,
+    /// wide enough to catch an edge, which is all a frameless window leaves.
+    fn window_frame(&mut self, ctx: &egui::Context) {
+        let screen = ctx.content_rect();
+        // A maximized window is the screen; there is no edge to draw or drag.
+        let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+        if !maximized {
+            ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                Id::new("window_edge"),
+            ))
+            .rect_stroke(
+                screen,
+                CornerRadius::ZERO,
+                Stroke::new(1.0, theme::border()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        use egui::viewport::ResizeDirection as Dir;
+        use egui::CursorIcon;
+        const E: f32 = 6.0;
+        const C: f32 = 12.0;
+        let (l, t, r, b) = (screen.left(), screen.top(), screen.right(), screen.bottom());
+        let bands: [(Dir, Rect, CursorIcon); 8] = [
+            (Dir::NorthWest, Rect::from_min_max(Pos2::new(l, t), Pos2::new(l + C, t + C)), CursorIcon::ResizeNwSe),
+            (Dir::NorthEast, Rect::from_min_max(Pos2::new(r - C, t), Pos2::new(r, t + C)), CursorIcon::ResizeNeSw),
+            (Dir::SouthWest, Rect::from_min_max(Pos2::new(l, b - C), Pos2::new(l + C, b)), CursorIcon::ResizeNeSw),
+            (Dir::SouthEast, Rect::from_min_max(Pos2::new(r - C, b - C), Pos2::new(r, b)), CursorIcon::ResizeNwSe),
+            (Dir::North, Rect::from_min_max(Pos2::new(l + C, t), Pos2::new(r - C, t + E)), CursorIcon::ResizeVertical),
+            (Dir::South, Rect::from_min_max(Pos2::new(l + C, b - E), Pos2::new(r - C, b)), CursorIcon::ResizeVertical),
+            (Dir::West, Rect::from_min_max(Pos2::new(l, t + C), Pos2::new(l + E, b - C)), CursorIcon::ResizeHorizontal),
+            (Dir::East, Rect::from_min_max(Pos2::new(r - E, t + C), Pos2::new(r, b - C)), CursorIcon::ResizeHorizontal),
+        ];
+        if maximized {
+            return;
+        }
+        let mut resize: Option<Dir> = None;
+        egui::Area::new(Id::new("window_resize"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(Pos2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_clip_rect(screen);
+                for (i, (dir, rect, cursor)) in bands.iter().enumerate() {
+                    let resp = ui.interact(*rect, Id::new(("window_edge", i)), Sense::drag());
+                    if resp.hovered() || resp.dragged() {
+                        ui.ctx().set_cursor_icon(*cursor);
+                    }
+                    if resp.drag_started() {
+                        resize = Some(*dir);
+                    }
+                }
+            });
+        if let Some(dir) = resize {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
+        }
+    }
+
     fn tab_strip(&mut self, ctx: &egui::Context) {
         let mut to_activate: Option<usize> = None;
         let mut to_close: Option<usize> = None;
+        let mut close_others: Option<usize> = None;
+        let mut close_after: Option<usize> = None;
+        let mut to_dup: Option<usize> = None;
+        let mut reopen = false;
         let mut add_tab = false;
         egui::TopBottomPanel::top("tabs")
             .exact_height(33.0)
@@ -1477,6 +1642,29 @@ impl App {
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 1.0;
+                    // The window's name, at the left end of its title row and before
+                    // the first tab, where a title bar carries it (asked for). It is
+                    // part of the bar, so a drag on it moves the window and a double
+                    // click maximizes, exactly as on the strip's empty space.
+                    let name_font = FontId::proportional(12.5);
+                    let name_galley = ui.fonts_mut(|f| {
+                        f.layout_no_wrap(APP_NAME.to_string(), name_font, theme::text())
+                    });
+                    let name_h = name_galley.size().y;
+                    let name_w = name_galley.size().x + 22.0;
+                    let (name_rect, name_resp) =
+                        ui.allocate_exact_size(Vec2::new(name_w, 30.0), Sense::click_and_drag());
+                    if name_resp.drag_started() {
+                        ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+                    }
+                    if name_resp.double_clicked() {
+                        toggle_maximized(ui.ctx());
+                    }
+                    ui.painter().galley(
+                        Pos2::new(name_rect.left() + 10.0, name_rect.center().y - name_h / 2.0),
+                        name_galley,
+                        theme::text(),
+                    );
                     for (i, tab) in self.tabs.iter().enumerate() {
                         let pane = &tab.panes[tab.active];
                         let title = if pane.is_trash() {
@@ -1494,7 +1682,14 @@ impl App {
                             .x;
                         let w = (text_w + 62.0).clamp(104.0, 230.0);
                         let (rect, resp) =
-                            ui.allocate_exact_size(Vec2::new(w, 30.0), Sense::click());
+                            ui.allocate_exact_size(Vec2::new(w, 30.0), Sense::click_and_drag());
+                        // A press on a tab and a move is a title bar drag, as on a
+                        // browser's tab strip; a press and release is still the
+                        // tab, because egui only calls it a drag past its own
+                        // threshold.
+                        if resp.drag_started() {
+                            ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+                        }
                         let is_active = i == self.active_tab;
                         let tab_bg = Rect::from_min_max(
                             Pos2::new(rect.left(), rect.top() + 3.0),
@@ -1509,7 +1704,7 @@ impl App {
                                     sw: 0,
                                     se: 0,
                                 },
-                                theme::header_bg(),
+                                theme::tab_active_bg(),
                             );
                             ui.painter().rect_filled(
                                 Rect::from_min_max(
@@ -1528,7 +1723,7 @@ impl App {
                                     sw: 0,
                                     se: 0,
                                 },
-                                theme::c(50, 55, 60),
+                                theme::tab_hover_bg(),
                             );
                         }
                         let icon_rect = Rect::from_center_size(
@@ -1544,6 +1739,39 @@ impl App {
                             font,
                             if is_active { theme::text() } else { theme::text_dim() },
                         );
+                        // The strip elides a long folder name, so the full path is
+                        // what the tab means; the menu carries the rest of what a
+                        // browser puts on a tab.
+                        resp.clone()
+                            .on_hover_text(pane.display_path().to_string())
+                            .context_menu(|ui| {
+                                ui.set_min_width(196.0);
+                                ui.set_max_width(210.0);
+                                if menu_row(ui, "Close Tab", "Ctrl+W").clicked() {
+                                    to_close = Some(i);
+                                    ui.close();
+                                }
+                                if self.tabs.len() > 1
+                                    && menu_row(ui, "Close Other Tabs", "").clicked()
+                                {
+                                    close_others = Some(i);
+                                    ui.close();
+                                }
+                                if i + 1 < self.tabs.len()
+                                    && menu_row(ui, "Close Tabs to the Right", "").clicked()
+                                {
+                                    close_after = Some(i);
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Duplicate Tab", "").clicked() {
+                                    to_dup = Some(i);
+                                    ui.close();
+                                }
+                                if menu_row(ui, "Reopen Closed Tab", "Ctrl+Shift+T").clicked() {
+                                    reopen = true;
+                                    ui.close();
+                                }
+                            });
                         let close_rect = Rect::from_center_size(
                             Pos2::new(rect.right() - 14.0, rect.center().y),
                             Vec2::splat(16.0),
@@ -1579,8 +1807,96 @@ impl App {
                             .rect_filled(add_rect, CornerRadius::same(3), theme::row_hover());
                     }
                     theme::draw_glyph(ui.painter(), add_rect, "plus", theme::text_dim());
-                    if add_resp.clicked() {
+                    if add_resp
+                        .clone()
+                        .on_hover_text("New tab (Ctrl+T)")
+                        .clicked()
+                    {
                         add_tab = true;
+                    }
+                    // The strip is the window's title bar now, so its empty space
+                    // is a title bar's: a drag on it moves the window, and a double
+                    // click maximizes or restores it. (It used to open a tab; Ctrl+T
+                    // and the + do that, and the strip has a bar's job now.) It takes
+                    // the row's remaining width, short of the window buttons, so a
+                    // press lands somewhere instead of falling through to the panel.
+                    let buttons_w = WINDOW_BUTTON_W * 3.0 + 2.0;
+                    let rest = (ui.available_width() - buttons_w).max(0.0);
+                    if rest > 8.0 {
+                        let (rest_rect, rest_resp) = ui.allocate_exact_size(
+                            Vec2::new(rest, ui.available_height()),
+                            Sense::click_and_drag(),
+                        );
+                        if rest_resp.drag_started() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                        }
+                        if rest_resp.double_clicked() {
+                            toggle_maximized(ui.ctx());
+                        }
+                        // A right click on the empty strip is the same menu as on a
+                        // tab, minus everything that needs a tab.
+                        rest_resp.context_menu(|ui| {
+                            ui.set_min_width(196.0);
+                            ui.set_max_width(210.0);
+                            if menu_row(ui, "New Tab", "Ctrl+T").clicked() {
+                                add_tab = true;
+                                ui.close();
+                            }
+                            if menu_row(ui, "Reopen Closed Tab", "Ctrl+Shift+T").clicked() {
+                                reopen = true;
+                                ui.close();
+                            }
+                        });
+                        let _ = rest_rect;
+                    }
+                    // The window's own three buttons, at the right end of the
+                    // row the tabs are in: minimizing, maximizing (or restoring a
+                    // maximized window) and closing it.
+                    let maximized = ui.ctx().input(|i| i.viewport().maximized).unwrap_or(false);
+                    for (name, glyph, tip) in [
+                        ("min", "minimize", "Minimize"),
+                        (
+                            "max",
+                            if maximized { "restore" } else { "maximize" },
+                            if maximized { "Restore" } else { "Maximize" },
+                        ),
+                        ("close", "close", "Close"),
+                    ] {
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(WINDOW_BUTTON_W, 28.0),
+                            Sense::click(),
+                        );
+                        let closing = name == "close";
+                        if resp.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::same(3),
+                                if closing {
+                                    theme::danger_fill()
+                                } else {
+                                    theme::row_hover()
+                                },
+                            );
+                        }
+                        theme::draw_glyph(
+                            ui.painter(),
+                            rect,
+                            glyph,
+                            if closing && resp.hovered() {
+                                theme::on_band()
+                            } else {
+                                theme::text_dim()
+                            },
+                        );
+                        if resp.clone().on_hover_text(tip).clicked() {
+                            match name {
+                                "min" => ui.ctx().send_viewport_cmd(
+                                    egui::ViewportCommand::Minimized(true),
+                                ),
+                                "max" => toggle_maximized(ui.ctx()),
+                                _ => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
+                            }
+                        }
                     }
                 });
             });
@@ -1589,6 +1905,18 @@ impl App {
         }
         if let Some(i) = to_close {
             self.close_tab(i);
+        }
+        if let Some(i) = close_others {
+            self.close_other_tabs(i);
+        }
+        if let Some(i) = close_after {
+            self.close_tabs_after(i);
+        }
+        if let Some(i) = to_dup {
+            self.duplicate_tab(i);
+        }
+        if reopen {
+            self.apply_tag("__reopen__");
         }
         if add_tab {
             let dir = self.pane().current_dir();
@@ -2654,21 +2982,18 @@ impl App {
                         if pictures {
                             if small_button(ui, "+").on_hover_text("Bigger thumbnails").clicked() {
                                 self.pane_mut().thumb_by(25.0);
-                                self.config.thumb_px = self.pane().thumb_px;
-                                self.config_dirty = true;
+                                self.sync_zoom_config();
                             }
                             let slider =
                                 theme::strip_slider(ui, &mut thumb_value, 50.0..=400.0, 110.0);
                             if slider.changed() {
                                 let px = gallery::clamp_thumb(thumb_value);
                                 self.pane_mut().thumb_px = px;
-                                self.config.thumb_px = px;
-                                self.config_dirty = true;
+                                self.sync_zoom_config();
                             }
                             if small_button(ui, "−").on_hover_text("Smaller thumbnails").clicked() {
                                 self.pane_mut().thumb_by(-25.0);
-                                self.config.thumb_px = self.pane().thumb_px;
-                                self.config_dirty = true;
+                                self.sync_zoom_config();
                             }
                             ui.label(
                                 egui::RichText::new(format!(
@@ -2706,7 +3031,7 @@ impl App {
                         // label the slider's tip carries.
                         if self.config.show_zoom_slider {
                             if small_button(ui, "+").on_hover_text("Zoom in").clicked() {
-                                self.pane_mut().zoom_by(1);
+                                self.pane_mut().view_zoom_by(1);
                                 zoom_changed = true;
                             }
                             let slider = theme::strip_slider(
@@ -2721,7 +3046,7 @@ impl App {
                                 zoom_changed = true;
                             }
                             if small_button(ui, "−").on_hover_text("Zoom out").clicked() {
-                                self.pane_mut().zoom_by(-1);
+                                self.pane_mut().view_zoom_by(-1);
                                 zoom_changed = true;
                             }
                         }
@@ -2800,9 +3125,7 @@ impl App {
                         }
                     });
                     if zoom_changed {
-                        self.config.zoom = self.pane().zoom;
-                        self.config.zoom_plain = self.pane().zoom_plain;
-                        self.config_dirty = true;
+                        self.sync_zoom_config();
                     }
                 });
             });
@@ -2996,6 +3319,12 @@ impl App {
                     self.split_frac = 0.5;
                     self.pane_mut().load(dir);
                     self.persist(Some(ctx));
+                    // The palette and its shading are settings too, and they live
+                    // in the theme rather than in `config` while the window runs,
+                    // so forgetting them has to put the theme back as well.
+                    crate::theme::set_light(self.config.light);
+                    crate::theme::set_shade(self.config.shade);
+                    crate::theme::apply_style(ctx);
                     self.toast("Settings are back to their defaults; this window stays open.");
                 }
                 Request::Restore(paths) => {
@@ -3044,16 +3373,12 @@ impl App {
                     };
                     self.quick = Some(Quick { path, text: content });
                 }
-                // The active directory's own menu: *Create New → Folder…* and
-                // *Create New → Text File…*. The folder is opened in the small
-                // window with its default name already selected, so typing
-                // replaces it (the original preselects the suggestion too).
-                Request::NewItem(kind, _dir) => {
-                    self.new_item = Some(NewItem {
-                        kind,
-                        name: kind.default_name().to_string(),
-                        focus: false,
-                    });
+                // The active directory's own menu: *Create New → Folder* and
+                // *Create New → Text File*. No window: the thing is made at once
+                // under a free name and its name opens for editing in place, so
+                // the menu row is the whole of the asking.
+                Request::NewItem(kind, dir) => {
+                    self.make_new(kind, &dir);
                 }
                 Request::Rename(path, new_name) => {
                     let target = path.with_file_name(&new_name);
@@ -3413,10 +3738,34 @@ impl App {
                     }
                 }
                 Request::ZoomChanged => {
-                    let zoom = self.pane().zoom;
-                    self.config.zoom = zoom;
-                    self.config.zoom_plain = self.pane().zoom_plain;
+                    self.sync_zoom_config();
+                }
+                // The empty space's *View* submenu. The picture view is left by
+                // choosing a list view, exactly as the toolbar buttons do, so the
+                // two ways of changing the view cannot disagree.
+                Request::SetView(mode) => {
+                    let pane = self.pane_mut();
+                    pane.view = mode;
+                    pane.set_pictures(false);
+                    self.config.view = mode.index();
+                    self.config.pictures = false;
                     self.config_dirty = true;
+                }
+                // *Sort By* on the empty space. Picking the key in force turns the
+                // order round; a new key starts at the direction it was last given.
+                Request::SetSort(key) => {
+                    let pane = self.pane_mut();
+                    let changed = if pane.sort == key {
+                        let desc = !pane.asc;
+                        pane.set_sort_dir(desc)
+                    } else {
+                        pane.choose_sort(key)
+                    };
+                    if changed {
+                        self.config.sort_key = self.pane().sort.index();
+                        self.config.sort_desc = !self.pane().asc;
+                        self.config_dirty = true;
+                    }
                 }
                 Request::OpenViewer(path, play) => {
                     self.open_viewer(&path, play);
@@ -3499,6 +3848,42 @@ impl App {
 
     pub fn toast(&mut self, msg: &str) {
         self.toast = Some((msg.to_string(), Instant::now()));
+    }
+
+    /// *Create New* in one step: make the thing in `dir` under the first free
+    /// name, mark it, and open the in-place name editor on it with the name
+    /// selected — the flow the folder case already had, now for both kinds and
+    /// without a window in between. Escape leaves the name it was made with.
+    pub fn make_new(&mut self, kind: NewKind, dir: &std::path::Path) {
+        let made = kind.create_here(dir);
+        let target = match made {
+            Ok(target) => target,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Free by construction, so this is a race with something else
+                // writing the same name; say so instead of silently retrying.
+                self.toast("An item with that name already exists.");
+                return;
+            }
+            Err(e) => {
+                self.toast(&format!("{}: {}", kind.failed_message(), e));
+                return;
+            }
+        };
+        let name = target
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.pane_mut().reload();
+        if let Some(idx) = self.pane().entries.iter().position(|e| e.path == target) {
+            self.pane_mut().select_single(idx);
+            self.pane_mut().scroll_to = Some(idx);
+            self.pane_mut().rename = Some(crate::state::RenameState {
+                index: idx,
+                text: name,
+                focus: false,
+            });
+        }
+        self.toast(kind.done_message());
     }
 
     // -----------------------------------------------------------------------
@@ -4154,8 +4539,6 @@ impl App {
                 self.bulk = None;
             } else if self.dups.is_some() {
                 self.dups = None;
-            } else if self.new_item.is_some() {
-                self.new_item = None;
             } else if self.open_with.is_some() {
                 self.open_with = None;
             } else if self.props.is_some() {
@@ -4190,6 +4573,20 @@ impl App {
             }
             if i.consume_key(ctrl, Key::T) {
                 reqs.push(Request::Toast("__newtab__".into()));
+            }
+            // Ctrl+Tab walks the tabs in both directions; Ctrl+Page Down and Page
+            // Up do the same, which is what a browser and Dolphin's own tabs use.
+            if i.consume_key(ctrl, Key::Tab) {
+                reqs.push(Request::Toast("__nexttab__".into()));
+            }
+            if i.consume_key(ctrl_shift, Key::Tab) {
+                reqs.push(Request::Toast("__prevtab__".into()));
+            }
+            if i.consume_key(ctrl, Key::PageDown) {
+                reqs.push(Request::Toast("__nexttab__".into()));
+            }
+            if i.consume_key(ctrl, Key::PageUp) {
+                reqs.push(Request::Toast("__prevtab__".into()));
             }
             if i.consume_key(ctrl, Key::W) {
                 reqs.push(Request::Toast("__closetab__".into()));
@@ -4328,6 +4725,16 @@ impl App {
             if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
                 reqs.push(Request::Toast("__upkey__".into()));
             }
+            // The page keys a list has had since before the mouse: one screenful
+            // of the view, not one row and not one picture. How many that is comes
+            // from the view itself (`Pane::per_page`), which is why the key handler
+            // does not guess at a number.
+            if i.consume_key(Modifiers::NONE, Key::PageDown) {
+                reqs.push(Request::Toast("__pagedown__".into()));
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageUp) {
+                reqs.push(Request::Toast("__pageup__".into()));
+            }
             if i.consume_key(Modifiers::NONE, Key::Home) {
                 reqs.push(Request::Toast("__homekey__".into()));
             }
@@ -4370,7 +4777,12 @@ impl App {
     fn session_signature(&self) -> String {
         let mut sig = String::new();
         for tab in &self.tabs {
-            sig.push_str(&tab.panes[tab.active].current_dir().to_string_lossy());
+            let pane = &tab.panes[tab.active];
+            sig.push_str(&pane.current_dir().to_string_lossy());
+            sig.push('|');
+            sig.push_str(&pane.view.index().to_string());
+            sig.push_str(if pane.pictures { "|pics" } else { "" });
+            sig.push_str(&format!("|{}|{}", pane.sort.index(), pane.asc));
             sig.push('\u{1f}');
         }
         sig.push_str(&self.active_tab.to_string());
@@ -4391,6 +4803,20 @@ impl App {
         self.config = cfg;
         self.session_sig = self.session_signature();
         self.config_dirty = false;
+    }
+
+    /// Write all four zoom memories to the settings: the three list-view ladders
+    /// and the picture wall's pixel height. Every zoom input goes through here, so
+    /// no view can be remembered at a size it was never set to.
+    fn sync_zoom_config(&mut self) {
+        let (zoom, plain, thumb) = {
+            let pane = self.pane();
+            (pane.zoom, pane.zoom_plain, pane.thumb_px)
+        };
+        self.config.zoom = zoom;
+        self.config.zoom_plain = plain;
+        self.config.thumb_px = thumb;
+        self.config_dirty = true;
     }
 
     /// Everything the next start should open with, taken from the live window.
@@ -4432,6 +4858,8 @@ impl App {
                     path: pane.current_dir(),
                     sort_key: Some(pane.sort.index()),
                     sort_desc: Some(!pane.asc),
+                    view: Some(pane.view.index()),
+                    pictures: pane.pictures,
                 }
             })
             .collect();
@@ -4465,6 +4893,8 @@ impl App {
                 let idx = self.active_tab;
                 self.close_tab(idx);
             }
+            "__nexttab__" => self.cycle_tab(1),
+            "__prevtab__" => self.cycle_tab(-1),
             // Ctrl+Shift+T: the tab that was closed last comes back. The
             // original keeps the list under the menu's "Recently Closed Tabs"
             // (0x12d8ff in /usr/bin/dolphin).
@@ -4502,21 +4932,20 @@ impl App {
                 self.filter_focus = on;
             }
             "__selectall__" => self.pane_mut().select_all(),
+            // The zoom keys act on the view that is on show — the picture wall's
+            // thumbnails included — and every one of the four memories is written
+            // back, so each view returns at the size it was left.
             "__zoomin__" => {
-                self.pane_mut().zoom_by(1);
-                self.config.zoom = self.pane().zoom;
-                self.config.zoom_plain = self.pane().zoom_plain;
+                self.pane_mut().view_zoom_by(1);
+                self.sync_zoom_config();
             }
             "__zoomout__" => {
-                self.pane_mut().zoom_by(-1);
-                self.config.zoom = self.pane().zoom;
-                self.config.zoom_plain = self.pane().zoom_plain;
+                self.pane_mut().view_zoom_by(-1);
+                self.sync_zoom_config();
             }
             "__zoomreset__" => {
-                self.pane_mut().zoom = [4, 0, 0];
-                self.pane_mut().zoom_plain = [2, 0, 0];
-                self.config.zoom = self.pane().zoom;
-                self.config.zoom_plain = self.pane().zoom_plain;
+                self.pane_mut().view_zoom_reset();
+                self.sync_zoom_config();
             }
             "__back__" => self.pane_mut().go_back(),
             "__forward__" => self.pane_mut().go_forward(),
@@ -4541,18 +4970,8 @@ impl App {
             "__places__" => self.places_visible = !self.places_visible,
             "__info__" => self.info_panel = !self.info_panel,
             "__newfolder__" => {
-                self.new_item = Some(NewItem {
-                    kind: NewKind::Folder,
-                    name: NewKind::Folder.default_name().to_string(),
-                    focus: false,
-                });
-            }
-            "__newtext__" => {
-                self.new_item = Some(NewItem {
-                    kind: NewKind::TextFile,
-                    name: NewKind::TextFile.default_name().to_string(),
-                    focus: false,
-                });
+                let dir = self.pane().current_dir();
+                self.make_new(NewKind::Folder, &dir);
             }
             "__rename__" => {
                 let idx = self.pane().cursor;
@@ -4611,17 +5030,13 @@ impl App {
             }
             "__down__" => self.move_cursor(1),
             "__upkey__" => self.move_cursor(-1),
-            "__homekey__" => {
-                self.pane_mut().cursor = 0;
-                self.pane_mut().select_single(0);
-                self.pane_mut().scroll_to = Some(0);
-            }
-            "__endkey__" => {
-                let last = self.pane().display_entries().len().saturating_sub(1);
-                self.pane_mut().cursor = last;
-                self.pane_mut().select_single(last);
-                self.pane_mut().scroll_to = Some(last);
-            }
+            "__pagedown__" => self.pane_mut().page_cursor(1),
+            "__pageup__" => self.pane_mut().page_cursor(-1),
+            // Home and End take the first and the last entry the view shows *and*
+            // the window with them: on a long folder the far end is not drawn, and a
+            // key that only moved the cursor left the screen exactly as it was.
+            "__homekey__" => self.pane_mut().jump_cursor(true),
+            "__endkey__" => self.pane_mut().jump_cursor(false),
             "__findfiles__" => {
                 let root = self.pane().current_dir();
                 self.findtext = Some(findtext::FindText::start(
@@ -4674,20 +5089,7 @@ impl App {
     fn move_cursor(&mut self, delta: i32) {
         // The arrow keys move through what the view actually shows: on the
         // picture wall that is the pictures, never the documents between them.
-        let shown = self.pane().shown_indices();
-        if shown.is_empty() {
-            return;
-        }
-        let at = self.pane().cursor;
-        let pos = shown.iter().position(|i| *i == at);
-        let next = match pos {
-            Some(p) => shown[(p as i32 + delta).clamp(0, shown.len() as i32 - 1) as usize],
-            None if delta > 0 => shown[0],
-            None => *shown.last().unwrap(),
-        };
-        self.pane_mut().cursor = next;
-        self.pane_mut().select_single(next);
-        self.pane_mut().scroll_to = Some(next);
+        self.pane_mut().step_cursor(delta);
     }
 
     // -----------------------------------------------------------------------
@@ -4866,8 +5268,10 @@ impl eframe::App for App {
                 self.pending_trash_demo = None;
             }
         }
-        self.top_toolbar(ctx);
+        // The tab strip is the window's topmost row: the toolbar belongs to the
+        // tab in front, the way a browser's address bar belongs to its tab.
         self.tab_strip(ctx);
+        self.top_toolbar(ctx);
         self.places_panel(ctx);
         self.info_panel_ui(ctx);
         self.status_bar(ctx);
@@ -4883,6 +5287,9 @@ impl eframe::App for App {
         // The viewer is drawn last, over everything, the way the browser's
         // viewer covers its page.
         self.viewer_ui(ctx);
+        // And the window's own edge and resize bands last of all: they belong to
+        // the window, not to anything in it.
+        self.window_frame(ctx);
         self.thumbs.poll(ctx);
         self.big.poll(ctx);
 
@@ -5378,8 +5785,42 @@ pub const EMPTY_TRASH_LABEL: &str = "Empty Trash";
 /// A command row inside a menu: the name on the left, its keyboard shortcut
 /// on the right, the way the original shows them.
 pub fn menu_row(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
+    menu_row_with(ui, label, hint, true)
+}
+
+/// A menu row that can be greyed out, for the rows that need something to work
+/// on — Cut and Copy with nothing marked, Paste with an empty clipboard. A
+/// disabled row still takes its place in the menu but does not react, which is
+/// how Explorer shows an unavailable action.
+pub fn menu_row_with(
+    ui: &mut egui::Ui,
+    label: &str,
+    hint: &str,
+    enabled: bool,
+) -> egui::Response {
     let width = ui.available_width().max(140.0);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::click());
+    // A greyed row senses nothing, so a press on it cannot run the action.
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 24.0), sense);
+    if !enabled {
+        ui.painter().text(
+            Pos2::new(rect.left() + 9.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(12.5),
+            theme::text_faint().gamma_multiply(0.7),
+        );
+        if !hint.is_empty() {
+            ui.painter().text(
+                Pos2::new(rect.right() - 9.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                hint,
+                FontId::proportional(10.5),
+                theme::text_faint().gamma_multiply(0.7),
+            );
+        }
+        return resp;
+    }
     if resp.hovered() {
         ui.painter().rect_filled(
             rect.shrink2(Vec2::new(2.0, 1.0)),
@@ -5521,11 +5962,7 @@ fn row_tinted_at(
         ui.painter().rect_filled(
             badge,
             CornerRadius::same(3),
-            if selected {
-                theme::c(48, 57, 66)
-            } else {
-                theme::c(36, 42, 48)
-            },
+            theme::key_badge(selected),
         );
         ui.painter().text(
             badge.center(),
@@ -5883,9 +6320,15 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size(startup_size.unwrap_or([1440.0, 900.0]))
         .with_min_inner_size([880.0, 540.0])
-        // The window title is the name the person sees on the title bar and
-        // in the task switcher. Renamed from the original program's name to
-        // this build's own name, as asked.
+        // The window draws its own title row: the tab strip *is* the title bar
+        // (as asked — "can these 2 lines be presented as one?"). The compositor
+        // is told not to draw one, and `App::window_frame` puts back what that
+        // takes away: the three window buttons, dragging, double click to
+        // maximize, the resize edges and a one-pixel frame.
+        .with_decorations(false)
+        // The window title is the name the person sees in the task switcher now
+        // that the bar is ours. Renamed from the original program's name to this
+        // build's own name, as asked.
         .with_title(APP_NAME)
         .with_app_id("dolphincraft");
     if let Some(pos) = startup_pos {
