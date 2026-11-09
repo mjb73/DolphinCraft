@@ -146,10 +146,18 @@ fn check_search_columns(
             return Err(format!("no Path column at {label} px"));
         };
         if !(c.name.right() <= path.left() + 0.01
-            && path.right() <= c.size.left() + 0.01
+            && path.right() <= c.type_.left() + 0.01
+            && c.type_.right() <= c.size.left() + 0.01
             && c.size.right() <= c.date.left() + 0.01)
         {
             return Err(format!("{label} px: the columns overlap"));
+        }
+        // The type column is drawn only when the row can hold it: at 260 px it
+        // gives way rather than squeezing the name into 30 px.
+        if c.type_.width() > 1.0 {
+            said.push(format!("{label} px: Type {:.0} px", c.type_.width()));
+        } else {
+            said.push(format!("{label} px: no Type column"));
         }
         // The header labels must fit between the rules that close their
         // columns: right-aligned ones keep HEAD_PAD of air, and the column
@@ -171,6 +179,15 @@ fn check_search_columns(
                     "{label} px: the {col_label} header needs {need:.1} px (its text, 6 px of air \
                      and the sort arrow) but the column is {:.1} px wide",
                     col.width()
+                ));
+            }
+        }
+        if c.type_.width() > 1.0 {
+            let need = head_px("Type") + crate::views::HEAD_PAD + crate::views::SORT_ARROW_W;
+            if need > c.type_.width() + 0.01 {
+                return Err(format!(
+                    "{label} px: the Type header needs {need:.1} px but the column is {:.1} px wide",
+                    c.type_.width()
                 ));
             }
         }
@@ -216,6 +233,68 @@ fn check_search_columns(
     Ok(said.join("; "))
 }
 
+/// The extension written on a document's page: the size must fit the page it is
+/// drawn on, and a row-sized icon must have no label at all rather than a smudge.
+fn check_icon_type_label(ui: &egui::Ui) -> Result<String, String> {
+    use crate::theme::type_label_px;
+    let measure = |text: &str, px: f32| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(
+                text.to_owned(),
+                egui::FontId::monospace(px),
+                crate::theme::text(),
+            )
+            .size()
+            .x
+        })
+    };
+    let mut said: Vec<String> = Vec::new();
+    // The page's own width and writing band, from the same constants the drawing
+    // uses.
+    let px_for = |icon: f32, label: &str| {
+        let band_w = icon * crate::theme::PAGE_W_FRAC * crate::theme::TYPE_AIR;
+        let band_h = icon * crate::theme::TYPE_BAND_FRAC;
+        let reference = measure(label, 10.0);
+        let size = type_label_px(reference, band_w, band_h);
+        (band_w, size, reference)
+    };
+    for icon in [200.0f32, 96.0, 64.0] {
+        for ext in ["vectorcraft", "pcraft", "blend"] {
+            let label = ext.to_ascii_uppercase();
+            let (band_w, size, reference) = px_for(icon, &label);
+            // A label, when there is one, fits the page it is drawn on. The
+            // longest extension gives way first: at 64 px it is below the floor.
+            if let Some(px) = size {
+                let drawn = reference * px / 10.0;
+                if drawn > band_w + 0.5 {
+                    return Err(format!(
+                        "{label} at {icon:.0} px is drawn {drawn:.1} px wide in a {band_w:.1} px page"
+                    ));
+                }
+                said.push(format!("{label} {px:.1} px on {icon:.0}"));
+            } else if icon >= 96.0 || ext != "vectorcraft" {
+                return Err(format!("{label} got no size on a {icon:.0} px icon"));
+            } else {
+                said.push(format!("{label} below the floor on {icon:.0}"));
+            }
+        }
+    }
+    // A small row icon cannot hold any of them legibly: it keeps its kind glyph,
+    // and the details view's Type column carries the words instead.
+    for icon in [24.0f32, 48.0] {
+        for ext in ["vectorcraft", "pcraft", "blend"] {
+            let label = ext.to_ascii_uppercase();
+            let (band_w, size, _) = px_for(icon, &label);
+            if size.is_some() {
+                return Err(format!(
+                    "{label} was labelled on a {icon:.0} px icon ({band_w:.1} px of page)"
+                ));
+            }
+        }
+    }
+    Ok(said.join(", "))
+}
+
 pub fn run() -> i32 {
     let base = std::env::temp_dir().join(format!("filecraft-selftest-{}", std::process::id()));
     let _ = fs::remove_dir_all(&base);
@@ -257,7 +336,8 @@ pub fn run() -> i32 {
                 return Err("the suggested names are not the ones the menu promises".into());
             }
             let file = crate::NewKind::TextFile
-                .create(&made, crate::NewKind::TextFile.default_name())
+                .create(&made, &crate::NewKind::TextFile.default_name())
+                .map(|m| m.path)
                 .map_err(|e| e.to_string())?;
             if !file.is_file() {
                 return Err("the text file is not on disk".into());
@@ -271,7 +351,8 @@ pub fn run() -> i32 {
                 return Err(".txt is not treated as text".into());
             }
             let folder = crate::NewKind::Folder
-                .create(&made, crate::NewKind::Folder.default_name())
+                .create(&made, &crate::NewKind::Folder.default_name())
+                .map(|m| m.path)
                 .map_err(|e| e.to_string())?;
             if !folder.is_dir() {
                 return Err("the folder is not on disk".into());
@@ -293,10 +374,10 @@ pub fn run() -> i32 {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_default()
             };
-            let a = crate::NewKind::Folder.create_here(&fresh).map_err(|e| e.to_string())?;
-            let b = crate::NewKind::Folder.create_here(&fresh).map_err(|e| e.to_string())?;
-            let t1 = crate::NewKind::TextFile.create_here(&fresh).map_err(|e| e.to_string())?;
-            let t2 = crate::NewKind::TextFile.create_here(&fresh).map_err(|e| e.to_string())?;
+            let a = crate::NewKind::Folder.create_here(&fresh).map(|m| m.path).map_err(|e| e.to_string())?;
+            let b = crate::NewKind::Folder.create_here(&fresh).map(|m| m.path).map_err(|e| e.to_string())?;
+            let t1 = crate::NewKind::TextFile.create_here(&fresh).map(|m| m.path).map_err(|e| e.to_string())?;
+            let t2 = crate::NewKind::TextFile.create_here(&fresh).map(|m| m.path).map_err(|e| e.to_string())?;
             if name_of(&a) != "New Folder" || name_of(&b) != "New Folder (1)" {
                 return Err(format!("folders came out {} and {}", name_of(&a), name_of(&b)));
             }
@@ -314,6 +395,290 @@ pub fn run() -> i32 {
                 }
             }
             Ok("2 made by hand, 4 named free".into())
+        })(),
+    );
+
+    // ---- the document types New offers, read from the registered apps ----
+    r.check(
+        "a document type is read from its application's entry and its MIME package",
+        (|| {
+            let package = r#"<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="image/x-psb">
+    <comment>Large PSD document</comment>
+    <glob pattern="*.psb" weight="5"/>
+  </mime-type>
+  <mime-type type="application/x-photocraft">
+    <comment>PhotoCraft document</comment>
+    <icon name="ai.storyteller.photocraft"/>
+    <glob pattern="*.pcraft" weight="5"/>
+  </mime-type>
+  <mime-type type="application/x-vectorcraft">
+    <comment>VectorCraft document</comment>
+    <glob pattern="*.vectorcraft" weight="5"/>
+    <glob pattern="*.drawcraft" weight="5"/>
+  </mime-type>
+  <mime-type type="application/x-vectorcraft-template">
+    <comment>VectorCraft template</comment>
+    <glob pattern="*.vctemplate" weight="5"/>
+  </mime-type>
+</mime-info>"#;
+            let facts = crate::docs::parse_mime_package(package, "application/x-photocraft")
+                .ok_or("the PhotoCraft type was not found in its own package")?;
+            if facts.comment != "PhotoCraft document" {
+                return Err(format!("the comment came out {:?}", facts.comment));
+            }
+            let ext = crate::docs::first_extension(&facts.globs).ok_or("no extension in *.pcraft")?;
+            if ext != "pcraft" {
+                return Err(format!("the extension came out {ext:?}"));
+            }
+            if facts.icon != "ai.storyteller.photocraft" {
+                return Err(format!("the icon came out {:?}", facts.icon));
+            }
+            // The type next door must not be read as this one.
+            let vector = crate::docs::parse_mime_package(package, "application/x-vectorcraft")
+                .ok_or("the VectorCraft type was not found")?;
+            if vector.globs.len() != 2
+                || crate::docs::first_extension(&vector.globs).as_deref() != Some("vectorcraft")
+            {
+                return Err(format!("the VectorCraft globs came out {:?}", vector.globs));
+            }
+            // Ownership is read from the desktop's own records, never from a
+            // table of application names: the type named after the application,
+            // the package naming the application's icon, or the description
+            // opening with its name. A template and a shared type never count.
+            let made = |comment: &str, icon: &str| crate::docs::MimeFacts {
+                comment: comment.to_string(),
+                globs: vec!["*.x".to_string()],
+                icon: icon.to_string(),
+            };
+            let cases = [
+                // mime, short, app name, app icon, comment, type icon, wanted
+                (
+                    "application/x-photocraft",
+                    "photocraft",
+                    "PhotoCraft",
+                    "ai.storyteller.photocraft",
+                    "PhotoCraft document",
+                    "ai.storyteller.photocraft",
+                    true,
+                ),
+                (
+                    "application/x-soundcraft-session",
+                    "soundcraft",
+                    "SoundCraft",
+                    "",
+                    "SoundCraft session",
+                    "",
+                    true,
+                ),
+                (
+                    "application/x-vectorcraft-template",
+                    "vectorcraft",
+                    "VectorCraft",
+                    "ai.storyteller.vectorcraft",
+                    "VectorCraft template",
+                    "ai.storyteller.vectorcraft",
+                    false,
+                ),
+                // Named after neither, but the package names the entry's icon.
+                (
+                    "application/x-meld-comparison",
+                    "meld",
+                    "Meld",
+                    "org.gnome.Meld",
+                    "Meld comparison description",
+                    "org.gnome.Meld",
+                    true,
+                ),
+                // Neither of the first two; the description opens with the name.
+                (
+                    "application/x-extension-fcstd",
+                    "freecad",
+                    "FreeCAD",
+                    "",
+                    "FreeCAD document files",
+                    "",
+                    true,
+                ),
+                // A type somebody else named is not this application's.
+                (
+                    "application/x-affinity",
+                    "vectorcraft",
+                    "VectorCraft",
+                    "ai.storyteller.vectorcraft",
+                    "Affinity document",
+                    "",
+                    false,
+                ),
+                // A shared type belongs to nobody.
+                (
+                    "image/png",
+                    "photocraft",
+                    "PhotoCraft",
+                    "ai.storyteller.photocraft",
+                    "PNG image",
+                    "",
+                    false,
+                ),
+                // A program that opens a format it does not own is not its maker.
+                (
+                    "application/vnd.oasis.opendocument.text",
+                    "libreoffice-writer",
+                    "LibreOffice Writer",
+                    "",
+                    "OpenDocument Text",
+                    "",
+                    false,
+                ),
+            ];
+            for (mime, short, name, icon, comment, type_icon, want) in cases {
+                if crate::docs::owns_type(mime, short, name, icon, &made(comment, type_icon)) != want {
+                    return Err(format!("{mime} for {short} answered {}", !want));
+                }
+            }
+
+            if crate::docs::title_case("PhotoCraft document") != "PhotoCraft Document" {
+                return Err("the label is not title-cased".into());
+            }
+            if crate::docs::short_name("ai.storyteller.photocraft.desktop") != "photocraft"
+                || crate::docs::short_name("ai.storyteller.vectorcraft") != "vectorcraft"
+            {
+                return Err("a desktop id did not shorten to its application's name".into());
+            }
+            // A glob with a wildcard mid-name names a family, not an extension.
+            let family = vec!["*.draw*".to_string(), "*.vc".to_string()];
+            if crate::docs::first_extension(&family).as_deref() != Some("vc") {
+                return Err("a family glob was taken for an extension".into());
+            }
+            Ok("pcraft first, the label titled, the template ruled out".into())
+        })(),
+    );
+
+    r.check(
+        "the settings decide which document types New offers, and start with none",
+        (|| {
+            let mut config = crate::config::Config::default();
+            if !config.new_docs.is_empty() || !crate::docs::enabled(&config).is_empty() {
+                return Err("a fresh profile already offers a document type".into());
+            }
+            config.set_new_doc("application/x-vectorcraft", true);
+            config.set_new_doc("application/x-vectorcraft", true); // twice is still one tick
+            if !config.offers_new_doc("application/x-vectorcraft") || config.new_docs.len() != 1 {
+                return Err(format!("the tick was not kept: {:?}", config.new_docs));
+            }
+            if config.offers_new_doc("application/x-photocraft") {
+                return Err("an unticked type is offered".into());
+            }
+            let on = crate::docs::enabled(&config);
+            if on.len() != 1
+                || crate::docs::catalog().get(on[0]).map(|d| d.mime.as_str())
+                    != Some("application/x-vectorcraft")
+            {
+                return Err(format!("New's rows came out {on:?}"));
+            }
+            let stored = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+            let back: crate::config::Config =
+                serde_json::from_str(&stored).map_err(|e| e.to_string())?;
+            if !back.offers_new_doc("application/x-vectorcraft") {
+                return Err("the tick did not survive the settings file".into());
+            }
+            config.set_new_doc("application/x-vectorcraft", false);
+            if config.offers_new_doc("application/x-vectorcraft")
+                || !crate::docs::enabled(&config).is_empty()
+            {
+                return Err("unticking left the row in place".into());
+            }
+            Ok(format!(
+                "a tick kept through the settings file, {} registered type(s) to choose from",
+                crate::docs::catalog().len()
+            ))
+        })(),
+    );
+
+    r.check(
+        "a new document is a document the application opens, not an empty file",
+        (|| {
+            // Only the format this build writes itself: the PhotoCraft kind is
+            // made by its own CLI, which a check has no business starting.
+            let Some(i) = crate::docs::catalog()
+                .iter()
+                .position(|d| matches!(d.ext.as_str(), "vectorcraft" | "drawcraft"))
+            else {
+                return Ok("no VectorCraft type is registered here, so the write was skipped".into());
+            };
+            let kind = &crate::docs::catalog()[i];
+            let dir = made.join("documents");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let a = crate::NewKind::Doc(i).create_here(&dir).map(|m| m.path).map_err(|e| e.to_string())?;
+            let b = crate::NewKind::Doc(i).create_here(&dir).map(|m| m.path).map_err(|e| e.to_string())?;
+            let name_of = |p: &Path| {
+                p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+            };
+            if name_of(&a) != kind.default_name() {
+                return Err(format!("the first one came out {}", name_of(&a)));
+            }
+            let second = format!("New {} (1).{}", kind.label, kind.ext);
+            if name_of(&b) != second {
+                return Err(format!("the second one came out {}, not {second}", name_of(&b)));
+            }
+            let text = fs::read_to_string(&a).map_err(|e| e.to_string())?;
+            if text.trim().is_empty() {
+                return Err("the document is an empty file".into());
+            }
+            if !text.contains("\"format\": \"vectorcraft\"") || !text.contains("\"artboards\"") {
+                return Err("the file is not a VectorCraft document".into());
+            }
+            if serde_json::from_str::<serde_json::Value>(&text).is_err() {
+                return Err("the document is not JSON".into());
+            }
+            Ok(format!("{} and {} both hold a document", name_of(&a), name_of(&b)))
+        })(),
+    );
+
+    r.check(
+        "every registered document type is offered, and a type with no known start still makes a file",
+        (|| {
+            // The list is the applications' own entries, so it is checked for
+            // shape rather than for a count: no type may repeat, and every row
+            // must have the three things a row and a file name need.
+            let mut seen: Vec<&str> = Vec::new();
+            for kind in crate::docs::catalog() {
+                if kind.ext.is_empty() || kind.label.is_empty() || kind.app.is_empty() {
+                    return Err(format!("{} has an empty part: {kind:?}", kind.mime));
+                }
+                if seen.contains(&kind.mime.as_str()) {
+                    return Err(format!("{} is listed twice", kind.mime));
+                }
+                if !kind.label.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    return Err(format!("the label {:?} is not title-cased", kind.label));
+                }
+                seen.push(&kind.mime);
+            }
+            // A type whose application this build has no command for is still a
+            // registered type: the row appears, and the file it makes is the empty
+            // one a file manager can always make — `create` says which it got.
+            let stranger = crate::docs::DocKind {
+                app: "NowhereCraft".to_string(),
+                id: "org.example.nowherecraft".to_string(),
+                mime: "application/x-nowherecraft".to_string(),
+                ext: "ncraft".to_string(),
+                label: "NowhereCraft Document".to_string(),
+            };
+            let dir = made.join("strangers");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let target = dir.join(stranger.default_name());
+            let seeded = crate::docs::create(&stranger, &target).map_err(|e| e.to_string())?;
+            if seeded {
+                return Err("an unknown application was said to have written a document".into());
+            }
+            if !target.is_file() || fs::metadata(&target).map_err(|e| e.to_string())?.len() != 0 {
+                return Err("the fallback did not make an empty file".into());
+            }
+            Ok(format!(
+                "{} registered type(s), each with a label and an extension; an unknown one falls back to an empty file",
+                crate::docs::catalog().len()
+            ))
         })(),
     );
 
@@ -1113,6 +1478,192 @@ pub fn run() -> i32 {
     );
 
     r.check(
+        "the update check reads a release and knows which version is newer",
+        (|| {
+            // The shape GitHub answers with, cut down to what is read: tag, body,
+            // page and the asset list with its download URLs.
+            let json = r###"{
+                "tag_name": "v0.1.10",
+                "html_url": "https://github.com/mjb73/DolphinCraft/releases/tag/v0.1.10",
+                "body": "## What's new in 0.1.10\n\nThe type column, and the type on the page.",
+                "assets": [
+                    {"name": "dolphincraft-0.1.10-x86_64-linux.tar.gz", "browser_download_url": "https://example.invalid/dolphincraft-0.1.10-x86_64-linux.tar.gz"},
+                    {"name": "dolphincraft-0.1.10-x86_64-linux.tar.gz.sha256", "browser_download_url": "https://example.invalid/dolphincraft-0.1.10-x86_64-linux.tar.gz.sha256"},
+                    {"name": "dolphincraft-0.1.10-aarch64-linux.tar.gz", "browser_download_url": "https://example.invalid/dolphincraft-0.1.10-aarch64-linux.tar.gz"},
+                    {"name": "dolphincraft-0.1.10-aarch64-linux.tar.gz.sha256", "browser_download_url": "https://example.invalid/dolphincraft-0.1.10-aarch64-linux.tar.gz.sha256"}
+                ]
+            }"###;
+            let rel = crate::update::parse_release(json)
+                .map_err(|e| format!("a real reply was refused: {e}"))?;
+            if rel.version != "0.1.10" {
+                return Err(format!("the tag read as {}", rel.version));
+            }
+            let want = format!("dolphincraft-0.1.10-{}-linux.tar.gz", crate::update::arch());
+            if rel.tarball != want {
+                return Err(format!("it picked {} instead of {want}", rel.tarball));
+            }
+            if !rel.tarball_url.ends_with(&want) {
+                return Err(format!("its link is {}", rel.tarball_url));
+            }
+            let sha_want = format!("{}.sha256", rel.tarball_url);
+            if rel.sha_url.as_deref() != Some(sha_want.as_str()) {
+                return Err(format!("its checksum link is {:?}", rel.sha_url));
+            }
+            if !rel.notes.contains("type on the page") {
+                return Err("the release notes were dropped".into());
+            }
+            // Numeric, not string order: 0.1.10 is later than 0.1.9, which a text
+            // comparison would put the other way round.
+            if !crate::update::newer("0.1.6", "0.1.9") || !crate::update::newer("0.1.9", "0.1.10") {
+                return Err("a later version was not seen as later".into());
+            }
+            if crate::update::newer("0.1.10", "0.1.6") || crate::update::newer("0.1.6", "v0.1.6") {
+                return Err("an older or the same version was called new".into());
+            }
+            if !crate::update::newer("0.1.6", "v0.2") {
+                return Err("a short tag (v0.2) was not compared".into());
+            }
+            // A release with no build for this machine is an answer with a
+            // reason, not a panic and not a silent offer.
+            let bare = r#"{"tag_name":"v0.1.10","assets":[]}"#;
+            match crate::update::parse_release(bare) {
+                Ok(_) => return Err("a release with no assets was accepted".into()),
+                Err(e) if e.contains(crate::update::arch()) => {}
+                Err(e) => return Err(format!("the reason did not name the architecture: {e}")),
+            }
+            Ok(format!(
+                "{}, {}, checksum {}, later than {}",
+                rel.version,
+                rel.tarball,
+                if rel.sha_url.is_some() { "listed" } else { "missing" },
+                crate::APP_VERSION
+            ))
+        })(),
+    );
+
+    r.check(
+        "an update installs from the release archive and leaves no staging file",
+        (|| {
+            use std::os::unix::fs::PermissionsExt;
+            let root = base.join("updateinstall");
+            let member = "dolphincraft-9.9.9-x86_64-linux";
+            let pack = root.join(member);
+            std::fs::create_dir_all(&pack).map_err(|e| e.to_string())?;
+            std::fs::write(pack.join("dolphincraft"), b"NEW BUILD\n").map_err(|e| e.to_string())?;
+            let archive = root.join(format!("{member}.tar.gz"));
+            let status = std::process::Command::new("tar")
+                .arg("-czf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(&root)
+                .arg(member)
+                .status()
+                .map_err(|e| e.to_string())?;
+            if !status.success() {
+                return Err("tar would not build the fixture archive".into());
+            }
+            let bytes = std::fs::read(&archive).map_err(|e| e.to_string())?;
+            // The release's own checksum file form: the hex, two spaces, the name.
+            let hex = crate::update::sha256_hex(&bytes);
+            let sum = format!("{hex}  {member}.tar.gz\n");
+            if crate::update::checksum_from_file(&sum).as_deref() != Some(hex.as_str()) {
+                return Err("the checksum file did not read back".into());
+            }
+            if crate::update::checksum_from_file("not a checksum").is_some() {
+                return Err("a line that is not a sha256 sum was accepted".into());
+            }
+            let bin = root.join("bin");
+            std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+            let exe = bin.join("dolphincraft");
+            std::fs::write(&exe, b"OLD BUILD\n").map_err(|e| e.to_string())?;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+            crate::update::install_archive(&bytes, &exe)?;
+            let now = std::fs::read_to_string(&exe).map_err(|e| e.to_string())?;
+            if now != "NEW BUILD\n" {
+                return Err(format!("the installed build reads {now:?}"));
+            }
+            let mode = std::fs::metadata(&exe).map_err(|e| e.to_string())?.permissions().mode();
+            if mode & 0o111 == 0 {
+                return Err("the installed build is not executable".into());
+            }
+            if bin.join("dolphincraft.new").exists() {
+                return Err("the staging file was left behind".into());
+            }
+            // A different archive has a different sum: the comparison the install
+            // makes before it touches anything fails for it.
+            let mut tampered = bytes.clone();
+            tampered.push(0);
+            if crate::update::sha256_hex(&tampered) == hex {
+                return Err("a changed archive kept its checksum".into());
+            }
+            Ok(format!("{member} installed, {mode:o}, no .new left"))
+        })(),
+    );
+
+    r.check(
+        "the Type column orders by type both ways, and keeps names ordered inside a type",
+        (|| {
+            use crate::state::{Pane, SortKey};
+            let mut pane = Pane::new(1, std::path::PathBuf::from("/tmp"));
+            pane.entries.clear();
+            pane.all.clear();
+            for name in ["a.blend", "b.pcraft", "c.vectorcraft", "d.txt", "e.pcraft"] {
+                let path = std::path::PathBuf::from(format!("/tmp/{name}"));
+                let mut e = fsutil::Entry::from_path(&path);
+                e.name = name.to_string();
+                pane.entries.push(e.clone());
+                pane.all.push(e);
+            }
+            pane.sort = SortKey::Type;
+            pane.asc = true;
+            pane.sort_entries();
+            let asc: Vec<String> = pane.entries.iter().map(|e| e.name.clone()).collect();
+            pane.asc = false;
+            pane.sort_entries();
+            let desc: Vec<String> = pane.entries.iter().map(|e| e.name.clone()).collect();
+            let mut reversed = asc.clone();
+            reversed.reverse();
+            if desc != reversed {
+                return Err(format!(
+                    "descending did not reverse ascending: {asc:?} then {desc:?}"
+                ));
+            }
+            // Two files of one type are ordered by name, so the order is defined
+            // rather than whatever the sort happened to visit first.
+            let pc: Vec<&String> = asc.iter().filter(|n| n.ends_with(".pcraft")).collect();
+            if pc != ["b.pcraft", "e.pcraft"] {
+                return Err(format!("the two .pcraft files came out {pc:?}"));
+            }
+            Ok(format!("{} → {}", asc.join(", "), desc.join(", ")))
+        })(),
+    );
+
+    r.check(
+        "the type written on a document's page is sized to the page",
+        (|| {
+            let ctx = egui::Context::default();
+            let mut outcome: Option<Result<String, String>> = None;
+            let mut raw = egui::RawInput::default();
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(480.0, 320.0),
+            ));
+            let _ = ctx.run(raw, |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        outcome = Some(check_icon_type_label(ui));
+                    });
+            });
+            match outcome {
+                Some(result) => result,
+                None => Err("the frame never ran".into()),
+            }
+        })(),
+    );
+
+    r.check(
         "choosing the key that is already chosen keeps the order",
         (|| {
             // `slotSortTriggered` @0x291f30 sets the ticked action and the role; it
@@ -1526,6 +2077,7 @@ pub fn run() -> i32 {
                                 active: true,
                                 show_location_bar: false,
                                 other_dir: None,
+                                new_docs: Vec::new(),
                             };
                             layout = Some(pane.find_bar(ui, &mut vctx));
                         });
@@ -2026,6 +2578,38 @@ pub fn run() -> i32 {
                 return Err("the name has stray spaces".into());
             }
             Ok(format!("the title bar, task switcher and app id all read {name:?}"))
+        })(),
+    );
+
+    // ---- the title row carries the name and the release --------------------
+    r.check(
+        "the title row prints the app's name and its release",
+        (|| {
+            let (name, version) = crate::title_row_text();
+            if name != crate::APP_NAME || version != crate::APP_VERSION {
+                return Err(format!("the bar reads {name:?} {version:?}"));
+            }
+            if !crate::about_line().contains(version) {
+                return Err(format!("the bar's {version:?} is not the About release"));
+            }
+            Ok(format!("{name} {version}"))
+        })(),
+    );
+
+    // ---- the menu's About row carries the version -------------------------
+    // The row is what the person asked for, and its right-hand column is where the
+    // number has to be readable without opening anything.
+    r.check(
+        "the app menu's About row names the app and shows its release",
+        (|| {
+            let (label, hint) = crate::about_menu_row();
+            if label != format!("About {}", crate::APP_NAME) {
+                return Err(format!("the row reads {label:?}"));
+            }
+            if hint != crate::APP_VERSION || !label.starts_with("About ") {
+                return Err(format!("{label:?} shows the version as {hint:?}"));
+            }
+            Ok(format!("{label} … {hint}"))
         })(),
     );
 
@@ -2708,6 +3292,7 @@ pub fn run() -> i32 {
                                     active: true,
                                     show_location_bar: false,
                                     other_dir: None,
+                                new_docs: Vec::new(),
                                 };
                                 pane.ui(ui, &mut vctx);
                             });
@@ -3644,6 +4229,7 @@ pub fn run() -> i32 {
                                 active: true,
                                 show_location_bar: false,
                                 other_dir: None,
+                                new_docs: Vec::new(),
                             };
                             pane.ui(ui, &mut vctx);
                             measured = Some(
@@ -3701,6 +4287,7 @@ pub fn run() -> i32 {
                             active: true,
                             show_location_bar: false,
                             other_dir: None,
+                                new_docs: Vec::new(),
                         };
                         pane2.ui(ui, &mut vctx);
                     });
@@ -4037,25 +4624,82 @@ pub fn run() -> i32 {
         })(),
     );
     r.check(
-        "the window opens where it was left, and ignores a place off any screen",
+        "the window opens where it was left, unless that place does not fit its monitor",
         (|| {
             use crate::config::Config;
             let mut cfg = Config::default();
             if crate::startup_position(&cfg).is_some() {
                 return Err("a fresh profile should let the window manager place the window".into());
             }
+            // A place recorded together with the monitor it belongs to survives
+            // the settings file and is reused.
             cfg.window_pos = Some([320.0, 180.0]);
+            cfg.window_px = Some([1200.0, 900.0]);
+            cfg.window_monitor = Some([1920.0, 1080.0]);
             let text = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
             let back: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
             match crate::startup_position(&back) {
                 Some([320.0, 180.0]) => {}
                 other => return Err(format!("the saved place came back as {other:?}")),
             }
+            // The window that started all this: 1200 wide at x = 1084 on a
+            // 1920-wide monitor hangs 364 px off the right edge, and the toolbar
+            // — with Find and Menu on it — is in the part that is off. The place
+            // is refused.
+            cfg.window_pos = Some([1084.0, 0.0]);
+            cfg.window_px = Some([1200.0, 1303.0]);
+            if crate::startup_position(&cfg).is_some() {
+                return Err("a window that hangs off its own monitor was placed there anyway".into());
+            }
+            // A place from a build that did not record the monitor cannot be
+            // checked at all, so it is not trusted.
+            cfg.window_pos = Some([320.0, 180.0]);
+            cfg.window_px = Some([1200.0, 900.0]);
+            cfg.window_monitor = None;
+            if crate::startup_position(&cfg).is_some() {
+                return Err("a place with no monitor to check it against was reused".into());
+            }
+            // And an absurd place is still refused.
+            cfg.window_monitor = Some([1920.0, 1080.0]);
             cfg.window_pos = Some([90_000.0, -90_000.0]);
             if crate::startup_position(&cfg).is_some() {
                 return Err("a place far past any screen was used anyway".into());
             }
-            Ok("kept through the file, refused when absurd".into())
+            Ok("kept when it fits its monitor, refused off it, refused unrecorded, refused absurd".into())
+        })(),
+    );
+    r.check(
+        "a window on the second screen is not off-screen, and a maximized one is left to the manager",
+        (|| {
+            use egui::{pos2, vec2, Rect};
+            // The person's own numbers: 1202 x 1053 at x = 1921 on the right-hand
+            // monitor, whose size is 2409 x 1355. The old rule compared
+            // 1921 + 1202 against 2409 (a size, not an origin) and called the
+            // window off-screen — so the first geometry change after a maximize
+            // shrank it and threw it onto the other screen.
+            let size = vec2(1202.0, 1053.0);
+            let monitor = vec2(2409.0, 1355.0);
+            let at = |x: f32, y: f32| Some(Rect::from_min_size(pos2(x, y), size));
+            if !crate::window_fits(size, at(1921.0, 138.0), monitor) {
+                return Err("a window on the right-hand screen was called off-screen".into());
+            }
+            if !crate::window_fits(size, at(0.0, 0.0), monitor) {
+                return Err("a window at the origin was called off-screen".into());
+            }
+            // An extent bigger than the monitor it is on is the only thing the
+            // monitor's own size can tell us, and it is still corrected.
+            if crate::window_fits(vec2(3000.0, 1053.0), at(0.0, 0.0), monitor) {
+                return Err("a window wider than its monitor was called usable".into());
+            }
+            // Above the top edge of every screen.
+            if crate::window_fits(size, at(100.0, -200.0), monitor) {
+                return Err("a window above the screen was called usable".into());
+            }
+            // An unreported place is not a reason to resize.
+            if !crate::window_fits(size, None, monitor) {
+                return Err("a window with no reported place was resized anyway".into());
+            }
+            Ok("1921 on a 2409-wide screen fits; too big, above the screen and no place do not".into())
         })(),
     );
     r.check(

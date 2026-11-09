@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 
 `install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
 `~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
-release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.6` to pin a
+release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.7` to pin a
 release.
 
 The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,
@@ -34,8 +34,9 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   it keeps them.
 - **Tabs**, one per browsing session, in the window's own title row across the very
   top — the tab strip *is* the title bar, so there is one line where there used to be
-  two: the window's name sits at its left end, before the first tab; drag the bar to
-  move the window, double-click its empty space to maximize, and the
+  two: the window's name and its release (`DolphinCraft 0.1.7`) sit at its left end,
+  before the first tab; drag the bar to move the window, double-click its empty
+  space to maximize, and the
   minimize/maximize/close buttons sit at its right end (the toolbar below it belongs
   to the tab in front): **Ctrl+T** opens
   one on the folder you are looking at, **Ctrl+W** closes it, **Ctrl+Tab** and
@@ -51,6 +52,14 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   Closing a tab is never final: *File → Recently Closed Tabs* lists the ten
   folders closed since the window opened, newest first, and
   **Ctrl+Shift+T** brings the last one straight back where it was.
+- **The type, where it is needed**: the details view carries a *Type* column —
+  *PhotoCraft Document*, *BLEND file*, *PDF document* — between the name and the
+  size, and clicking its header sorts by it ascending or descending like the other
+  columns; the cell and the sort read the same string, so they cannot disagree, and
+  the column gives way on a window too narrow to hold it. On a document's icon the
+  page itself carries the extension (*PCRAFT*, *VECTORCRAFT*, *BLEND*) in letters
+  sized to the tile, so two documents made by two applications no longer wear the
+  same blank page; a tile too small to read keeps the plain page.
 - **Three view modes**: icons, details and compact (a column of names), each with
   its own zoom level and sort order. Compact sizes its columns from the longest
   name in the listing, so a name is not cut off at a fixed five-font-height cell —
@@ -229,6 +238,19 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   are left out rather than offered as dead rows. **Recent Locations** remembers
   the six folders you have walked into this window, newest first, so the way back
   to a deep folder is one click; either heading folds away when you don't need it.
+- ***Check for Updates…*** in the app menu, above *About*, asks GitHub whether a
+  newer release exists — only when you pick it; nothing looks for one on its own,
+  and while a check or an install runs the row says so and does nothing. A newer
+  release opens a window with its notes and the version you have, and *Install and
+  Restart* downloads the tarball, checks it against the release's sha256 before
+  anything is replaced, puts the new build in place and starts it with the same
+  folder and flags — the window comes back on the new version in a second. A
+  download that does not match its checksum is refused and the build you have is
+  left alone. *About* now says it dials out, because it does.
+- ***About DolphinCraft*** sits pinned at the bottom of the app menu, with the
+  release number in its right-hand column, and opens a small window carrying the
+  name, the version, the tag the build was cut from and the licence. Escape or
+  *Close* dismisses it.
 - Copy, cut, paste, rename, move to trash, delete, new folder, and file
   properties, all with the shortcuts you already know from Dolphin. Clicking a
   file that is already marked asks to rename it — the name opens in place with
@@ -241,6 +263,33 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   Enter keeps it (Escape keeps the suggestion). A second one takes the next free
   name (`New Folder`, `New Folder (1)`) instead of refusing. F10 makes a folder
   the same way, and the app menu's *New* group carries both kinds.
+- **Documents from the applications on this computer**: every installed
+  application that keeps a document type of its own is offered under
+  *Document Types* in the app menu's *New* group — its `.desktop` entry names the
+  format and its MIME package describes it, so ticking PhotoCraft puts
+  *PhotoCraft Document* under *New → New Document*; the count on the row says how
+  many are on. That creation list is a submenu rather than rows in *New*, so the
+  menu stays the same height however many types are ticked. Nothing in the list
+  is written down here, so it is whatever the computer has: the same rows
+  appear on another machine with the same applications installed, and an
+  application this build has never heard of appears when its own package names
+  its format. The file is a real document, not an empty file wearing the
+  extension: the format's own application is asked to start it through the CLI
+  that ships beside it — `<name>-cli` on the PATH when the application came from
+  a package, inside the sandbox when it came from the flatpak store — and
+  VectorCraft's JSON is written directly. A type whose application has no such
+  command still gets its tick and its row, and the toast says the file it made
+  is empty.
+- **The window comes back where you can reach it**: a size saved on a bigger
+  screen (or at a different scale) is corrected on the first frame, so the
+  toolbar — and *Menu* on it — is never left outside the desktop; a window that
+  is already usable on either of two screens is left exactly where it is, and
+  *Maximize* or a double click on the header is the window manager's to answer.
+- **A menu that fits**: everything that is a setting rather than an action now
+  lives under *Settings* — *Appearance* (light mode and its shading), *Panels*,
+  *Previews and sizes*, *Starting*, *Deleting* — so the menu opens on *New*,
+  *Tools*, *View*, *Settings* and *Sort by* instead of a list as tall as
+  the window.
 - **Deleting asks nothing first** (as you asked): mark the pictures — or any
   files — and press Delete; they are in the Trash before you let go of the key.
   Shift+Delete removes them for good the same way. What replaces the question is
@@ -289,7 +338,6 @@ Options:
 --keep-settings           use the saved layout instead of factory settings
 --find <text>             open the find bar with these words already narrowing the list
 --deep                   with --find, look through every folder below as well
---guide                   open the card that explains Find and Menu
 --menu                    open the app's own menu (used to photograph it)
 --open-with <file>        open the Open With chooser on that file at once
                           (used to photograph it)

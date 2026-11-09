@@ -18,10 +18,20 @@ use crate::theme;
 use crate::{App, Bulk, Confirm, ConfirmAction, Dups, NewKind, Props, Quick, ShortcutEdit};
 
 /// A quiet heading inside the app menu, so its rows read as groups ("New",
-/// "Tools", "View", "Help") instead of one long list.
+/// "Tools", "View", "Settings", "Help") instead of one long list.
 fn menu_group(ui: &mut egui::Ui, text: &str) {
     ui.add_space(4.0);
     ui.label(egui::RichText::new(text).size(10.5).color(theme::text_faint()));
+}
+
+/// Both width bounds for a submenu. A submenu's `ui` reports the whole window's
+/// width, so a row built with `menu_row` (which allocates `available_width`)
+/// would make the popup as wide as the window and push it over to the left of
+/// its parent; the framework-widget submenus get their bounds from the widgets
+/// they draw with.
+fn menu_box(ui: &mut egui::Ui, width: f32) {
+    ui.set_min_width(width);
+    ui.set_max_width(width);
 }
 
 fn window_style<'a>(title: &'a str) -> egui::Window<'a> {
@@ -43,9 +53,26 @@ impl App {
     pub fn app_menu(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(250.0);
         let dir = self.pane().current_dir();
+        // The menu reads top-down as what it does: make something, run a tool,
+        // change the view, change a setting, sort, ask for help. Everything that
+        // is a *setting* rather than an action lives one level down under
+        // *Settings*, so this list stays short enough to read without scrolling.
+        self.menu_new(ui, &dir);
+        ui.separator();
+        self.menu_tools(ui, &dir);
+        ui.separator();
+        self.menu_view(ui);
+        self.menu_settings(ui);
+        ui.separator();
+        self.menu_sort(ui);
+    }
+
+    /// *New*: a window, a tab, the tabs that were closed, a folder, a text file,
+    /// the document types the person has ticked, and the submenu that ticks them.
+    fn menu_new(&mut self, ui: &mut egui::Ui, dir: &std::path::Path) {
         menu_group(ui, "New");
         if crate::menu_row(ui, "New Window", "Ctrl+N").clicked() {
-            crate::spawn_folder_window(&dir);
+            crate::spawn_folder_window(dir);
             ui.close();
         }
         if crate::menu_row(ui, "New Tab", "Ctrl+T").clicked() {
@@ -60,7 +87,7 @@ impl App {
             let list: Vec<PathBuf> = self.closed_tabs.iter().rev().cloned().collect();
             ui.add_enabled_ui(!list.is_empty(), |ui| {
                 ui.menu_button("Recently Closed Tabs", |ui| {
-                    ui.set_min_width(240.0);
+                    menu_box(ui, 240.0);
                     for (i, path) in list.iter().enumerate() {
                         let name = path
                             .file_name()
@@ -82,24 +109,107 @@ impl App {
         // and their name opens for editing in place (`App::make_new`) — the same
         // one-step flow as *Create New* on the view's own space.
         if crate::menu_row(ui, "New Folder", "F10").clicked() {
-            self.make_new(NewKind::Folder, &dir);
+            self.make_new(NewKind::Folder, dir);
             ui.close();
         }
         // The other half of the original's *Create New* menu: an empty text
         // file, which opens in the editor like any other file once it is on disk.
         if crate::menu_row(ui, "New Text File", "").clicked() {
-            self.make_new(NewKind::TextFile, &dir);
+            self.make_new(NewKind::TextFile, dir);
             ui.close();
         }
+        // Added feature, asked for by the person: the document types the settings
+        // tick are made from one *New Document* submenu rather than one row each.
+        // A ticked list is the person's own choice of length, so the rows must not
+        // push *Add Shortcut*, *Document Types* and the rest of the menu down the
+        // way nine inline rows once did: the group's rows are fixed, its submenu
+        // grows. The rows come from `docs::catalog`, so they are the applications
+        // the desktop has registered and not a list written here.
+        let ticked = crate::docs::enabled(&self.config);
+        if !ticked.is_empty() {
+            let mut new_doc: Option<usize> = None;
+            ui.menu_button("New Document", |ui| {
+                menu_box(ui, 236.0);
+                for i in ticked {
+                    let Some(kind) = crate::docs::catalog().get(i) else {
+                        continue;
+                    };
+                    let resp = crate::menu_row(ui, &kind.label, "").on_hover_text(format!(
+                        "A new .{} document, made by {}",
+                        kind.ext, kind.app
+                    ));
+                    if resp.clicked() {
+                        new_doc = Some(i);
+                        ui.close();
+                    }
+                }
+            });
+            if let Some(i) = new_doc {
+                self.make_new(NewKind::Doc(i), dir);
+                ui.close();
+            }
+        }
+        // The list itself, one row rather than one row per type: the ticks were
+        // once nine rows in this menu, and they pushed everything below them out
+        // of sight. This row is the settings for the submenu above it.
+        self.menu_document_types(ui);
         if crate::menu_row(ui, "Add Shortcut…", "Ctrl+Shift+S").clicked() {
-            self.open_shortcut_editor(None, dir.clone());
+            self.open_shortcut_editor(None, dir.to_path_buf());
             ui.close();
         }
         if crate::menu_row(ui, "Open Terminal Here", "").clicked() {
-            fsutil::open_terminal(&dir);
+            fsutil::open_terminal(dir);
             ui.close();
         }
-        ui.separator();
+    }
+
+    /// Which applications' documents *New* offers, as a submenu of checkboxes —
+    /// the whole registered list, so an application that is installed is one tick
+    /// away instead of a row that appears without being asked for. The count on
+    /// the row says how many are on, because a submenu hides its own contents.
+    fn menu_document_types(&mut self, ui: &mut egui::Ui) {
+        let kinds = crate::docs::catalog();
+        let on = kinds
+            .iter()
+            .filter(|k| self.config.offers_new_doc(&k.mime))
+            .count();
+        // No `add_enabled_ui` around the submenu: a `menu_button` wrapped in an
+        // enabled scope gets its popup inside a child id-space, and a row that
+        // never opens is exactly what that produces.
+        if kinds.is_empty() {
+            ui.add_enabled(
+                false,
+                egui::Button::new("Document Types")
+                    .min_size(Vec2::new(ui.available_width(), 0.0)),
+            )
+            .on_hover_text("No installed application registers a document type this build can start.");
+        } else {
+            ui.menu_button(format!("Document Types ({on}/{})", kinds.len()), |ui| {
+                menu_box(ui, 236.0);
+                ui.label(
+                    egui::RichText::new("Tick the types New should offer:")
+                        .size(10.5)
+                        .color(theme::text_faint()),
+                );
+                for kind in kinds {
+                    let mut checked = self.config.offers_new_doc(&kind.mime);
+                    let resp = ui
+                        .checkbox(&mut checked, &kind.label)
+                        .on_hover_text(format!(
+                            "A new .{} document in this folder, made by {}",
+                            kind.ext, kind.app
+                        ));
+                    if resp.changed() {
+                        self.config.set_new_doc(&kind.mime, checked);
+                        self.config_dirty = true;
+                    }
+                }
+            });
+        }
+    }
+
+    /// *Tools*: the actions this build adds, in the order they are used.
+    fn menu_tools(&mut self, ui: &mut egui::Ui, dir: &std::path::Path) {
         menu_group(ui, "Tools");
         // The original's own row, first in its Tools menu: a `manage_disk_space`
         // action labelled "Manage Disk Space Usage" (string 0x22d931, icon
@@ -108,7 +218,7 @@ impl App {
         // free-space tooltip — "Press to manage disk space usage." — is true
         // without anything to install.
         if crate::menu_row(ui, "Manage Disk Space Usage…", "").clicked() {
-            self.reqs.push(Request::SpaceUsage(dir.clone()));
+            self.reqs.push(Request::SpaceUsage(dir.to_path_buf()));
             ui.close();
         }
         // Added feature: the two archive rows. They act on what is marked, and
@@ -116,7 +226,7 @@ impl App {
         // not marked anything usually means "this folder".
         if crate::menu_row(ui, "Compress…", "").clicked() {
             let paths = self.pane().selected_paths();
-            self.reqs.push(Request::Compress(paths, dir.clone()));
+            self.reqs.push(Request::Compress(paths, dir.to_path_buf()));
             ui.close();
         }
         // The first marked archive, if any is marked: Extract acts on one file.
@@ -226,14 +336,14 @@ impl App {
         // find bar names but answers elsewhere.
         if crate::menu_row(ui, "Find in Files…", "Ctrl+Shift+F").clicked() {
             self.findtext = Some(findtext::FindText::start(
-                dir.clone(),
+                dir.to_path_buf(),
                 findtext::Options::new(String::new()),
             ));
             ui.close();
         }
         if crate::menu_row(ui, "Find Duplicates…", "Ctrl+Shift+D").clicked() {
             self.dups = Some(Dups {
-                scan: crate::search::DupScan::start(dir.clone()),
+                scan: crate::search::DupScan::start(dir.to_path_buf()),
             });
             ui.close();
         }
@@ -263,7 +373,11 @@ impl App {
             }
             ui.close();
         }
-        ui.separator();
+    }
+
+    /// The switches that change what the view shows, kept one click away because
+    /// they are used while working rather than configured once.
+    fn menu_view(&mut self, ui: &mut egui::Ui) {
         menu_group(ui, "View");
         let mut show_hidden = self.pane().show_hidden;
         if ui.checkbox(&mut show_hidden, "Show Hidden Files").changed() {
@@ -276,71 +390,6 @@ impl App {
             self.pane_mut().previews = previews;
             self.config_dirty = true;
         }
-        // Three settings the original keeps on two of its own pages, together
-        // here. Each is the original's own key and range:
-        // `GeneralSettings` `ShowZoomSlider` (the status-bar slider, off by
-        // default there), `[PreviewSettings] MaximumSize` (previews only for
-        // files below N MiB, 0 = any size) and
-        // `ContentDisplaySettings` `RecursiveDirectorySizeLimit` (how deep
-        // "size of contents" walks, 1..20).
-        ui.menu_button("Previews and sizes", |ui| {
-            ui.set_min_width(250.0);
-            let mut zoom_slider = self.config.show_zoom_slider;
-            if ui
-                .checkbox(&mut zoom_slider, "Show zoom slider")
-                .on_hover_text(
-                    "The original has this off in a fresh profile and switches it \
-                     on from the status bar's own menu",
-                )
-                .changed()
-            {
-                self.config.show_zoom_slider = zoom_slider;
-                self.config_dirty = true;
-            }
-            ui.separator();
-            let mut mib = self.config.preview_max_mib;
-            ui.horizontal(|ui| {
-                ui.label("Previews for files below");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut mib)
-                            .range(0..=999)
-                            .suffix(" MiB"),
-                    )
-                    .changed()
-                {
-                    self.config.preview_max_mib = mib;
-                    self.thumbs.set_max_mib(mib);
-                    self.config_dirty = true;
-                }
-            });
-            ui.label(
-                egui::RichText::new(if mib == 0 {
-                    "0 = files of any size"
-                } else {
-                    "bigger files show their type icon"
-                })
-                .size(10.5)
-                .color(theme::text_faint()),
-            );
-            let mut depth = self.config.size_limit;
-            ui.horizontal(|ui| {
-                ui.label("Size of contents, up to");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut depth)
-                            .range(
-                                crate::search::SIZE_LIMIT_MIN..=crate::search::SIZE_LIMIT_MAX,
-                            )
-                            .suffix(" folders"),
-                    )
-                    .changed()
-                {
-                    self.config.size_limit = depth;
-                    self.config_dirty = true;
-                }
-            });
-        });
         // Added feature: the picture gallery, and its viewer for whichever
         // picture is selected.
         let mut pictures = self.pane().pictures;
@@ -376,161 +425,251 @@ impl App {
                 self.unsplit();
             }
         }
-        let mut places = self.places_visible;
-        if ui.checkbox(&mut places, "Show Shortcuts Panel").changed() {
-            self.places_visible = places;
-        }
-        // Added feature: the *Network* group can leave the panel, heading and
-        // all, for a desktop with no shares. The switch is here rather than on
-        // the group's own heading because a hidden group has no heading to
-        // click, and a setting with no way back is a trap.
-        let mut network = self.config.network_visible;
-        if ui
-            .checkbox(&mut network, "Show Network Shared Folders")
-            .on_hover_text("The Network group in the panel: the shares this desktop has mounted")
-            .changed()
-        {
-            self.config.network_visible = network;
-            self.config_dirty = true;
-        }
-        // Added feature, asked for by the person: dark and light, from the menu.
-        // The whole window is repainted from the palette, so egui's own widget
-        // colours have to be set again as well as the switch itself.
-        let mut light = self.config.light;
-        if ui
-            .checkbox(&mut light, "Light Mode")
-            .on_hover_text("Switch the whole window between the dark and light palette")
-            .changed()
-        {
-            self.config.light = light;
-            self.config_dirty = true;
-            crate::theme::set_light(light);
-            crate::theme::apply_style(ui.ctx());
-            ui.ctx().request_repaint();
-        }
-        // Added feature, asked for by the person: one of their displays did not
-        // show the steps between the light window's surfaces, so the depth of
-        // that shading is a control instead of a constant. Shown only in the
-        // light palette — the dark one already sits at the dark end of the range,
-        // where deepening the surfaces closes the ladder rather than opening it.
-        if self.config.light {
-            let mut shade = self.config.shade.min(100);
-            let resp = crate::theme::setting_slider(ui, &mut shade, 0..=100, 104.0);
-            if resp.changed() {
-                self.config.shade = shade;
-                self.config_dirty = true;
-                crate::theme::set_shade(shade);
-                crate::theme::apply_style(ui.ctx());
-                ui.ctx().request_repaint();
-            }
-            resp.on_hover_text(
-                "How deep the light palette's shading goes: the panel, the toolbar, \
-                 the hovered row and the hairlines. 0 keeps the values the palette was designed with",
-            );
-        }
-        let mut info = self.info_panel;
-        if ui.checkbox(&mut info, "Show Information Panel").changed() {
-            self.info_panel = info;
-            self.config_dirty = true;
-        }
-        ui.separator();
-        // The original's Startup page offers "Folders, tabs, and window state
-        // from last time" (0x137dc8) and saves it in
-        // `DolphinMainWindow::slotSaveSession`. Everything else on this page is
-        // always remembered; this switch is only about the tabs, because a window
-        // that reopens seven tabs is not everyone's wish.
-        menu_group(ui, "Starting");
-        let mut reopen = self.config.restore_session;
-        if ui
-            .checkbox(&mut reopen, "Reopen the tabs I had open")
-            .on_hover_text(
-                "Sorting, view, zoom, panel widths and window size are always remembered",
-            )
-            .changed()
-        {
-            self.config.restore_session = reopen;
-            self.config_dirty = true;
-        }
-        // Added feature: a plain statement of what is kept, and one row to
-        // forget it. Everything in this window is written as it is chosen, so
-        // the person can see where it went and undo it in a single click.
-        ui.label(
-            egui::RichText::new("Saved as you go: sort, view, zoom, panels, colours, pictures and the window's size and place.")
-                .size(10.5)
-                .color(theme::text_faint()),
-        );
-        if crate::menu_row(ui, "Forget remembered settings", "").clicked() {
-            self.reqs.push(Request::ForgetSettings);
-            ui.close();
-        }
-        ui.separator();
-        // The original keeps these three on its Confirmations page, one switch
-        // per destructive action (`ConfirmTrash`, `ConfirmDelete`,
-        // `ConfirmEmptyTrash`). Here the two that the person asked to be
-        // question-free start off, and the one that cannot be undone starts on.
-        menu_group(ui, "Deleting");
-        let mut ask_trash = self.config.confirm_trash;
-        if ui
-            .checkbox(&mut ask_trash, "Ask before moving to the Trash")
-            .on_hover_text("Off: Delete on a marked selection moves it at once, with Undo")
-            .changed()
-        {
-            self.config.confirm_trash = ask_trash;
-            self.config_dirty = true;
-        }
-        let mut ask_delete = self.config.confirm_delete;
-        if ui
-            .checkbox(&mut ask_delete, "Ask before deleting permanently")
-            .on_hover_text("Off: Shift+Delete on a marked selection deletes it at once")
-            .changed()
-        {
-            self.config.confirm_delete = ask_delete;
-            self.config_dirty = true;
-        }
-        let mut ask_empty = self.config.confirm_empty_trash;
-        if ui
-            .checkbox(&mut ask_empty, "Ask before emptying the Trash")
-            .changed()
-        {
-            self.config.confirm_empty_trash = ask_empty;
-            self.config_dirty = true;
-        }
-        let undo_ready = self
-            .undo_trash
-            .as_ref()
-            .map(|u| u.at.elapsed().as_secs_f32() < crate::UNDO_SECS)
-            .unwrap_or(false);
-        // The Trash's own action, in the original's own words and with its own
-        // rule: the row is there in the Trash view and greyed out while there is
-        // nothing in it (`FUN_0018db20`).
-        let in_trash = self.pane().is_trash();
-        let trash_items = if in_trash {
-            self.pane().entries.len()
-        } else {
-            0
-        };
-        if in_trash {
-            let mut empty = false;
-            ui.add_enabled_ui(trash_items > 0, |ui| {
-                if crate::menu_row(ui, crate::EMPTY_TRASH_LABEL, "").clicked() {
-                    empty = true;
+    }
+
+    /// Every setting in one submenu, grouped by what it is about. The menu had
+    /// grown to the height of the window — nine document types, five view
+    /// switches and six confirmations in one list — and a menu that has to be
+    /// scrolled to reach *Quit* is a menu nobody reads.
+    fn menu_settings(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Settings", |ui| {
+            menu_box(ui, 250.0);
+            // Added feature, asked for by the person: dark and light, and how
+            // deep the light palette's shading goes. The whole window is
+            // repainted from the palette, so egui's own widget colours have to be
+            // set again as well as the switch itself.
+            ui.menu_button("Appearance", |ui| {
+                menu_box(ui, 240.0);
+                let mut light = self.config.light;
+                if ui
+                    .checkbox(&mut light, "Light Mode")
+                    .on_hover_text("Switch the whole window between the dark and light palette")
+                    .changed()
+                {
+                    self.config.light = light;
+                    self.config_dirty = true;
+                    crate::theme::set_light(light);
+                    crate::theme::apply_style(ui.ctx());
+                    ui.ctx().request_repaint();
+                }
+                // One of the person's displays did not show the steps between the
+                // light window's surfaces, so the depth of that shading is a
+                // control instead of a constant. Shown only in the light palette —
+                // the dark one already sits at the dark end of the range, where
+                // deepening the surfaces closes the ladder rather than opening it.
+                if self.config.light {
+                    let mut shade = self.config.shade.min(100);
+                    let resp = crate::theme::setting_slider(ui, &mut shade, 0..=100, 104.0);
+                    if resp.changed() {
+                        self.config.shade = shade;
+                        self.config_dirty = true;
+                        crate::theme::set_shade(shade);
+                        crate::theme::apply_style(ui.ctx());
+                        ui.ctx().request_repaint();
+                    }
+                    resp.on_hover_text(
+                        "How deep the light palette's shading goes: the panel, the toolbar, \
+                         the hovered row and the hairlines. 0 keeps the values the palette was designed with",
+                    );
                 }
             });
-            if empty {
-                self.reqs.push(Request::EmptyTrash);
-                ui.close();
-            }
-        }
-        ui.add_enabled_ui(undo_ready, |ui| {
-            if crate::menu_row(ui, "Undo Move to Trash", "Ctrl+Z").clicked() && undo_ready {
-                self.undo_last_trash();
-                ui.close();
-            }
+            // The panels the window carries, each switchable on its own.
+            ui.menu_button("Panels", |ui| {
+                menu_box(ui, 240.0);
+                let mut places = self.places_visible;
+                if ui.checkbox(&mut places, "Show Shortcuts Panel").changed() {
+                    self.places_visible = places;
+                }
+                // Added feature: the *Network* group can leave the panel, heading
+                // and all, for a desktop with no shares. The switch is here rather
+                // than on the group's own heading because a hidden group has no
+                // heading to click, and a setting with no way back is a trap.
+                let mut network = self.config.network_visible;
+                if ui
+                    .checkbox(&mut network, "Show Network Shared Folders")
+                    .on_hover_text("The Network group in the panel: the shares this desktop has mounted")
+                    .changed()
+                {
+                    self.config.network_visible = network;
+                    self.config_dirty = true;
+                }
+                let mut info = self.info_panel;
+                if ui.checkbox(&mut info, "Show Information Panel").changed() {
+                    self.info_panel = info;
+                    self.config_dirty = true;
+                }
+            });
+            // Three settings the original keeps on two of its own pages, together
+            // here. Each is the original's own key and range:
+            // `GeneralSettings` `ShowZoomSlider` (the status-bar slider, off by
+            // default there), `[PreviewSettings] MaximumSize` (previews only for
+            // files below N MiB, 0 = any size) and
+            // `ContentDisplaySettings` `RecursiveDirectorySizeLimit` (how deep
+            // "size of contents" walks, 1..20).
+            ui.menu_button("Previews and sizes", |ui| {
+                menu_box(ui, 260.0);
+                let mut zoom_slider = self.config.show_zoom_slider;
+                if ui
+                    .checkbox(&mut zoom_slider, "Show zoom slider")
+                    .on_hover_text(
+                        "The original has this off in a fresh profile and switches it \
+                         on from the status bar's own menu",
+                    )
+                    .changed()
+                {
+                    self.config.show_zoom_slider = zoom_slider;
+                    self.config_dirty = true;
+                }
+                ui.separator();
+                let mut mib = self.config.preview_max_mib;
+                ui.horizontal(|ui| {
+                    ui.label("Previews for files below");
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut mib)
+                                .range(0..=999)
+                                .suffix(" MiB"),
+                        )
+                        .changed()
+                    {
+                        self.config.preview_max_mib = mib;
+                        self.thumbs.set_max_mib(mib);
+                        self.config_dirty = true;
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(if mib == 0 {
+                        "0 = files of any size"
+                    } else {
+                        "bigger files show their type icon"
+                    })
+                    .size(10.5)
+                    .color(theme::text_faint()),
+                );
+                let mut depth = self.config.size_limit;
+                ui.horizontal(|ui| {
+                    ui.label("Size of contents, up to");
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut depth)
+                                .range(
+                                    crate::search::SIZE_LIMIT_MIN..=crate::search::SIZE_LIMIT_MAX,
+                                )
+                                .suffix(" folders"),
+                        )
+                        .changed()
+                    {
+                        self.config.size_limit = depth;
+                        self.config_dirty = true;
+                    }
+                });
+            });
+            // The original's Startup page offers "Folders, tabs, and window state
+            // from last time" (0x137dc8) and saves it in
+            // `DolphinMainWindow::slotSaveSession`. Everything else on this page is
+            // always remembered; this switch is only about the tabs, because a
+            // window that reopens seven tabs is not everyone's wish.
+            ui.menu_button("Starting", |ui| {
+                menu_box(ui, 268.0);
+                let mut reopen = self.config.restore_session;
+                if ui
+                    .checkbox(&mut reopen, "Reopen the tabs I had open")
+                    .on_hover_text(
+                        "Sorting, view, zoom, panel widths and window size are always remembered",
+                    )
+                    .changed()
+                {
+                    self.config.restore_session = reopen;
+                    self.config_dirty = true;
+                }
+                ui.separator();
+                // Added feature: a plain statement of what is kept, and one row to
+                // forget it. Everything in this window is written as it is chosen,
+                // so the person can see where it went and undo it in a single click.
+                ui.label(
+                    egui::RichText::new("Saved as you go: sort, view, zoom, panels, colours, pictures and the window's size and place.")
+                        .size(10.5)
+                        .color(theme::text_faint()),
+                );
+                if crate::menu_row(ui, "Forget remembered settings", "").clicked() {
+                    self.reqs.push(Request::ForgetSettings);
+                    ui.close();
+                }
+            });
+            // The original keeps these three on its Confirmations page, one switch
+            // per destructive action (`ConfirmTrash`, `ConfirmDelete`,
+            // `ConfirmEmptyTrash`). Here the two that the person asked to be
+            // question-free start off, and the one that cannot be undone starts on.
+            ui.menu_button("Deleting", |ui| {
+                menu_box(ui, 250.0);
+                let mut ask_trash = self.config.confirm_trash;
+                if ui
+                    .checkbox(&mut ask_trash, "Ask before moving to the Trash")
+                    .on_hover_text("Off: Delete on a marked selection moves it at once, with Undo")
+                    .changed()
+                {
+                    self.config.confirm_trash = ask_trash;
+                    self.config_dirty = true;
+                }
+                let mut ask_delete = self.config.confirm_delete;
+                if ui
+                    .checkbox(&mut ask_delete, "Ask before deleting permanently")
+                    .on_hover_text("Off: Shift+Delete on a marked selection deletes it at once")
+                    .changed()
+                {
+                    self.config.confirm_delete = ask_delete;
+                    self.config_dirty = true;
+                }
+                let mut ask_empty = self.config.confirm_empty_trash;
+                if ui
+                    .checkbox(&mut ask_empty, "Ask before emptying the Trash")
+                    .changed()
+                {
+                    self.config.confirm_empty_trash = ask_empty;
+                    self.config_dirty = true;
+                }
+                let undo_ready = self
+                    .undo_trash
+                    .as_ref()
+                    .map(|u| u.at.elapsed().as_secs_f32() < crate::UNDO_SECS)
+                    .unwrap_or(false);
+                // The Trash's own action, in the original's own words and with its
+                // own rule: the row is there in the Trash view and greyed out while
+                // there is nothing in it (`FUN_0018db20`).
+                let in_trash = self.pane().is_trash();
+                let trash_items = if in_trash {
+                    self.pane().entries.len()
+                } else {
+                    0
+                };
+                ui.separator();
+                if in_trash {
+                    let mut empty = false;
+                    ui.add_enabled_ui(trash_items > 0, |ui| {
+                        if crate::menu_row(ui, crate::EMPTY_TRASH_LABEL, "").clicked() {
+                            empty = true;
+                        }
+                    });
+                    if empty {
+                        self.reqs.push(Request::EmptyTrash);
+                        ui.close();
+                    }
+                }
+                ui.add_enabled_ui(undo_ready, |ui| {
+                    if crate::menu_row(ui, "Undo Move to Trash", "Ctrl+Z").clicked() && undo_ready {
+                        self.undo_last_trash();
+                        ui.close();
+                    }
+                });
+            });
         });
-        ui.separator();
-        // Sorting is also reachable here, so it stays available in a window so
-        // narrow that the toolbar's sort control gives way to the location bar.
+    }
+
+    /// Sorting is also reachable here, so it stays available in a window so
+    /// narrow that the toolbar's sort control gives way to the location bar.
+    fn menu_sort(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Sort by", |ui| {
+            menu_box(ui, 220.0);
             let mut changed = false;
             {
                 let pane = self.pane_mut();
@@ -561,6 +700,7 @@ impl App {
                 // Same three comparisons the original's Sort page lists
                 // (`FUN_001e5750` @0x1e5750).
                 ui.menu_button("Name comparison", |ui| {
+                    menu_box(ui, 200.0);
                     for mode in [
                         crate::state::NameSort::Natural,
                         crate::state::NameSort::CaseInsensitive,
@@ -585,14 +725,32 @@ impl App {
                 self.config_dirty = true;
             }
         });
-        ui.separator();
-        menu_group(ui, "Help");
-        if crate::menu_row(ui, "What the Two Buttons Do…", "F1").clicked() {
-            self.guide_open = true;
+    }
+
+    /// The two rows that close the app menu, drawn beside the menu rather than in
+    /// its scrolling part (`app_menu` is taller than a window once the tool rows
+    /// and the view switches are in), so they are on screen at any height. The
+    /// About row carries this build's release in its right-hand column (asked for
+    /// by the person: *"add an about item in the menu that shows the version
+    /// number of the app"*) and opens a window where it can be read properly.
+    pub fn app_menu_footer(&mut self, ui: &mut egui::Ui) {
+        // Added feature: a manual check for a newer release. Nothing looks for one
+        // on its own — this row is the only place that starts it — and while a
+        // check or an install is running the row says so and does nothing.
+        if self.update.busy() {
+            let words = if self.update.installing {
+                "Installing Update…"
+            } else {
+                "Checking for Updates…"
+            };
+            let _ = crate::menu_row_with(ui, words, "", false);
+        } else if crate::menu_row(ui, "Check for Updates…", "").clicked() {
+            self.update.start_check();
             ui.close();
         }
-        if crate::menu_row(ui, "About", "").clicked() {
-            self.toast(&crate::about_line());
+        let (label, version) = crate::about_menu_row();
+        if crate::menu_row(ui, &label, version).clicked() {
+            self.about_open = true;
             ui.close();
         }
         if crate::menu_row(ui, "Quit", "Ctrl+Q").clicked() {
@@ -1005,7 +1163,8 @@ impl App {
         self.copy_dialog(ctx);
         self.resize_dialog(ctx);
         self.shortcut_dialog(ctx);
-        self.guide_dialog(ctx);
+        self.about_dialog(ctx);
+        self.update_dialog(ctx);
     }
 
     /// Added feature: *Manage Disk Space Usage*.
@@ -2285,72 +2444,51 @@ impl App {
         self.open_with = Some(ow);
     }
 
-    /// Added: the plain-language answer to "what do these three buttons do?".
-    /// One row per button, each naming the one thing it owns — a place, a find,
-    /// a setting — because that is the confusion a row of unlabeled glyphs
-    /// creates.
-    fn guide_dialog(&mut self, ctx: &egui::Context) {
-        if !self.guide_open {
+    /// Added: the window the menu's About row opens. The original's *Help → About
+    /// Dolphin* is a dialog with the version at the top of it; this one shows the
+    /// same three things — the name, the release and what the program is — and the
+    /// tag the binary was cut from, without a network call.
+    fn about_dialog(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
             return;
         }
         let mut open = true;
         let mut close = false;
-        let rows: [(&str, &str, &str); 2] = [
-            (
-                "search",
-                "Find",
-                "Narrows what you see to the names that match. “This folder” \
-                 looks at the list in front of you while you type; “In subfolders” \
-                 also looks inside every folder below.",
-            ),
-            (
-                "menu",
-                "Menu",
-                "The app's own switches and extras — sorting, previews, hidden \
-                 files, duplicates, bulk rename. Nothing in this list changes your \
-                 files on its own.",
-            ),
-        ];
-        window_style("What the Two Buttons Do")
+        window_style(&format!("About {}", crate::APP_NAME))
             .open(&mut open)
             .show(ctx, |ui| {
-                ui.set_min_width(440.0);
+                ui.set_min_width(340.0);
+                ui.add_space(2.0);
                 ui.label(
-                    egui::RichText::new(
-                        "They sit together at the right end of the toolbar. Each one owns a \
-                         different question.",
-                    )
-                    .size(11.5)
-                    .color(theme::text_dim()),
+                    egui::RichText::new(crate::APP_NAME)
+                        .size(17.0)
+                        .color(theme::text()),
+                );
+                ui.add_space(3.0);
+                ui.label(
+                    egui::RichText::new(format!("Version {}", crate::APP_VERSION))
+                        .size(13.0)
+                        .color(theme::text()),
+                );
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new("a file manager with extra tools")
+                        .size(11.5)
+                        .color(theme::text_dim()),
                 );
                 ui.add_space(10.0);
-                for (glyph, name, text) in rows {
-                    ui.horizontal_top(|ui| {
-                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(30.0), Sense::hover());
-                        ui.painter().rect_filled(
-                            rect,
-                            CornerRadius::same(4),
-                            theme::c(52, 58, 64),
-                        );
-                        theme::draw_glyph(ui.painter(), rect, glyph, theme::text());
-                        ui.add_space(8.0);
-                        ui.vertical(|ui| {
-                            ui.set_max_width(360.0);
-                            ui.label(egui::RichText::new(name).size(13.0).color(theme::text()));
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(text).size(11.5).color(theme::text_dim()),
-                                )
-                                .wrap(),
-                            );
-                        });
-                    });
-                    ui.add_space(10.0);
-                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Built from the v{} tag — github.com/mjb73/DolphinCraft",
+                        crate::APP_VERSION
+                    ))
+                    .size(10.5)
+                    .color(theme::text_faint()),
+                );
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("Right-click a file or folder for its own menu.")
+                        egui::RichText::new("Rust and egui, MIT licence. Dials out only for *Check for Updates…*, when asked.")
                             .size(10.5)
                             .color(theme::text_faint()),
                     );
@@ -2365,7 +2503,129 @@ impl App {
                 });
             });
         if !open || close {
-            self.guide_open = false;
+            self.about_open = false;
+        }
+    }
+
+    /// Added feature: *Check for Updates…*. Three faces and one window: the offer
+    /// with the release notes, the wait while the download is checked and put in
+    /// place, and the failure with its reason. The dialog only ever appears after
+    /// the menu row was picked — the app looks for nothing by itself.
+    fn update_dialog(&mut self, ctx: &egui::Context) {
+        if self.update.installing {
+            let version = self
+                .update
+                .release
+                .as_ref()
+                .map(|r| r.version.clone())
+                .unwrap_or_default();
+            window_style("Updating DolphinCraft").show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.label(
+                    egui::RichText::new(format!("Downloading and installing {version}…"))
+                        .size(13.0)
+                        .color(theme::text()),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(
+                        "The download is checked against the release's sha256 before anything is \
+                         replaced. The window restarts on the new build when it is in place; the \
+                         settings are kept.",
+                    )
+                    .size(11.0)
+                    .color(theme::text_dim()),
+                );
+            });
+            return;
+        }
+        if let Some(release) = self.update.release.clone() {
+            let mut later = false;
+            let mut install = false;
+            window_style(&format!("DolphinCraft {} is available", release.version)).show(ctx, |ui| {
+                ui.set_min_width(460.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "You have {}. The newer build is {} for {}.",
+                        crate::APP_VERSION,
+                        release.version,
+                        std::env::consts::ARCH
+                    ))
+                    .size(13.0)
+                    .color(theme::text()),
+                );
+                ui.add_space(8.0);
+                if !release.notes.trim().is_empty() {
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(release.notes.trim())
+                                    .size(11.0)
+                                    .color(theme::text_dim()),
+                            );
+                        });
+                    ui.add_space(8.0);
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "The file is {}, checked against the release's sha256 before this one is \
+                         replaced.",
+                        release.tarball
+                    ))
+                    .size(10.5)
+                    .color(theme::text_faint()),
+                );
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(egui::Button::new("Later").min_size(Vec2::new(84.0, 26.0)))
+                        .clicked()
+                    {
+                        later = true;
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new("Install and Restart")
+                                    .min_size(Vec2::new(160.0, 26.0)),
+                            )
+                            .clicked()
+                        {
+                            install = true;
+                        }
+                    });
+                });
+            });
+            if later {
+                self.update.dismiss();
+            }
+            if install {
+                self.update.start_install();
+            }
+            return;
+        }
+        if let Some(error) = self.update.error.clone() {
+            let mut close = false;
+            window_style("Check for Updates").show(ctx, |ui| {
+                ui.set_min_width(420.0);
+                ui.label(egui::RichText::new(error).size(12.0).color(theme::text()));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .add(egui::Button::new("Close").min_size(Vec2::new(84.0, 24.0)))
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
+            });
+            if close {
+                self.update.dismiss();
+            }
         }
     }
 

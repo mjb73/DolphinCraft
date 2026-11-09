@@ -7,9 +7,23 @@
 pub const APP_NAME: &str = "DolphinCraft";
 
 /// The release this build came from. `Cargo.toml`'s `version` is the number on
-/// the GitHub release tag (`v0.1.6`), so About names the download the person
+/// the GitHub release tag (`v0.1.7`), so About names the download the person
 /// actually has — no network call, no guessing from a commit hash.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The two strings the title row prints at the window's top left: the name, and the
+/// release beside it (asked for by the person — the version belongs on the bar, not
+/// only behind a menu).
+pub fn title_row_text() -> (&'static str, &'static str) {
+    (APP_NAME, APP_VERSION)
+}
+
+/// The app menu's About row and the word in its right-hand column: the name in
+/// the label, this build's release in the hint, so the version is readable in the
+/// menu itself rather than only after a click (asked for by the person).
+pub fn about_menu_row() -> (String, &'static str) {
+    (format!("About {APP_NAME}"), APP_VERSION)
+}
 
 /// The one line About shows: the name, the release, and what the app is.
 pub fn about_line() -> String {
@@ -20,6 +34,7 @@ mod apps;
 mod archive;
 mod config;
 mod copymove;
+mod docs;
 mod findtext;
 mod foldercolor;
 mod fsutil;
@@ -35,6 +50,7 @@ mod selftest;
 mod space;
 mod state;
 mod theme;
+mod update;
 mod views;
 
 use std::collections::HashMap;
@@ -62,6 +78,11 @@ fn toggle_maximized(ctx: &egui::Context) {
     let now = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
     ctx.send_viewport_cmd(ViewportCommand::Maximized(!now));
 }
+
+/// How many frames the startup geometry is watched for. The window manager
+/// places the window after the first paint, so one check is not enough; the
+/// watch ends here, and any window button or title-bar drag ends it at once.
+pub const FIT_FRAMES: u32 = 900;
 
 /// How many folders the navigation panel's *Recent Locations* group keeps. The
 /// group is a way back to somewhere the person was, not a history browser; six
@@ -369,22 +390,39 @@ pub struct OpenWith {
     pub focus: bool,
 }
 
-/// What *Create New* makes: a folder, or an empty text file. The original's own
-/// menu offers both (plus whatever template types the desktop has), so the two
-/// share one rule for how they are made and named.
+/// What *Create New* makes: a folder, an empty text file, or a document of one
+/// of the types the settings have ticked (`docs::catalog`). The original's own
+/// menu offers folders, a text file and whatever document types the desktop has
+/// registered, so all three share one rule for how they are made and named.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NewKind {
     Folder,
     TextFile,
+    /// A registered document type, as an index into `docs::catalog()`. An index
+    /// rather than the kind itself keeps `NewKind` `Copy` and the request that
+    /// carries it unchanged; the catalog is read once per run, so the index means
+    /// the same type for the whole of it.
+    Doc(usize),
+}
+
+/// What *Create New* put on disk: where, and whether it is a document the
+/// application can open or the empty file a type with no known way to start one
+/// gets. `empty` is what the toast needs to tell the difference.
+pub struct NewMade {
+    pub path: PathBuf,
+    pub empty: bool,
 }
 
 impl NewKind {
     /// The name the thing is made with — and the name its editor opens on, all
     /// of it selected, so typing replaces it.
-    pub fn default_name(self) -> &'static str {
+    pub fn default_name(self) -> String {
         match self {
-            NewKind::Folder => "New Folder",
-            NewKind::TextFile => "New Text File.txt",
+            NewKind::Folder => "New Folder".to_string(),
+            NewKind::TextFile => "New Text File.txt".to_string(),
+            NewKind::Doc(i) => Self::doc_label(i)
+                .map(|label| format!("New {}.{}", label, Self::doc_ext(i)))
+                .unwrap_or_else(|| "New Document".to_string()),
         }
     }
 
@@ -392,48 +430,108 @@ impl NewKind {
     /// `New Folder (1)`, `New Folder (2)` — `copymove::free_target`'s rule, so a
     /// second Create New never asks and never refuses.
     ///
-    /// A file is created empty and *new*: `create_new` refuses a name that is
-    /// already taken rather than emptying the file that has it. The name here is
-    /// free by construction, so a refusal means something changed on disk between
-    /// picking the name and making it.
-    pub fn create_here(self, dir: &std::path::Path) -> std::io::Result<PathBuf> {
+    /// A file is created *new*: `create_new` refuses a name that is already taken
+    /// rather than emptying the file that has it. The name here is free by
+    /// construction, so a refusal means something changed on disk between picking
+    /// the name and making it.
+    pub fn create_here(self, dir: &std::path::Path) -> std::io::Result<NewMade> {
         let target = crate::copymove::free_target(dir, &dir.join(self.default_name()));
         let name = target
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.default_name().to_string());
+            .unwrap_or_else(|| self.default_name());
         self.create(dir, &name)
     }
 
     /// Make it, in `dir`, under exactly this name.
-    pub fn create(self, dir: &std::path::Path, name: &str) -> std::io::Result<PathBuf> {
+    pub fn create(self, dir: &std::path::Path, name: &str) -> std::io::Result<NewMade> {
         let target = dir.join(name);
         match self {
-            NewKind::Folder => std::fs::create_dir(&target).map(|()| target),
+            NewKind::Folder => std::fs::create_dir(&target).map(|()| NewMade {
+                path: target,
+                empty: false,
+            }),
             NewKind::TextFile => {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(&target)
-                    .map(|_| target)
+                    .map(|_| NewMade {
+                        path: target,
+                        empty: false,
+                    })
             }
+            // A document is made by `docs`: either a format this build writes
+            // itself or the application's own CLI, and `empty` says which the
+            // person actually got.
+            NewKind::Doc(i) => match crate::docs::catalog().get(i) {
+                Some(kind) => crate::docs::create(kind, &target).map(|seeded| NewMade {
+                    path: target,
+                    empty: !seeded,
+                }),
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "that document type is no longer registered",
+                )),
+            },
         }
     }
 
-    /// What to say once it is on disk.
-    pub fn done_message(self) -> &'static str {
+    /// What to say once it is on disk. `empty` is only meaningful for a document
+    /// type: it says the application had no way to start one, so the file is an
+    /// empty file wearing the type's name.
+    pub fn done_message(self, empty: bool) -> String {
         match self {
-            NewKind::Folder => "Folder created.",
-            NewKind::TextFile => "Text file created.",
+            NewKind::Folder => "Folder created.".to_string(),
+            NewKind::TextFile => "Text file created.".to_string(),
+            NewKind::Doc(_) => match Self::doc_label(self.index()) {
+                Some(label) if empty => format!(
+                    "{} created empty — {} could not start one here",
+                    label,
+                    Self::doc_app(self.index())
+                ),
+                Some(label) => format!("{} created.", label),
+                None => "Document created.".to_string(),
+            },
         }
     }
 
-    /// What to say when it could not be made.
-    pub fn failed_message(self) -> &'static str {
+    /// What to say when it could not be made. The document case names no reason
+    /// of its own: `make_new` prints the one the application gave.
+    pub fn failed_message(self) -> String {
         match self {
-            NewKind::Folder => "Could not create folder",
-            NewKind::TextFile => "Could not create file",
+            NewKind::Folder => "Could not create folder".to_string(),
+            NewKind::TextFile => "Could not create file".to_string(),
+            NewKind::Doc(_) => "Could not create document".to_string(),
         }
+    }
+
+    /// The catalog index this kind carries, for the two lookups below.
+    fn index(self) -> usize {
+        match self {
+            NewKind::Doc(i) => i,
+            _ => usize::MAX,
+        }
+    }
+
+    /// The catalog's label for a document kind, when the index still names one.
+    fn doc_label(i: usize) -> Option<&'static str> {
+        crate::docs::catalog().get(i).map(|d| d.label.as_str())
+    }
+
+    fn doc_ext(i: usize) -> &'static str {
+        crate::docs::catalog()
+            .get(i)
+            .map(|d| d.ext.as_str())
+            .unwrap_or("")
+    }
+
+    /// The application's name, for the toast that says who could not start it.
+    fn doc_app(i: usize) -> &'static str {
+        crate::docs::catalog()
+            .get(i)
+            .map(|d| d.app.as_str())
+            .unwrap_or("the application")
     }
 }
 
@@ -461,12 +559,19 @@ pub struct Shot {
 pub struct App {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
-    /// Added: the little card that explains what Find, Open and Menu each do,
-    /// so the two icons stop being a guessing game.
-    pub guide_open: bool,
+    /// The About window the menu's row opens. Its own flag rather than a toast:
+    /// a message that leaves after two seconds is not a place to read a version.
+    pub about_open: bool,
+    /// Added feature: *Check for Updates…* — whether a check or an install is
+    /// running, the release offered, and the thread's reply channel.
+    pub update: crate::update::Update,
     /// `--menu`: open the app menu on the first frame so a picture of it can be
     /// taken. A click on the button opens it in normal use.
     pub open_menu_once: bool,
+    /// `--diag`: frames left to report the app menu's popup rect on stderr, so a
+    /// display where the menu does not appear can be measured instead of guessed
+    /// at. Zero in normal use.
+    pub diag_frames: u32,
     /// `--sort-menu`: open the Sort By popup on the first frame so a picture of it
     /// can be taken. A click on the sort control opens it in normal use.
     pub open_sort_once: bool,
@@ -536,6 +641,17 @@ pub struct App {
     /// 120 is the default; `--frames` asks for more, which is how a long walk
     /// (the disk-usage window on a big folder) can be photographed finished.
     pub shot_frames: u64,
+    /// Set once the window has been checked against the monitor it opened on. A
+    /// size or place saved on a larger screen (or under a different scale) puts
+    /// the toolbar — and the Menu button on it — outside the desktop, where the
+    /// button reads as broken; the first frame brings the window back.
+    pub fitted: bool,
+    /// Frames spent watching the window's size and place, so the check above does
+    /// not run forever.
+    pub fit_frames: u32,
+    /// The size, place and monitor seen at the last check, so the check only runs
+    /// when the window manager has actually changed something.
+    pub fit_seen: (Option<Vec2>, Option<Pos2>, Option<Vec2>),
     /// Added feature: the picture viewer, when one is open, and the loader that
     /// feeds it full-size pictures.
     pub viewer: Option<gallery::Viewer>,
@@ -601,17 +717,119 @@ pub(crate) fn settings_signature(cfg: &Config) -> String {
     serde_json::to_string(cfg).unwrap_or_default()
 }
 
-/// Where the window should open: the place it was left, unless that place is
-/// off any plausible screen (a monitor that has since been unplugged), in which
-/// case the window manager picks, as it did before.
+/// Where the window should open: the place it was left, checked against the
+/// monitor that place was recorded on.
+///
+/// A place is only reused when the whole window fits inside that monitor. A
+/// place saved on a bigger screen, or one recorded while the window was wider
+/// than the screen it was on, leaves the toolbar — the right-hand end of the
+/// window, where *Find* and *Menu* live — outside the desktop; the popup then
+/// opens off the screen and the button reads as doing nothing. A file from
+/// before `window_monitor` existed cannot be checked at all, so the window
+/// manager picks the place instead, exactly as it does on a first run.
 pub(crate) fn startup_position(cfg: &Config) -> Option<[f32; 2]> {
     let pos = cfg.window_pos?;
+    let monitor = cfg.window_monitor?;
+    let size = cfg.window_px?;
     let sane = |v: f32| v.is_finite() && v >= -32_000.0 && v <= 32_000.0;
-    if sane(pos[0]) && sane(pos[1]) {
+    if !(sane(pos[0]) && sane(pos[1]) && sane(monitor[0]) && sane(monitor[1])) {
+        return None;
+    }
+    if monitor[0] <= 0.0 || monitor[1] <= 0.0 {
+        return None;
+    }
+    let fits = pos[0] >= -1.0
+        && pos[1] >= -1.0
+        && pos[0] + size[0] <= monitor[0] + 1.0
+        && pos[1] + size[1] <= monitor[1] + 1.0;
+    if fits {
         Some(pos)
     } else {
         None
     }
+}
+
+/// Whether a window of `size` — its top-left at `outer`, when the window manager
+/// reports it — is usable on the monitor it is on.
+///
+/// **Only the extent is compared with `monitor`.** `ViewportInfo::monitor_size`
+/// is the *size* of the monitor under the window and carries no origin, while
+/// `outer_rect` is in screen coordinates. Comparing `outer.max.x` against
+/// `monitor.x` therefore reads every window on a right-hand monitor as hanging
+/// off the desktop: the person's own window is 1202 wide at x = 1921 on a
+/// 2409-wide second screen, and 1921 + 1202 > 2409. That is the test that used
+/// to fire the moment a maximize changed the geometry, shrinking the window and
+/// throwing it onto the other screen. The place is questioned only when the
+/// origin is above or left of every screen — negative coordinates, where no
+/// monitor sits in a normal layout.
+pub(crate) fn window_fits(size: Vec2, outer: Option<Rect>, monitor: Vec2) -> bool {
+    if monitor.x <= 0.0 || monitor.y <= 0.0 {
+        return false;
+    }
+    let extent = size.x <= monitor.x + 1.0 && size.y <= monitor.y + 1.0;
+    let place = outer
+        .map(|r| r.min.x >= -1.0 && r.min.y >= -1.0)
+        .unwrap_or(true);
+    extent && place
+}
+
+/// Bring a window that was left off its monitor back where it can be used.
+///
+/// A size saved on a larger screen, or under a scale that turns the same points
+/// into more pixels, leaves part of the window outside the desktop. The toolbar
+/// is the right-hand end of the window, so what falls off is *Find* and *Menu* —
+/// a button that is not on the screen cannot open anything, and nothing on
+/// screen says why.
+///
+/// Three rules, learned from a two-screen desktop:
+///
+/// * **a maximized window is never touched** — the window manager owns its
+///   geometry, and resizing it here is how a maximize turned into a jump to the
+///   other screen;
+/// * **the extent alone decides** whether the window is too big (see
+///   `window_fits`); a window on the second screen is not off-screen, however
+///   far to the right its x is;
+/// * **the place is corrected only for a negative origin**, and then to the
+///   primary screen's corner. Centring a window inside an unknown monitor is a
+///   guess, and the guess puts windows on the wrong screen.
+fn fit_window_to_monitor(ctx: &egui::Context) -> bool {
+    let viewport = ctx.input(|i| i.viewport().clone());
+    if viewport.maximized == Some(true) {
+        return true;
+    }
+    let Some(monitor) = viewport.monitor_size else {
+        return false;
+    };
+    if monitor.x <= 0.0 || monitor.y <= 0.0 {
+        return false;
+    }
+    // `inner_rect` is the window's own area and is always reported; `outer_rect`
+    // needs the window manager to say where the frame is, and a frameless window
+    // under KWin's XWayland bridge does not always get one. The size is what is
+    // corrected here, so the inner rect is the right measurement.
+    let Some(rect) = viewport.inner_rect.or(viewport.outer_rect) else {
+        return false;
+    };
+    let size = rect.size();
+    if window_fits(size, viewport.outer_rect, monitor) {
+        return true;
+    }
+    let want = Vec2::new(
+        size.x.min(monitor.x - 40.0).max(640.0),
+        size.y.min(monitor.y - 80.0).max(400.0),
+    );
+    if (want.x - size.x).abs() > 1.0 || (want.y - size.y).abs() > 1.0 {
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(want));
+    }
+    // Only a window whose origin is above or left of every screen is moved, and
+    // it goes to the primary screen's corner. A Wayland compositor ignores this
+    // command, and the resize above is then the whole of the correction.
+    if let Some(outer) = viewport.outer_rect {
+        if outer.min.x < -1.0 || outer.min.y < -1.0 {
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(0.0, 0.0)));
+        }
+    }
+    true
 }
 
 /// Put every display choice back to its factory default. Used by the menu's
@@ -683,7 +901,6 @@ impl App {
         start_dims: bool,
         start_find: Option<String>,
         start_deep: bool,
-        start_guide: bool,
         start_menu: bool,
         open_details_at_start: bool,
         light_flag: bool,
@@ -824,10 +1041,14 @@ impl App {
         let mut app = App {
             tabs,
             active_tab,
-            // `--guide` opens the card on the first frame, which is how the
-            // screenshot of it gets taken (F1 and the menu entry set this too).
-            guide_open: start_guide,
+            about_open: false,
+            update: crate::update::Update::default(),
             open_menu_once: start_menu,
+            diag_frames: if start_menu || std::env::var_os("DOLPHINCRAFT_DIAG").is_some() {
+                900
+            } else {
+                0
+            },
             open_sort_once: false,
             // A start is always one view. Split is chosen in the window (F3,
             // the menu switch, or "In the other pane"), and is not carried into
@@ -879,6 +1100,9 @@ impl App {
             pending_compare: start_compare,
             frames: 0,
             shot_frames: 120,
+            fitted: false,
+            fit_frames: 0,
+            fit_seen: (None, None, None),
             open_details_at_start,
             config_dirty: false,
             next_pane_id: next_id,
@@ -1251,6 +1475,60 @@ impl App {
                         // right-click-only popup it used to carry made the
                         // button look dead, which is half of why the three
                         // glyphs were unreadable.
+                        if self.diag_frames > 0 && ui.ctx().input(|i| i.pointer.any_click() || i.pointer.any_pressed() || i.pointer.any_released()) {
+                            eprintln!(
+                                "diag: BUTTON EVENT press={} release={} click={} pos={:?} origin={:?}",
+                                ui.ctx().input(|i| i.pointer.any_pressed()),
+                                ui.ctx().input(|i| i.pointer.any_released()),
+                                ui.ctx().input(|i| i.pointer.any_click()),
+                                ui.ctx().input(|i| i.pointer.interact_pos()),
+                                ui.ctx().input(|i| i.pointer.press_origin()),
+                            );
+                        }
+                        if self.diag_frames > 0 && self.diag_frames % 45 == 0 {
+                            eprintln!(
+                                "diag: button rect {:.1},{:.1}..{:.1},{:.1} hovered={} pointer={:?} ppp={:.3}",
+                                menu.rect.min.x, menu.rect.min.y, menu.rect.max.x, menu.rect.max.y,
+                                menu.hovered(),
+                                ui.ctx().input(|i| i.pointer.hover_pos()),
+                                ui.ctx().pixels_per_point(),
+                            );
+                        }
+                        if self.diag_frames > 0 && (menu.hovered() || menu.clicked()) {
+                            eprintln!(
+                                "diag: menu hovered={} clicked={} interact={:?} rect={:?}",
+                                menu.hovered(),
+                                menu.clicked(),
+                                menu.interact_pointer_pos(),
+                                menu.rect,
+                            );
+                        }
+                        if self.diag_frames > 0 {
+                            // Does an area created *here*, inside the toolbar's
+                            // layout scope, paint? If it does not, popups are
+                            // being clipped to the toolbar row.
+                            egui::Area::new(egui::Id::new("diag-area-in-toolbar"))
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(egui::Pos2::new(300.0, 300.0))
+                                .show(ui.ctx(), |ui| {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(260.0, 90.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        4.0,
+                                        egui::Color32::from_rgb(20, 140, 220),
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        "TOOLBAR AREA",
+                                        egui::FontId::proportional(20.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                });
+                        }
                         let mut popup = egui::Popup::menu(&menu);
                         if self.open_menu_once {
                             self.open_menu_once = false;
@@ -1265,8 +1543,18 @@ impl App {
                         // reach the last rows. It scrolls now, capped to the height
                         // of the window itself so it fits whether egui opens it
                         // below the button or flips it above.
-                        popup.show(|ui| {
-                            let limit = (ui.ctx().content_rect().height() - 96.0).max(120.0);
+                        let shown = popup.show(|ui| {
+                            // Never taller than the screen: a window taller
+                            // than the monitor (or a HiDPI scale) would clamp
+                            // the popup past the display, and a popup nobody
+                            // can see is the button doing nothing.
+                            let window = ui.ctx().content_rect().height();
+                            let monitor = ui
+                                .ctx()
+                                .input(|i| i.viewport().monitor_size)
+                                .map(|s| s.y)
+                                .unwrap_or(window);
+                            let limit = (window.min(monitor) - 96.0).max(120.0);
                             let sa = egui::ScrollArea::vertical()
                                 .max_height(limit)
                                 // A popup is sized from the frame before it, so a
@@ -1285,7 +1573,32 @@ impl App {
                                     egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
                                 )
                                 .show(ui, |ui| self.app_menu(ui));
+                            // The two rows that end the menu live *outside* it, so
+                            // they are on screen whatever the window's height: About
+                            // (which names the release) and Quit were the rows that
+                            // fell off the bottom of a long menu.
+                            ui.separator();
+                            self.app_menu_footer(ui);
                         });
+                        // `--diag`: one answer, on the display that is failing,
+                        // instead of a guess from a headless test screen.
+                        if self.diag_frames > 0 {
+                            self.diag_frames -= 1;
+                            if let Some(shown) = &shown {
+                                let ctx = ui.ctx();
+                                let ppp = ctx.pixels_per_point();
+                                let screen = ctx.screen_rect();
+                                let rect = shown.response.rect;
+                                eprintln!(
+                                    "diag: popup rect {rect:?} ppp {ppp:.3} screen {screen:?} \
+inside={} focused={}",
+                                    screen.contains_rect(rect),
+                                    ctx.input(|i| i.focused),
+                                );
+                            } else if self.diag_frames == 1 {
+                                eprintln!("diag: popup did not render at all");
+                            }
+                        }
 
                         let find_on = self.pane().filter_on;
                         if toolbar_word_button(ui, "search", labeled.then_some("Find"), find_on, true)
@@ -1620,6 +1933,9 @@ impl App {
                 }
             });
         if let Some(dir) = resize {
+            // A resize is the person choosing the window's size: the startup fit
+            // is done with it.
+            self.fit_frames = FIT_FRAMES;
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
         }
     }
@@ -1632,6 +1948,11 @@ impl App {
         let mut to_dup: Option<usize> = None;
         let mut reopen = false;
         let mut add_tab = false;
+        // Set by a press that belongs to the window rather than the list — a
+        // title-bar drag, the maximize button, a double click on the header. The
+        // startup fit then stops looking: from here on the geometry is the
+        // person's, not something to correct.
+        let mut window_touched = false;
         egui::TopBottomPanel::top("tabs")
             .exact_height(33.0)
             .frame(
@@ -1643,27 +1964,46 @@ impl App {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 1.0;
                     // The window's name, at the left end of its title row and before
-                    // the first tab, where a title bar carries it (asked for). It is
-                    // part of the bar, so a drag on it moves the window and a double
-                    // click maximizes, exactly as on the strip's empty space.
+                    // the first tab, where a title bar carries it (asked for), with the
+                    // release beside it in the dim colour so the number is on screen
+                    // without asking anything. It is part of the bar, so a drag on it
+                    // moves the window and a double click maximizes, exactly as on the
+                    // strip's empty space.
                     let name_font = FontId::proportional(12.5);
-                    let name_galley = ui.fonts_mut(|f| {
-                        f.layout_no_wrap(APP_NAME.to_string(), name_font, theme::text())
+                    let version_font = FontId::proportional(11.5);
+                    let (name_text, version_text) = title_row_text();
+                    let (name_galley, version_galley) = ui.fonts_mut(|f| {
+                        (
+                            f.layout_no_wrap(name_text.to_string(), name_font, theme::text()),
+                            f.layout_no_wrap(
+                                version_text.to_string(),
+                                version_font,
+                                theme::text_dim(),
+                            ),
+                        )
                     });
                     let name_h = name_galley.size().y;
-                    let name_w = name_galley.size().x + 22.0;
+                    let name_w = name_galley.size().x + version_galley.size().x + 30.0;
                     let (name_rect, name_resp) =
                         ui.allocate_exact_size(Vec2::new(name_w, 30.0), Sense::click_and_drag());
                     if name_resp.drag_started() {
+                        window_touched = true;
                         ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
                     }
                     if name_resp.double_clicked() {
+                        window_touched = true;
                         toggle_maximized(ui.ctx());
                     }
+                    let name_left = Pos2::new(name_rect.left() + 10.0, name_rect.center().y - name_h / 2.0);
+                    let version_x = name_left.x + name_galley.size().x + 6.0;
+                    ui.painter().galley(name_left, name_galley, theme::text());
                     ui.painter().galley(
-                        Pos2::new(name_rect.left() + 10.0, name_rect.center().y - name_h / 2.0),
-                        name_galley,
-                        theme::text(),
+                        Pos2::new(
+                            version_x,
+                            name_rect.center().y - version_galley.size().y / 2.0,
+                        ),
+                        version_galley,
+                        theme::text_dim(),
                     );
                     for (i, tab) in self.tabs.iter().enumerate() {
                         let pane = &tab.panes[tab.active];
@@ -1828,9 +2168,11 @@ impl App {
                             Sense::click_and_drag(),
                         );
                         if rest_resp.drag_started() {
+                            window_touched = true;
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
                         }
                         if rest_resp.double_clicked() {
+                            window_touched = true;
                             toggle_maximized(ui.ctx());
                         }
                         // A right click on the empty strip is the same menu as on a
@@ -1893,7 +2235,10 @@ impl App {
                                 "min" => ui.ctx().send_viewport_cmd(
                                     egui::ViewportCommand::Minimized(true),
                                 ),
-                                "max" => toggle_maximized(ui.ctx()),
+                                "max" => {
+                                    window_touched = true;
+                                    toggle_maximized(ui.ctx())
+                                }
                                 _ => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
                             }
                         }
@@ -1921,6 +2266,10 @@ impl App {
         if add_tab {
             let dir = self.pane().current_dir();
             self.new_tab_public(dir);
+        }
+        if window_touched {
+            // The window's own geometry is the person's from this press on.
+            self.fit_frames = FIT_FRAMES;
         }
     }
 
@@ -3146,6 +3495,7 @@ impl App {
                         active: true,
                         show_location_bar: self.split,
                         other_dir: None,
+                        new_docs: crate::docs::enabled(&self.config),
                     };
                     tab.panes[0].ui(ui, &mut vctx);
                     tab.active = 0;
@@ -3194,6 +3544,7 @@ impl App {
                         active: active == 0,
                         show_location_bar: true,
                         other_dir: Some(right_dir),
+                        new_docs: crate::docs::enabled(&self.config),
                     };
                     let mut child = ui.new_child(
                         egui::UiBuilder::new()
@@ -3212,6 +3563,7 @@ impl App {
                         active: active == 1,
                         show_location_bar: true,
                         other_dir: Some(left_dir),
+                        new_docs: crate::docs::enabled(&self.config),
                     };
                     let mut child2 = ui.new_child(
                         egui::UiBuilder::new()
@@ -3856,8 +4208,8 @@ impl App {
     /// without a window in between. Escape leaves the name it was made with.
     pub fn make_new(&mut self, kind: NewKind, dir: &std::path::Path) {
         let made = kind.create_here(dir);
-        let target = match made {
-            Ok(target) => target,
+        let NewMade { path: target, empty } = match made {
+            Ok(made) => made,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 // Free by construction, so this is a race with something else
                 // writing the same name; say so instead of silently retrying.
@@ -3883,7 +4235,7 @@ impl App {
                 focus: false,
             });
         }
-        self.toast(kind.done_message());
+        self.toast(&kind.done_message(empty));
     }
 
     // -----------------------------------------------------------------------
@@ -4529,8 +4881,13 @@ impl App {
         let typing = ctx.wants_keyboard_input();
         let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if esc {
-            if self.guide_open {
-                self.guide_open = false;
+            if self.about_open {
+                self.about_open = false;
+            } else if self.update.release.is_some() || self.update.error.is_some() {
+                // The offer or the failure: Escape puts it away, as it does the
+                // other windows. A running install is left alone — it restarts
+                // the window either way.
+                self.update.dismiss();
             } else if self.quick.is_some() {
                 self.quick = None;
             } else if self.confirm.is_some() {
@@ -4617,9 +4974,6 @@ impl App {
             // folders").
             if i.consume_key(ctrl, Key::Z) {
                 reqs.push(Request::Toast("__undo__".into()));
-            }
-            if i.consume_key(Modifiers::NONE, Key::F1) {
-                reqs.push(Request::Toast("__guide__".into()));
             }
             if i.consume_key(ctrl, Key::I) {
                 reqs.push(Request::Toast("__filter__".into()));
@@ -4865,15 +5219,29 @@ impl App {
             .collect();
         cfg.session_tab = self.active_tab;
         if let Some(ctx) = ctx {
+            // A maximized window's geometry is the screen, not a choice of the
+            // person's: saving it would reopen a screen-sized *restored* window
+            // next time, which the startup fit then shrinks by its margins.
+            let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
             let (size, pos) = ctx.input(|i| {
                 let vp = i.viewport();
-                (vp.inner_rect.map(|r| [r.width(), r.height()]), vp.outer_rect.map(|r| r.min))
+                (
+                    vp.inner_rect.map(|r| [r.width(), r.height()]),
+                    vp.outer_rect.map(|r| r.min),
+                )
             });
-            if let Some(size) = size {
-                cfg.window_px = Some([size[0].round(), size[1].round()]);
-            }
-            if let Some(pos) = pos {
-                cfg.window_pos = Some([pos.x.round(), pos.y.round()]);
+            if !maximized {
+                if let Some(size) = size {
+                    cfg.window_px = Some([size[0].round(), size[1].round()]);
+                    // The monitor the place belongs to, so the place can be
+                    // checked before the next run reuses it.
+                    cfg.window_monitor = ctx
+                        .input(|i| i.viewport().monitor_size)
+                        .map(|m| [m.x.round(), m.y.round()]);
+                }
+                if let Some(pos) = pos {
+                    cfg.window_pos = Some([pos.x.round(), pos.y.round()]);
+                }
             }
         }
         cfg
@@ -4916,9 +5284,6 @@ impl App {
                 pane.filter_on = true;
                 pane.find_deep = false;
                 self.filter_focus = true;
-            }
-            "__guide__" => {
-                self.guide_open = true;
             }
             "__filter__" => {
                 let on = !self.pane().filter_on;
@@ -5149,6 +5514,82 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // A window saved on a bigger screen opens off this one; bring it back
+        // before anything is drawn, so the toolbar is reachable.
+        // Watched for the first quarter-minute rather than checked once: the
+        // window manager places the window *after* the first paint, and the
+        // placement it restores can be the one that hangs off the screen (KWin
+        // remembers a window's geometry per application, whatever the program
+        // asked for). A single check on the first frame sees the window at 0,0
+        // — inside the monitor — and stops looking, which is exactly how a
+        // window ends up at x = 1084 on a 2408-wide screen with the toolbar,
+        // and the Menu button on it, off the desktop. The check re-runs whenever
+        // the size, place or monitor changes, and stops after `FIT_FRAMES` frames
+        // — and at the first press on the window's own header, button or edge —
+        // so it never fights the person dragging or maximizing the window.
+        // A maximized window belongs to the window manager: it fills the monitor
+        // it was maximized on, and nothing here may resize or move it. That is the
+        // half that used to break: a maximize changes the geometry, the look
+        // below saw a two-screen position it could not read, and the window was
+        // shrunk and thrown onto the other screen.
+        let maximized_now = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+        if self.fit_frames < FIT_FRAMES && !maximized_now {
+            self.fit_frames += 1;
+            let seen = ctx.input(|i| {
+                let v = i.viewport();
+                (
+                    v.inner_rect.map(|r| r.size()),
+                    v.outer_rect.map(|r| r.min),
+                    v.monitor_size,
+                )
+            });
+            if seen != self.fit_seen {
+                self.fit_seen = seen;
+                fit_window_to_monitor(ctx);
+            }
+        }
+        // Added feature: *Check for Updates…* — the worker thread's answer lands
+        // here. The check and the download run off the UI thread, so the window
+        // keeps drawing while they do; while one is running the frame asks to be
+        // repainted often enough to notice it has finished.
+        match self.update.poll() {
+            crate::update::Poll::Idle => {}
+            crate::update::Poll::Say(words) => self.toast(&words),
+            crate::update::Poll::Restart(exe) => {
+                // The new build is on disk: save what the window is doing, then
+                // start it and close this one. The save comes first so the new
+                // process reads the current tabs rather than the last autosave.
+                self.persist(Some(ctx));
+                match crate::update::restart(&exe) {
+                    Ok(()) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                    Err(e) => self.toast(&format!("Updated, but the restart failed: {e}")),
+                }
+            }
+        }
+        // Experiment behind `DOLPHINCRAFT_DIAG`: an ordinary area and a window,
+        // drawn where they cannot be missed. If these paint and the menu does
+        // not, the fault is in the popup's own clipping, not in areas.
+        if self.diag_frames > 0 {
+            egui::Area::new(egui::Id::new("diag-area"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(egui::Pos2::new(200.0, 200.0))
+                .show(ctx, |ui| {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::new(300.0, 120.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgb(200, 30, 30));
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "AREA TEST",
+                        egui::FontId::proportional(24.0),
+                        egui::Color32::WHITE,
+                    );
+                });
+            egui::Window::new("diag-window")
+                .fixed_pos(egui::Pos2::new(200.0, 400.0))
+                .show(ctx, |ui| {
+                    ui.label("WINDOW TEST");
+                });
+        }
         // A picture named on the command line opens on the very first frame, so
         // a captured window shows the viewer and not an empty desktop.
         if let Some((path, play)) = self.pending_viewer.take() {
@@ -5311,6 +5752,16 @@ impl eframe::App for App {
             }
         }
         self.screenshot_tick(ctx);
+        // A finished check or download is only noticed on a frame, and the window
+        // otherwise sleeps until the next input: while a job is running, ask for
+        // the next frame so the reply is picked up within a tenth of a second.
+        // This sits at the end of the frame on purpose — the click that starts an
+        // install is handled in `dialogs`, after the poll at the top, so a request
+        // made up there missed exactly that click and the window went to sleep with
+        // the install finished but unread.
+        if self.update.busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+        }
     }
 
     /// The window is closing: one last write, so the tabs, the sort and the
@@ -6060,7 +6511,6 @@ fn main() -> eframe::Result<()> {
     let mut start_deep = false;
     // `--below`: the picture wall looking inside the folders below.
     let mut start_below = false;
-    let mut start_guide = false;
     let mut start_menu = false;
     let mut open_with_file: Option<PathBuf> = None;
     // Deep-pass captures: open the Sort By popup on the first frame, or open the
@@ -6151,7 +6601,6 @@ fn main() -> eframe::Result<()> {
                 }
             }
             "--deep" => start_deep = true,
-            "--guide" => start_guide = true,
             "--menu" => start_menu = true,
             // Opens the "Other Application…" chooser on the first frame, with
             // this file, so the chooser can be photographed without a mouse.
@@ -6381,7 +6830,6 @@ fn main() -> eframe::Result<()> {
                 start_dims,
                 start_find,
                 start_deep,
-                start_guide,
                 start_menu,
                 start_details,
                 light_flag,

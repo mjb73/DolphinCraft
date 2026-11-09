@@ -790,7 +790,20 @@ pub fn elide_name(ui: &egui::Ui, text: &str, max_w: f32, font: FontId) -> String
 // ---------------------------------------------------------------------------
 
 pub fn draw_kind_icon(painter: &egui::Painter, rect: Rect, kind: Kind, dim: bool) {
-    draw_kind_icon_tinted(painter, rect, kind, dim, None)
+    draw_kind_icon_ext(painter, rect, kind, dim, "");
+}
+
+/// The same icon with the file's own type written on its page — `.pcraft`,
+/// `.vectorcraft`, `.blend` — so two documents made by two applications do not
+/// wear the same blank page.
+pub fn draw_kind_icon_ext(
+    painter: &egui::Painter,
+    rect: Rect,
+    kind: Kind,
+    dim: bool,
+    ext: &str,
+) {
+    draw_kind_icon_tinted_ext(painter, rect, kind, dim, None, ext);
 }
 
 /// The same icon, but with a folder drawn in the person's colour. Files keep
@@ -802,10 +815,21 @@ pub fn draw_kind_icon_tinted(
     dim: bool,
     tint: Option<Color32>,
 ) {
+    draw_kind_icon_tinted_ext(painter, rect, kind, dim, tint, "");
+}
+
+pub fn draw_kind_icon_tinted_ext(
+    painter: &egui::Painter,
+    rect: Rect,
+    kind: Kind,
+    dim: bool,
+    tint: Option<Color32>,
+    ext: &str,
+) {
     let alpha = if dim { 120 } else { 255 };
     match kind {
         Kind::Folder => draw_folder(painter, rect, alpha, tint),
-        _ => draw_document(painter, rect, kind, alpha),
+        _ => draw_document(painter, rect, kind, alpha, ext),
     }
 }
 
@@ -878,7 +902,7 @@ fn draw_folder(painter: &egui::Painter, rect: Rect, alpha: u8, tint: Option<Colo
     painter.rect_filled(shade_rect, r, fade(shade, alpha));
 }
 
-fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
+fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8, ext: &str) {
     let (w, h) = (rect.width(), rect.height());
     let x0 = rect.left() + w * 0.18;
     let x1 = rect.right() - w * 0.18;
@@ -1118,6 +1142,73 @@ fn draw_document(painter: &egui::Painter, rect: Rect, kind: Kind, alpha: u8) {
             }
         }
     }
+    // Added: the type on the page itself, in the band under the glyph.
+    draw_type_label(painter, x0, x1, y1, h, ext, alpha);
+}
+
+/// The file's extension as words on the page, sized to the icon rather than
+/// baked at one size.
+///
+/// `Painter::layout_no_wrap` measures with the very font that draws, so the size
+/// is solved from the page's own width: `vectorcraft` (ten letters) sets the floor
+/// in a 96 px tile while `blend` is drawn twice as large, and a tile too small to
+/// hold the smallest legible size simply has no label — the details view's *Type*
+/// column carries the words at every size. The colour is a literal dark grey
+/// rather than a palette `c(..)`: `c` flips with the light palette, and the paper
+/// this sits on is light in both modes.
+fn draw_type_label(
+    painter: &egui::Painter,
+    x0: f32,
+    x1: f32,
+    y1: f32,
+    h: f32,
+    ext: &str,
+    alpha: u8,
+) {
+    const REF_PX: f32 = 10.0;
+    if ext.is_empty() {
+        return;
+    }
+    let band_w = (x1 - x0) * TYPE_AIR;
+    let band_h = h * TYPE_BAND_FRAC;
+    let ink = fade(Color32::from_rgb(64, 70, 76), alpha);
+    let label = ext.to_ascii_uppercase();
+    let reference = painter.layout_no_wrap(label.clone(), FontId::monospace(REF_PX), ink);
+    // Text width is linear in the font size, so one layout answers every icon
+    // size the window offers.
+    let Some(px) = type_label_px(reference.size().x, band_w, band_h) else {
+        return;
+    };
+    let galley = painter.layout_no_wrap(label, FontId::monospace(px), ink);
+    let pos = Pos2::new(
+        (x0 + x1) * 0.5 - galley.size().x * 0.5,
+        y1 - h * 0.02 - galley.size().y,
+    );
+    painter.galley(pos, galley, ink);
+}
+
+/// The page's share of the icon's width (`draw_document` insets it by 18 % on
+/// each side), the air the words keep inside it, and the band under the kind
+/// glyph as a share of the icon's height — the three numbers the label's size is
+/// solved from, kept here so the check and the drawing cannot drift.
+pub(crate) const PAGE_W_FRAC: f32 = 0.64;
+pub(crate) const TYPE_AIR: f32 = 0.92;
+pub(crate) const TYPE_BAND_FRAC: f32 = 0.12;
+
+/// The size an extension is drawn at on a page whose writing band is `band_w` by
+/// `band_h`, given that the words measured `reference_w` at 10 px. `None` when the
+/// answer would be smaller than `MIN_PX`, where the letters are a smudge — the
+/// icon then carries no label and the details view's *Type* column carries the
+/// words instead. Pure, so the rule is checked without a window.
+pub(crate) fn type_label_px(reference_w: f32, band_w: f32, band_h: f32) -> Option<f32> {
+    const MIN_PX: f32 = 6.0;
+    const MAX_PX: f32 = 15.0;
+    const REF_PX: f32 = 10.0;
+    if reference_w <= 0.0 || band_w < MIN_PX * 1.5 || band_h < MIN_PX {
+        return None;
+    }
+    let px = (REF_PX * band_w / reference_w).min(band_h).min(MAX_PX);
+    (px >= MIN_PX).then_some(px)
 }
 
 // ---------------------------------------------------------------------------

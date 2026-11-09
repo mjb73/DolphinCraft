@@ -963,8 +963,22 @@ icon-only sort at 620 px, and the menu opening below the button, entirely under
 the toolbar. Split view (F3) keeps its per-pane location bars and the sort
 control in the toolbar with no bar to collide with. In a window that is not
 maximised the app menu is capped to the window's own height and scrolls (its bar
-always drawn), because the rows below the fold — Help, About, Quit — were once
+always drawn), because the rows below the fold — About and Quit — were once
 simply unreachable: the popup ran off the bottom of the screen and could not move.
+
+**About and Quit are pinned below the scrolling part.** Scrolling kept the rows
+reachable but not *findable*: the person asked for an About row that shows the
+version, and the row was the one below the fold of a menu twelve tool rows long.
+`App::app_menu_footer` is therefore drawn after the `ScrollArea` in the popup, not
+inside it — a fixed footer at the popup's bottom edge — so both rows are on screen at
+any window height. The row's label and its right-hand column come from
+`about_menu_row()`: `About DolphinCraft` and `0.1.7`, so the number is readable in
+the menu itself. Clicking it opens `about_dialog`, a small window (the original's
+*Help → About Dolphin* is a dialog too) carrying the name at 17 px, `Version 0.1.7`,
+the one line, the tag the binary was cut from, the licence, and a Close button;
+Escape closes it through the same ladder in `handle_shortcuts` that closes the
+other windows. `--selftest` asserts the row's two halves (`the app menu's About row names
+the app and shows its release`).
 
 ### The buttons at the right end: what each one owns
 
@@ -997,7 +1011,7 @@ menu already do:
 | button | word | the one job | what it must not do |
 | --- | --- | --- | --- |
 | Find | `Find` | narrows the list in place as you type; two chips, *This folder* / *In subfolders*, say how far the looking goes | never opens anything, never changes a setting |
-| Menu | `Menu` | the app's own settings and tools, grouped New / Tools / View / Help | never touches the person's files |
+| Menu | `Menu` | the app's own settings and tools, grouped New / Tools / View / Settings / Sort by | never touches the person's files |
 
 Three faults were fixed to make that true:
 
@@ -1028,10 +1042,11 @@ Three faults were fixed to make that true:
    with `theme::draw_glyph("close")` — a line shape, like every other icon in
    the window.
 
-The card that spells the three jobs out was unreachable for the same class of
-reason: `guide_open` was never set by `--guide`, so the dialog existed and never
-drew. It now opens from the menu, from F1, and from `--guide`
-(`app/shots/now/guide2.png`).
+The card that spelled the three jobs out is gone: the person asked for its row
+(*What the Two Buttons Do…*) to be removed, so the dialog, its `guide_open` flag,
+the F1 binding and the `--guide` flag went with it, and the app menu ends on
+*Sort by* instead of a *Help* group that held nothing else.
+`app/shots/now/guide2.png` is the last picture of it.
 
 ## The Path column in search results (asked for by the person)
 
@@ -1044,10 +1059,10 @@ search is showing.
 | what | value |
 | --- | --- |
 | when | the pane is showing a search **and** the walk covers the subfolders (`search.is_some() && find_deep`); a *This folder* search has every row in the folder the bar already names, so the column would repeat one value down the list. It also stays away when every hit lies in the searched folder itself, because then there is no folder to name |
-| where | between **Name** and **Size** — Name, Path, Size, Modified — drawn by `Pane::column_rects` (`app/src/views.rs`) |
+| where | between **Name** and **Type** — Name, Path, Type, Size, Modified — drawn by `Pane::column_rects` (`app/src/views.rs`) |
 | width | **measured from what the two columns hold**, not from a share of the row. `Pane::measure_search_columns` lays out the widest name and the widest folder of the result with the very fonts the rows draw with (13 px name, 12 px folder) as the batches arrive, and `column_rects` gives each column that width plus its padding — the icon and its gaps live inside the name's. Any room left over is split evenly. Two earlier attempts were wrong in opposite directions: a fixed 42 % capped at 240 px cut deep folders off while the name column sat empty, and a character estimate with a 220 px floor for the name then cut long *names* off. When the row cannot hold both, the numeric columns hand their slack back first (Size and Modified shrink to what their own cells need, never below 44 / 64 px), then the name keeps 220 px if the folder still gets 90 px, and only a row that cannot physically hold both elides anything |
 | the text | the folder relative to the folder the search started from (`2024/03`), because the bar above already names the root; `—` for a file lying directly in the searched folder; the file's own full folder if it somehow lies outside the root. `views::hit_folder` |
-| the header | a plain label, not one of the three sort buttons: the rows are found by name, not ordered by folder, and a header that sorted nothing would be the lie |
+| the header | a plain label, not one of the four sort buttons: the rows are found by name, not ordered by folder, and a header that sorted nothing would be the lie |
 
 `--selftest` *"a search's columns fit the longest name and folder, not a share of the
 row"* builds a tree with a 44-character file name three folders down, runs the
@@ -1057,6 +1072,115 @@ while the row is wide enough for both — that `theme::elide_name` returns the l
 name and the long folder **unchanged**, i.e. nothing is cut. *"a search hit's folder
 is written relative to the folder searched"* covers the three label cases
 (relative, `—`, outside-the-root).
+
+## Check for Updates (asked for by the person)
+
+The person's words: *"build a mechanism that checks the github repo if there is a
+newer release and offers the update. This should not be automatic but there should
+be a 'Check for updates' option in the menu. once the new version is installed, the
+app should restart."*
+
+**The row.** `Check for Updates…` is the first row of `app_menu_footer`, above
+*About* — the pinned part of the menu, outside the scrolling list, so it is there
+whatever the menu's height. While a check or an install is running it says
+*Checking for Updates…* / *Installing Update…* and is drawn disabled
+(`menu_row_with(..., false)`).
+
+**The check** (`src/update.rs`, `check`). `GET
+https://api.github.com/repos/mjb73/DolphinCraft/releases/latest` with a
+`User-Agent` (GitHub answers 403 without one) and a 30 s timeout, on a worker
+thread; the reply comes back over an `mpsc` channel that `App::update` polls.
+`DOLPHINCRAFT_UPDATE_ENDPOINT` points the check somewhere else — a test server,
+a file — without a rebuild. The tag is compared numerically, so `0.1.10` is later
+than `0.1.9`, which string order would get wrong. The release is read from
+`tag_name`, `body`, `html_url` and `assets[].name`/`browser_download_url`; the
+asset is `dolphincraft-<version>-<arch>-linux.tar.gz` with its `.sha256` beside
+it, which is exactly what `packaging/linux-tarball.sh` and the release workflow
+publish (checked against the real v0.1.6 release: eight assets, those names).
+
+**The offer.** A window titled *DolphinCraft X is available*: the version you
+have, the release notes in a 240 px scroll area, the tarball's name, and
+*Later* / *Install and Restart*. Escape or *Later* puts it away. A release with
+no build for this architecture is an error with the architecture named, not a
+crash and not a silent offer.
+
+**The install** (`download_and_install`, `install_archive`). Download the tarball
+and the `.sha256`, hash the bytes, compare — a mismatch stops here, with the
+build on disk untouched — then `tar -xzf` into a scratch folder, take
+`<member>/dolphincraft`, copy it beside the running binary as `<name>.new`, make
+it 755 and `rename` it over the old one. A running executable cannot be written
+into (`ETXTBSY`) but can be replaced by a rename, which is why the new build is
+staged and moved in one step.
+
+**The restart** (`restart`). Spawn the installed path with the same arguments,
+then close the window, so the next launch is the same folder with the same flags.
+The path is carried in `Poll::Restart(PathBuf)` from before the rename: after it,
+`current_exe()` answers `/…/dolphincraft (deleted)` — the running process's own
+inode — and spawning that fails with `ENOENT`. That is not hypothetical: the first
+build did exactly this and reported *"Updated, but the restart failed: the new
+build would not start (No such file or directory)"* with the new file correctly in
+place.
+
+**The other fault the driving found.** The frame asks to be repainted while a job
+runs, so the reply is noticed with the window idle. That request first sat at the
+top of `App::update`, before `dialogs` — but the click that *starts* an install is
+handled in `dialogs`, later in the same frame, so the request was never made for
+that click and the window slept with the install finished and unread. The request
+is at the end of the frame now.
+
+**Proof, with a server on this machine.** A fixture release (tarball whose member
+`dolphincraft` is a script that writes a marker file) served by
+`python3 -m http.server` and reached through `DOLPHINCRAFT_UPDATE_ENDPOINT`, driven
+by `xdotool` through the real menu: the offer appeared, *Install and Restart*
+replaced the binary and the marker was written by the new build while the old
+process exited. The same fixture with a wrong `.sha256` was refused — *"the
+download does not match its checksum (70fc038dfc14 …, expected 000000000000)"* —
+and the binary on disk still had its old size. Against the real GitHub, with no
+override, the check answered *"DolphinCraft 0.1.6 is the latest version — this is
+0.1.6."* `--selftest` covers the reply parsing, the numeric comparison, the
+checksum file form and a real tar archive installed over a fixture binary
+(executable, no `.new` left).
+
+*About* said "Nothing dials out." — it now says it dials out only for this row,
+when asked.
+
+## The Type column, and the type written on the page (asked for by the person)
+
+The person's words: *"the extension is different depending on the app chosen but
+the icon for the document looks the same. Can you write the filetype into the
+empty document thumbnail in a scalable way. Also add the filetype as a column in
+the details view and allow it to be sorted ascending and descending like the other
+columns."*
+
+**The details column.** Name | [Path] | Type | Size | Modified, from
+`Pane::column_rects`. Type takes 18 % of the row clamped to 56–150 px: its floor
+holds the header, its share holds the usual labels ("Plain text document" is the
+longest), and a longer one elides at its end. It **gives way** — zero width, no
+header, no separator, no click target — when the row cannot hold it, because the
+name keeps 110 px of its own before a fourth column is worth drawing: a 260 px
+window shows Name/Path/Size/Modified, a 700 px one shows all five. The cell reads
+`Entry::type_label`, the very function `sort_entries` sorts by, so the column and
+the order cannot disagree. Clicking the header sorts by it, and a key that is not
+the current one starts the way the original starts it (`descends_first`: Name and
+Type ascending, Size and Modified descending), so a second click turns it round.
+
+**The page.** `theme::draw_type_label` writes the extension in the band under the
+kind glyph, upper-cased, in the mono face. It is sized rather than fixed:
+`Painter::layout_no_wrap` measures the words at 10 px, and the page's own band
+(`PAGE_W_FRAC` = 0.64 of the tile, `TYPE_AIR` = 0.92 of that, `TYPE_BAND_FRAC` =
+0.12 of the tile's height) is solved for the size by `theme::type_label_px`, with
+a 6 px floor and a 15 px cap. Measured: `VECTORCRAFT` 8.6 px on a 96 px tile and
+below the floor on a 64 px one; `PCRAFT` and `BLEND` 11.5 px on 96 and 7.7 px on
+64; all three capped at 15 px on a 200 px wall tile. A 48 px row icon gets no
+label at all rather than a smudge — the Type column carries the words at that
+size. The ink is a literal dark grey, not `c(..)`: `c` flips with the light
+palette, and the paper this sits on is light in both modes.
+
+`--selftest` *"the type written on a document's page is sized to the page"*
+measures with the real font inside a live frame and asserts the drawn width still
+fits the page; *"the Type column orders by type both ways, and keeps names ordered
+inside a type"* checks that descending reverses ascending and that two files of
+one type keep their name order.
 
 ## The deep pass: the main program read function by function
 
@@ -1384,7 +1508,7 @@ declared application title.
 | --- | --- | --- | --- |
 | title bar text | `Dolphin` | `DolphinCraft` | original: the NUL-terminated string `"Dolphin"` at **0x12d350** in `/usr/bin/dolphin`, immediately after the `@title` tag of its KAboutData block (next to `"File Manager"` and the authors) — i.e. the program's declared name, not a translated label. Rename asked for by the person. |
 | `WM_CLASS` / app id | `dolphin` | `dolphincraft` | the original's desktop file / QGuiApplication application id; the copy follows the new title so the task switcher groups it as its own app |
-| name shown in the About row | — | `DolphinCraft — file manager with extra tools` | rebuild's toast; the original's About box is a KAboutData dialog, which this build does not reproduce |
+| name shown in the About row | — | `About DolphinCraft` with `0.1.7` in its right-hand column, opening a small window with the version | asked for by the person; the original's About box is a KAboutData dialog, which this build now answers with its own dialog rather than a toast |
 
 Both the viewport title and the name handed to `eframe::run_native` were changed
 together, so the X11 `_NET_WM_NAME` and the Wayland title agree. Checked on a
@@ -1904,9 +2028,12 @@ close) and the tab strip were two rows of chrome above one toolbar. The window i
 now created with `.with_decorations(false)`, so the compositor draws no bar, and the
 tab strip carries what that bar carried:
 
-* the **window's name** (`APP_NAME`, 12.5 px, `text()`) at its left end, before the
-  first tab, with ten pixels of padding either side of the word — it drags and
-  double-clicks like the strip's empty space, being part of the same bar;
+* the **window's name and its release** at its left end, before the first tab, with
+  ten pixels of padding either side: `title_row_text()` gives the two strings,
+  `DolphinCraft` at 12.5 px in `text()` and `0.1.7` six pixels after it at 11.5 px in
+  `text_dim()`, so the number is on the bar itself and reads as a version rather
+  than part of the name. The whole block drags and double-clicks like the strip's
+  empty space, being part of the same bar;
 * the **three window buttons** at its right end (`WINDOW_BUTTON_W` = 34 px each,
   glyphs `minimize` / `maximize` / `restore` added to `theme::draw_glyph`, the close
   one on `danger_fill` under the pointer) sending `ViewportCommand::Minimized`,
@@ -2496,7 +2623,7 @@ gone; opening is a double-click, Enter, or *Open* / *Open With* on the right-cli
 menu, and the row is shorter by one button and its menu.
 
 The app menu is now a scrolling list capped to the window's height: in a window
-that was not maximised its last rows (*Help*, *About*, *Quit*) could sit below the
+that was not maximised its last rows (*About*, *Quit*) could sit below the
 bottom edge with no way to reach them. *About* names the release the build came
 from — the crate version, which is the GitHub tag without its `v` — so a picture of
 the box says which build it is.
@@ -3406,6 +3533,201 @@ the second row runs.
 * `--selftest` covers the making, the emptiness of the file, and the free-name
   rule — `Create New makes an empty text file and a folder, and the second one
   picks a free name` reads both names off the disk.
+
+## A window that comes back on the monitor it opened on
+
+A size and a place are saved between runs (`window_px`, `window_pos`). Saved on a
+larger screen, or under a scale that turns the same points into more pixels, they
+leave part of the window outside the desktop — and the toolbar is the right-hand
+end of the window, so what falls off is *Find* and *Menu*. The symptom is a
+button that does nothing: the popup opens, but off the screen, and nothing on
+screen says why. `startup_position` only rejected absurd values (±32 000), so the
+place was honoured however far off it was.
+
+The place is now checked rather than trusted: `window_monitor` records the size
+of the monitor the place belongs to, and `startup_position` reuses the place only
+when the whole saved window fits inside that monitor. A file with no
+`window_monitor` (anything written before this) cannot be checked at all, so its
+place is dropped and the window manager picks — which is what a first run does.
+The runtime net (`fit_window_to_monitor`) measures the window from `inner_rect`,
+because a frameless window under KWin's XWayland bridge does not always report an
+`outer_rect`; it keeps watching for `FIT_FRAMES` (900) frames instead of latching
+on the first one, since the window manager reports the monitor a frame or two
+after the first paint.
+
+**Two screens broke that net, and the maximize button is where it showed.**
+`ViewportInfo::monitor_size` is the *size* of the monitor under the window and
+carries no origin, while `inner_rect`/`outer_rect` are in screen coordinates. The
+net compared the window's far edge with that size — `outer.max.x <= monitor.x` —
+which every window on a right-hand monitor fails: the person's own window is
+1202 × 1053 at x = 1921 on a 2409 × 1355 second screen, and 1921 + 1202 > 2409.
+Because the check re-ran whenever the geometry changed, the first change after a
+maximize (the window manager filling the screen) shrank the window to the
+monitor's width minus its margins and moved it to the primary screen's corner.
+Maximize therefore "worked sometimes": whether it survived depended on when the
+geometry change landed inside the watch. Three rules replace it:
+
+* `window_fits` compares **only the extent** — a window is too big when it is
+  bigger than the monitor it is on — and questions the place **only when the
+  origin is negative**, above or left of every screen. `--selftest` holds the
+  person's own numbers: 1202 × 1053 at 1921 on a 2409-wide screen fits, 3000 wide
+  does not, an origin at y = -200 does not, and an unreported place is not a
+  reason to resize.
+* **A maximized window is never touched**: `fit_window_to_monitor` returns
+  before it measures anything when `maximized == Some(true)`, because the window
+  manager owns that geometry.
+* **The watch ends at the first press on the window** — a title-bar drag, the
+  maximize or minimize button, a double click on the header, a resize edge — so
+  the geometry is the person's from then on. It also ends when the window is
+  maximized.
+
+The place is no longer corrected by centring it in the monitor: that needed the
+monitor's origin, which egui does not report, and the guess is what put windows
+on the wrong screen. A maximized window's geometry is not saved either: the next
+run would open a screen-sized *restored* window that the startup fit then shrinks
+by its margins.
+
+`startup_position` keeps its own rule unchanged, and on a second screen it
+declines (the place is in screen coordinates, the monitor is only a size), so
+KWin's own per-window memory places the window there.
+
+The menu's own height follows the same rule: the popup is capped to the smaller
+of the window's height and the monitor's, minus 96 px. A popup taller than the
+screen is a popup that gets clamped out of sight.
+
+**Do not photograph or click the app against the person's real settings.** A test
+run that took the real `config.json` wrote a 1200 × 1303 window at x = 1084 into
+it, and their next launch opened with the toolbar off the desktop. `--screenshot`
+already loads a fresh config; a *live* run needs `XDG_CONFIG_HOME` pointing at a
+temporary copy.
+
+## Document types in Create New, read from the applications themselves
+
+The person's words: *"in the settings to be able to select types of documents
+that can be created under new like photocraft, vectorcraft documents — these
+should be checkboxes based on the list of applications registered"*, and then,
+after a first pass that only ever showed those two examples: *"it was supposed to
+be dynamic based on the app list installed on the computer"*.
+
+**Where the list comes from.** No application is named in the code. For each
+entry `apps::catalog` reads out of the data directories, `docs::catalog`:
+
+1. takes the application's short name — the last part of its desktop id, with
+   `.desktop` removed (`ai.storyteller.photocraft` → `photocraft`);
+2. reads every type the entry declares in `MimeType=` out of the MIME packages —
+   `~/.local/share/flatpak/exports/share/mime/packages` first, then the user's
+   own, then each `XDG_DATA_DIRS` entry, then the system-wide flatpak store —
+   with a small reader for the `<mime-type …><comment>…</comment><glob
+   pattern="*.x"/><icon name="…"/>` block (`docs::parse_mime_types`). The whole
+   registry is read once and kept; the first package that describes a type wins,
+   and a hidden entry (`NoDisplay=true`) never reaches the list at all, which is
+   why `wine-extension-msp.desktop` is absent;
+3. **keeps the type only when the desktop's own records say it is that
+   application's format.** Three pieces of evidence say so and any one is
+   enough, none of them a table of names:
+   * the type is named after the application — `application/x-<short>`, or that
+     with a word after it (`application/x-soundcraft-session`), which is how the
+     Craft applications, Blender and Qt Designer declare theirs;
+   * the type's package names the application's own icon — `<icon
+     name="org.gnome.Meld"/>` beside `Icon=org.gnome.Meld`;
+   * the type's description opens with the application's name —
+     "FreeCAD document files", "FreeFileSync Batch File".
+   A `-template` type is a form to start from, not a document, and a shared type
+   (`image/png`, the OpenDocument formats) is declared by many programs and is no
+   one's own;
+4. keeps only a type with a description and a plain extension: the first `*.x`
+   glob is the extension, and a glob with a wildcard anywhere but the front names
+   a family, not a name;
+5. titles the comment (`PhotoCraft document` → `PhotoCraft Document`), which is
+   both the row's label and, with `New ` in front, the file's name.
+
+On this machine that is fifteen types — Blender Scene, DeckCraft Presentation,
+DesignCraft Document, FilmCraft Project, FLUID GUI Design, FontForge's Spline
+Font Database, FreeCAD Document Files, FreeFileSync's Configuration and Batch
+File, Meld Comparison Description, PhotoCraft Document, Qt Designer Interface
+Document, RealTimeSync Configuration, SoundCraft Session and VectorCraft
+Document — and each appears because its application is installed and says so,
+not because it was written down. `DOLPHINCRAFT_DOCS_TRACE=1` prints that list
+with the entry each row came from, which is how another machine's registry can be
+asked what it offered.
+
+**Why the file associations are not the list.** The obvious "standard" source is
+the desktop's own assignment — which program is the default for which type, as
+`~/.config/mimeapps.list` and `mimeinfo.cache` record it. It answers the wrong
+question: *who opens this* rather than *who makes a new one*. Measured here, that
+assignment names 77 types, 54 of them with a description and an extension; 27 of
+those are video containers assigned to VLC, 24 are text formats assigned to the
+editor, and PhotoCraft's own type has no line there at all. A catalog built from
+it would offer "New MPEG video" beside "New C source code" and still not offer a
+PhotoCraft document. So the assignment is deliberately not consulted: the
+catalog is what each application says is its own format, joined to the entry
+that declares it.
+
+A consequence worth knowing: an application that only opens shared formats
+(WordCraft's `.docx`, GridCraft's `.xlsx`, PdfCraft's `.pdf`) has no type of its
+own to name a new file with, so it gets no row. That is the same reason the
+OpenDocument writer next door gets none — a new file of that type made by a file
+manager would be an empty file pretending to be a document.
+
+**How the file is made** (`docs::create`). An empty file named `.pcraft` is a
+corrupt bundle, not a document, so the format is never faked:
+
+* VectorCraft is JSON, so its skeleton is written here — instant, and it works in
+  a folder the flatpak sandbox was never given. `vectorcraft-cli run --in … --export
+  …svg` reads the result back with no warnings;
+* everything else is asked of the application that owns the format, through the
+  CLI that ships beside it: PhotoCraft `run --new {} --out`, DeckCraft `run --save`,
+  SoundCraft `run --save`, DesignCraft `run --cmd file.new --export`, FilmCraft
+  `--save-as <file> exec file.newProject`. The file is the only thing this build
+  fills in. PhotoCraft answers in about 80 ms, so the row does not freeze the
+  window;
+* **the CLI is looked for in two places, because there are two ways to install
+  one application**: `<short>-cli` on the `PATH` (a distribution package), then
+  `flatpak run --command=<short>-cli <id>` (the store). The store is tried second
+  so that a machine with the application as a package is not asked to have
+  flatpak at all; a plan that fails is reported with its own first line of
+  complaint, and the next plan still gets its turn;
+* the command runs in the document's own folder: a `flatpak run` whose working
+  directory the sandbox cannot enter fails before the application starts;
+* success means the file exists **and holds something**. An exit code of 0 that
+  wrote nothing is a failure and the application's own first line of complaint is
+  the toast — which is what happens when `XDG_CONFIG_HOME` points somewhere
+  PhotoCraft's CLI does not like (it exits 0 and writes nothing, its own bug);
+* a type with no known command still gets a row, and `create` makes the empty
+  file a file manager can always make — the toast says so (*"Message Catalog
+  created empty — Qt Linguist could not start one here"*), so the person is told
+  which of the two they got.
+
+Two sandboxes write only where they have been given: SoundCraft has `xdg-music`
+alone and DeckCraft `xdg-documents` alone, so a document made anywhere else
+reports the application's refusal instead of leaving a broken file behind.
+
+**The settings.** `config.new_docs` holds MIME types, not indices and not
+application names, so a format added to or removed from this build cannot move a
+tick onto a different type. It starts empty, so the menu is the two kinds it
+always had until the person asks for a document; `App::make_new` and the app
+menu's rows both read it through `docs::enabled`.
+
+**The menu, after it grew.** Nine document types inline pushed everything below
+them — *Settings*, *Sort by*, *Quit* — off a laptop window, so the list is one
+row, *Document Types (n/N)*, whose submenu holds the checkboxes, and every
+setting moved into *Settings* ▸ *Appearance / Panels / Previews and sizes /
+Starting / Deleting*. **The rows that make the documents are a submenu too**
+(*New Document ▸*, one row per ticked type, drawn only when something is
+ticked): the previous cut put them back inline as "New PhotoCraft Document" …,
+which is a list of the person's own length sitting in a menu of fixed groups —
+the same clutter the ticks had just been moved out of. *New* is now New Window /
+New Tab / Recently Closed Tabs / New Folder / New Text File / New Document ▸ /
+Document Types ▸ / Add Shortcut / Open Terminal Here whatever the ticks are.
+Each submenu sets *both* `set_min_width` and `set_max_width` (`panels::menu_box`)
+for the reason the *Create New* popup documents: a submenu's `ui` reports the
+whole window's width. The folder's own *Create New* keeps its rows flat, because
+that menu is already the submenu and a third level would be worse than the rows.
+
+`--selftest` covers the reading (a fixture MIME package, the title-cased label,
+the template and family-glob exclusions), the settings round-trip through the
+JSON file, and the two kinds of creation — a real VectorCraft document read back
+as JSON, and an unknown application's type falling back to an empty file.
 
 **Clicking the marked item again renames it.** The person's words: *"if you
 highlight a file and then click it again the app should interpret this as a

@@ -98,13 +98,16 @@ pub fn parse_desktop(id: &str, text: &str) -> Option<AppEntry> {
 
 fn data_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    let home = crate::fsutil::home_dir();
-    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from) {
-        dirs.push(xdg.join("applications"));
-    } else {
-        dirs.push(home.join(".local/share/applications"));
-        dirs.push(home.join(".local/share/flatpak/exports/share/applications"));
-    }
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::fsutil::home_dir().join(".local/share"));
+    dirs.push(data_home.join("applications"));
+    // The user's flatpak store is a data directory of its own. Some desktops put
+    // it in `XDG_DATA_DIRS` and some do not, so it is added here rather than
+    // hoped for: without it every application from the store disappears from
+    // *Open With* and from *Create New* on a machine whose `XDG_DATA_HOME` is set
+    // to something other than `~/.local/share`.
+    dirs.push(data_home.join("flatpak/exports/share/applications"));
     let extra = std::env::var("XDG_DATA_DIRS")
         .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
     for part in extra.split(':').filter(|p| !p.is_empty()) {
@@ -555,7 +558,7 @@ fn terminal_wrap(terminal: bool, args: &[String]) -> (String, Vec<String>) {
     (args[0].clone(), args[1..].to_vec())
 }
 
-fn which(name: &str) -> bool {
+pub(crate) fn which(name: &str) -> bool {
     std::env::var("PATH")
         .map(|path| {
             path.split(':')

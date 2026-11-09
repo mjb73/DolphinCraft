@@ -384,6 +384,14 @@ pub struct Config {
     /// the same spot is part of that. Not used in screenshot mode.
     #[serde(default)]
     pub window_pos: Option<[f32; 2]>,
+    /// The monitor that place was recorded on, so the place can be checked before
+    /// it is reused: a place saved on a bigger screen, or one written while the
+    /// window was wider than the screen, puts the toolbar — and *Menu* on it —
+    /// outside the desktop, where the button reads as broken. Without this there
+    /// is nothing to check the place against, and `startup_position` then declines
+    /// to reuse it.
+    #[serde(default)]
+    pub window_monitor: Option<[f32; 2]>,
     /// The Shortcuts section of the navigation panel can be folded away.
     #[serde(default = "yes")]
     pub shortcuts_expanded: bool,
@@ -496,6 +504,35 @@ pub struct Config {
     /// cap, which is also this build's factory default.
     #[serde(default)]
     pub preview_max_mib: u32,
+    /// Added feature, asked for by the person: the document types *Create New*
+    /// offers, held as MIME types (`application/x-photocraft`) because that is
+    /// what identifies a type and what survives an application being upgraded or
+    /// a format being added to this build. Empty on a fresh profile, so the menu
+    /// is unchanged until the person ticks a type in the settings — and a type
+    /// whose application has gone leaves its MIME string behind, harmlessly, as
+    /// nothing lists it.
+    #[serde(default)]
+    pub new_docs: Vec<String>,
+}
+
+impl Config {
+    /// Whether *New* should offer this document type.
+    pub fn offers_new_doc(&self, mime: &str) -> bool {
+        self.new_docs.iter().any(|m| m == mime)
+    }
+
+    /// Tick or untick one document type. Ticking one already ticked, or unticking
+    /// one that was not, changes nothing, so a double click cannot corrupt the
+    /// list.
+    pub fn set_new_doc(&mut self, mime: &str, on: bool) {
+        if on {
+            if !self.offers_new_doc(mime) {
+                self.new_docs.push(mime.to_string());
+            }
+        } else {
+            self.new_docs.retain(|m| m != mime);
+        }
+    }
 }
 
 fn size_limit() -> u32 {
@@ -571,6 +608,7 @@ impl Default for Config {
             session_tab: 0,
             window_px: None,
             window_pos: None,
+            window_monitor: None,
             shortcuts_expanded: true,
             recent_files_expanded: true,
             recent_locations_expanded: true,
@@ -605,6 +643,7 @@ impl Default for Config {
             confirm_delete: true,
             confirm_empty_trash: true,
             preview_max_mib: 0,
+            new_docs: Vec::new(),
         }
     }
 }

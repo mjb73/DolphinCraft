@@ -893,7 +893,12 @@ impl Pane {
         }
         if !drew {
             let side = (pic_rect.height().min(pic_rect.width()) * 0.45).clamp(24.0, 96.0);
-            theme::draw_kind_icon_tinted(
+            let ext = entry
+                .path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            theme::draw_kind_icon_tinted_ext(
                 ui.painter(),
                 Rect::from_center_size(pic_rect.center(), Vec2::splat(side)),
                 if entry.is_symlink { Kind::Link } else { entry.kind },
@@ -902,6 +907,7 @@ impl Pane {
                     .tint
                     .filter(|_| entry.is_dir)
                     .map(|t| theme::c(t[0], t[1], t[2])),
+                &ext,
             );
         }
         // The browser frames each picture with a two-pixel border; the same

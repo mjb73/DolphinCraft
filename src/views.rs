@@ -25,6 +25,11 @@ pub struct ViewCtx<'a> {
     /// The folder the other view shows, when there is one: the destination the
     /// two *Other View* rows copy or move into.
     pub other_dir: Option<std::path::PathBuf>,
+    /// The document types the settings have ticked, as indices into
+    /// `docs::catalog()` — the rows *Create New* adds after the folder and the
+    /// text file. Passed in rather than read here because a pane draws no
+    /// settings of its own.
+    pub new_docs: Vec<usize>,
 }
 
 /// The column rectangles of the details view, in drawing order. `path` is
@@ -32,6 +37,9 @@ pub struct ViewCtx<'a> {
 pub struct DetailsCols {
     pub name: Rect,
     pub path: Option<Rect>,
+    /// Added: the file's type ("PhotoCraft Document"), between the name and the
+    /// size, and sortable like the columns either side of it.
+    pub type_: Rect,
     pub size: Rect,
     pub date: Rect,
 }
@@ -196,6 +204,9 @@ pub struct BackgroundMenu {
     pub marked: usize,
     /// Whether the clipboard holds something to paste into this folder.
     pub can_paste: bool,
+    /// The document types the settings have ticked, as indices into
+    /// `docs::catalog()`.
+    pub new_docs: Vec<usize>,
 }
 
 /// Right-clicking the folder's own background: the same list Explorer puts there
@@ -296,6 +307,22 @@ fn background_menu(ui: &mut egui::Ui, st: &BackgroundMenu, reqs: &mut Vec<Reques
             reqs.push(Request::NewItem(NewKind::TextFile, st.dir.clone()));
             ui.close();
         }
+        // Added feature, asked for by the person: the document types the settings
+        // tick, one row each, made by the application that registers the type.
+        // The row carries the type's own description — the words its MIME package
+        // gives it, title-cased ("PhotoCraft Document") — and the hover text says
+        // which application makes it and what the file will be.
+        for i in &st.new_docs {
+            let Some(kind) = crate::docs::catalog().get(*i) else {
+                continue;
+            };
+            let resp = crate::menu_row(ui, &kind.label, "")
+                .on_hover_text(format!("A new .{} document, made by {}", kind.ext, kind.app));
+            if resp.clicked() {
+                reqs.push(Request::NewItem(NewKind::Doc(*i), st.dir.clone()));
+                ui.close();
+            }
+        }
     });
     ui.separator();
     if crate::menu_row(ui, "Copy Location", "").clicked() {
@@ -368,6 +395,7 @@ impl Pane {
                 asc: self.asc,
                 marked: self.sel.len(),
                 can_paste: !vctx.clipboard.paths.is_empty(),
+                new_docs: vctx.new_docs.clone(),
             };
             bg.context_menu(|ui| background_menu(ui, &menu, vctx.reqs));
         }
@@ -842,9 +870,23 @@ impl Pane {
                 size_w = (self.search_size_px + 14.0).max(44.0).min(size_w);
             }
         }
-        // What the two text columns share once size and date have theirs.
-        let text_w = w - size_w - date_w;
-        let mut name_w = text_w.max(w * 0.45);
+        // Added: the type column, between the name and the size. It is drawn only
+        // when the row can hold it — the name needs 110 px of its own before a
+        // fourth column is worth anything, and on a 260 px window the four
+        // headers do not fit. Its floor holds the header "Type" and its 18 % share
+        // holds the usual labels ("Plain text document" is the longest); a longer
+        // one elides rather than squeezing the name, which is what the row is about.
+        let type_w = if (w - size_w - date_w).max(0.0) >= 110.0 + 56.0 {
+            (w * 0.18).clamp(56.0, 150.0)
+        } else {
+            0.0
+        };
+        // What the text columns share once size, type and date have theirs. The
+        // name takes what is left: the three right-hand columns are at their
+        // floors before the name gives way, so on the narrowest window the name
+        // still has its icon and a few letters rather than the row overlapping.
+        let text_w = (w - size_w - date_w - type_w).max(20.0);
+        let mut name_w = text_w;
         let mut path = None;
         let mut path_w = 0.0;
         if show_path {
@@ -875,15 +917,25 @@ impl Pane {
             Pos2::new(rect.left() + name_w, rect.bottom()),
         );
         let after_name = rect.left() + name_w + path_w;
-        let size = Rect::from_min_max(
+        let type_ = Rect::from_min_max(
             Pos2::new(after_name, rect.top()),
-            Pos2::new(after_name + size_w, rect.bottom()),
+            Pos2::new(after_name + type_w, rect.bottom()),
+        );
+        let size = Rect::from_min_max(
+            Pos2::new(after_name + type_w, rect.top()),
+            Pos2::new(after_name + type_w + size_w, rect.bottom()),
         );
         let date = Rect::from_min_max(
             Pos2::new(rect.right() - date_w, rect.top()),
             rect.max,
         );
-        DetailsCols { name, path, size, date }
+        DetailsCols {
+            name,
+            path,
+            type_,
+            size,
+            date,
+        }
     }
 
     /// Measure the widest name and the widest folder in the search results, with
@@ -991,7 +1043,7 @@ impl Pane {
         let (hrect, _) = ui.allocate_exact_size(Vec2::new(width, header_h), Sense::hover());
         ui.painter().rect_filled(hrect, 0.0, theme::header_bg());
         let cols = self.details_columns(hrect);
-        let (name_c, size_c, date_c) = (cols.name, cols.size, cols.date);
+        let (name_c, type_c, size_c, date_c) = (cols.name, cols.type_, cols.size, cols.date);
         // Added feature: the folder column, while a search is showing. It is a
         // label rather than a button: the rows are found by content, not
         // ordered by folder, so a header that pretended to sort would lie.
@@ -1006,10 +1058,16 @@ impl Pane {
         }
         let labels = [
             (SortKey::Name, "Name", name_c, Align2::LEFT_CENTER),
+            (SortKey::Type, "Type", type_c, Align2::LEFT_CENTER),
             (SortKey::Size, "Size", size_c, Align2::RIGHT_CENTER),
             (SortKey::Modified, "Modified", date_c, Align2::RIGHT_CENTER),
         ];
         for (key, label, rect, align) in labels {
+            // A column that gave way (the type column on a narrow window) has no
+            // header to draw and no place to click.
+            if rect.width() <= 1.0 {
+                continue;
+            }
             let sort_here = self.sort == key;
             let color = if sort_here { theme::text() } else { theme::text_dim() };
             let font = FontId::proportional(12.0);
@@ -1052,8 +1110,12 @@ impl Pane {
                 if self.sort == key {
                     self.asc = !self.asc;
                 } else {
+                    // A key that is not the current one starts the way the
+                    // original starts it: Name and Type ascending, Size and
+                    // Modified descending (`SortKey::descends_first`), which is
+                    // also what the *Sort by* menu does through `choose_sort`.
                     self.sort = key;
-                    self.asc = true;
+                    self.asc = !key.descends_first();
                 }
                 self.sort_entries();
             }
@@ -1062,6 +1124,9 @@ impl Pane {
         // On the boundaries themselves: a rule drawn six pixels inside the column
         // cut through the Size label, which ends at the boundary.
         let mut seps = vec![size_c.left(), date_c.left()];
+        if type_c.width() > 1.0 {
+            seps.push(type_c.left());
+        }
         if let Some(path_c) = cols.path {
             seps.push(path_c.left());
         }
@@ -1207,7 +1272,7 @@ impl Pane {
         );
 
         let cols = self.details_columns(rect);
-        let (name_c, size_c, date_c) = (cols.name, cols.size, cols.date);
+        let (name_c, type_c, size_c, date_c) = (cols.name, cols.type_, cols.size, cols.date);
         // The icon follows the zoom level, as it does in the original's details
         // view: Ctrl+Plus makes the rows grow instead of only changing the label
         // in the status bar.
@@ -1225,12 +1290,13 @@ impl Pane {
             }
         }
         if !drew_preview {
-            theme::draw_kind_icon_tinted(
+            theme::draw_kind_icon_tinted_ext(
                 ui.painter(),
                 icon_rect,
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
                 row_tint(&entry, selected),
+                &entry.extension(),
             );
         }
 
@@ -1300,6 +1366,24 @@ impl Pane {
             FontId::proportional(12.0),
             dim,
         );
+        // Added: the type cell. Its words come from `Entry::type_label`, the same
+        // function the sort uses, so the column and the order can never disagree;
+        // a label wider than the column elides at its end rather than running into
+        // the size beside it.
+        {
+            let font = FontId::proportional(12.0);
+            let max_w = (type_c.width() - HEAD_PAD - 4.0).max(16.0);
+            let label = theme::elide_name(ui, &entry.type_label(), max_w, font.clone());
+            if type_c.width() > 1.0 {
+                ui.painter().text(
+                    Pos2::new(type_c.left() + HEAD_PAD, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    label,
+                    font,
+                    dim,
+                );
+            }
+        }
         ui.painter().text(
             Pos2::new(date_c.right() - HEAD_PAD, rect.center().y),
             Align2::RIGHT_CENTER,
@@ -1604,12 +1688,13 @@ impl Pane {
             }
         }
         if !drew_thumb {
-            theme::draw_kind_icon_tinted(
+            theme::draw_kind_icon_tinted_ext(
                 ui.painter(),
                 Rect::from_center_size(icon_rect.center(), Vec2::splat(icon)),
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
                 row_tint(&entry, selected),
+                &entry.extension(),
             );
         }
 
@@ -1831,12 +1916,13 @@ impl Pane {
             }
         }
         if !drew_preview {
-            theme::draw_kind_icon_tinted(
+            theme::draw_kind_icon_tinted_ext(
                 ui.painter(),
                 icon_rect,
                 if entry.is_symlink { Kind::Link } else { entry.kind },
                 entry.broken,
                 row_tint(&entry, selected),
+                &entry.extension(),
             );
         }
         let font = FontId::proportional(12.5);

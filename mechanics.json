@@ -90,8 +90,14 @@
   {
    "name": "details columns",
    "group": "view",
-   "value": "Name, Size, Modified",
-   "source": "live capture of dolphin 26.08.2 details view"
+   "value": "Name, Type, Size, Modified (a Path column joins them while a deep search is showing)",
+   "source": "live capture of dolphin 26.08.2 details view for the original's Name, Size, Modified; Type is this build's addition (2026-11-09), between Name and Size, and it gives way on a row too narrow to hold it"
+  },
+  {
+   "name": "type written on a document icon",
+   "group": "view",
+   "value": "the file's extension, upper-cased, in the band under the kind glyph and sized to the tile: VECTORCRAFT at 8.6 px on a 96 px tile, nothing below a 6 px floor",
+   "source": "this build (2026-11-09): theme::draw_type_label / type_label_px, solved from Painter::layout_no_wrap at 10 px and the page's own band (PAGE_W_FRAC 0.64, TYPE_AIR 0.92, TYPE_BAND_FRAC 0.12); the person asked for it because two documents from two applications wore the same blank page"
   },
   {
    "name": "details row height",
@@ -1358,8 +1364,8 @@
   {
    "name": "three-button card",
    "group": "toolbar",
-   "value": "F1, or Menu > What the Three Buttons Do...",
-   "source": "this build: panels.rs guide_dialog, opened by --guide"
+   "value": "removed at the person's request: the Menu row, F1 and --guide are gone with it",
+   "source": "this build: the guide_dialog and its row were deleted; the app menu now ends on Sort by"
   },
   {
    "name": "details panel open when a picture opens",
@@ -2197,6 +2203,49 @@
    "group": "files",
    "value": "an empty file made with create_new(true): a name that is already taken is refused, never emptied",
    "source": "own choice: create_file makes an empty file; create_new keeps a mistyped name from truncating the file that already has it"
+  },
+  {
+   "name": "document types Create New offers",
+   "group": "menu",
+   "value": "every installed application that keeps a document format of its own: the type named after it, the type its MIME package names its icon for, or the type its description names it in",
+   "source": "docs::owns_type + docs::catalog, from apps::catalog + the MIME packages (15 on this machine); the desktop's default applications are deliberately not used: they name who opens a type, not who makes one"
+  },
+  {
+   "name": "document types on by default",
+   "group": "menu",
+   "value": 0,
+   "unit": "types",
+   "source": "config.new_docs starts empty; the ticks are the person's own"
+  },
+  {
+   "name": "where a ticked document type is offered",
+   "group": "menu",
+   "value": "Menu > New > New Document, one row per ticked type; the row is drawn only when something is ticked",
+   "source": "this build: panels.rs menu_new, a menu_button with panels::menu_box width; the folder's Create New keeps its rows flat because it is already a submenu"
+  },
+  {
+   "name": "maximizing on a two-screen desktop",
+   "group": "window",
+   "value": "left to the window manager: the startup fit skips a maximized window, compares only the extent with the monitor's size, and stops at the first press on the title bar, the window buttons or a resize edge",
+   "source": "this build: main.rs window_fits / fit_window_to_monitor / FIT_FRAMES. egui-winit reports outer_rect in screen coordinates but monitor_size as a size without origin, so the old 'far edge <= monitor.x' test read a window at x = 1921 on a 2409-wide second screen as off-screen"
+  },
+  {
+   "name": "update check",
+   "group": "update",
+   "value": "manual only: the menu's *Check for Updates...* row asks api.github.com for mjb73/DolphinCraft's latest release on a worker thread, and offers it when its version is numerically newer",
+   "source": "this build (2026-11-09): src/update.rs check / parse_release / newer; the About line changed from 'Nothing dials out.' to say it dials out only when this row is picked"
+  },
+  {
+   "name": "update install",
+   "group": "update",
+   "value": "the release tarball, checked against its .sha256 before anything is replaced, unpacked and renamed over the running binary; the window then restarts with the same arguments",
+   "source": "this build: download_and_install / install_archive / restart; asset names are packaging/linux-tarball.sh's dolphincraft-<v>-<arch>-linux.tar.gz and .sha256, checked against the real v0.1.6 release"
+  },
+  {
+   "name": "update endpoint override",
+   "group": "update",
+   "value": "DOLPHINCRAFT_UPDATE_ENDPOINT replaces the GitHub URL with any address that answers a release JSON",
+   "source": "this build: update::endpoint; used by the local-server test that drove the whole flow"
   }
  ]
 }

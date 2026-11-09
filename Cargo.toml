@@ -1,6 +1,6 @@
 [package]
 name = "dolphincraft"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with extra tools."
 authors = ["Michael Bayes"]
@@ -27,6 +27,10 @@ walkdir = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Added feature: *Check for Updates…* asks GitHub for the newest release and
+# installs it. ureq is a small blocking HTTPS client (rustls, no OpenSSL), run on
+# a worker thread so the window never waits on the network.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 # Added feature: a picture dragged out of the window is handed to another
 # program over the X11 drag-and-drop protocol (see src/dragout.rs).
 x11rb = "0.13"
