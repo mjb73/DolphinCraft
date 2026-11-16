@@ -30,6 +30,12 @@ pub struct ViewCtx<'a> {
     /// text file. Passed in rather than read here because a pane draws no
     /// settings of its own.
     pub new_docs: Vec<usize>,
+    /// `--pick`: the window is answering a file dialog. The listing, the views,
+    /// the places and the find bar all stay — a dialog is a file browser — but
+    /// the things a dialog must not offer go: no right-click menus (they rename,
+    /// delete and make files), no second click that turns a row into a name
+    /// field. The dialog's own footer is what answers.
+    pub pick: bool,
 }
 
 /// The column rectangles of the details view, in drawing order. `path` is
@@ -369,7 +375,7 @@ impl Pane {
                         .show(ui, |ui| {
                             ui.set_min_width((ui.available_width() - 4.0).max(60.0));
                             ui.set_min_height(22.0);
-                            self.breadcrumb_ui(ui, vctx.reqs);
+                            self.breadcrumb_ui(ui, vctx.reqs, vctx.pick);
                         });
                 });
         }
@@ -397,7 +403,10 @@ impl Pane {
                 can_paste: !vctx.clipboard.paths.is_empty(),
                 new_docs: vctx.new_docs.clone(),
             };
-            bg.context_menu(|ui| background_menu(ui, &menu, vctx.reqs));
+            if !vctx.pick {
+                bg.context_menu(|ui| background_menu(ui, &menu, vctx.reqs));
+            }
+
         }
 
         // Ctrl + wheel zooms the view, the same one-step-per-notch change the
@@ -502,7 +511,7 @@ impl Pane {
         self.location_select = true;
     }
 
-    pub fn breadcrumb_ui(&mut self, ui: &mut egui::Ui, reqs: &mut Vec<Request>) {
+    pub fn breadcrumb_ui(&mut self, ui: &mut egui::Ui, reqs: &mut Vec<Request>, pick: bool) {
         if self.location_edit.is_some() {
             let field_id = ui.make_persistent_id("location-field");
             let mut submitted: Option<String> = None;
@@ -628,6 +637,10 @@ impl Pane {
                     reqs.push(Request::Navigate(path.clone()));
                 }
                 resp.context_menu(|ui| {
+                    // A dialog's bar has no windows or tabs to offer.
+                    if pick {
+                        return;
+                    }
                     if ui.button("Copy Location").clicked() {
                         ui.ctx().copy_text(path.display().to_string());
                         ui.close();
@@ -2001,7 +2014,9 @@ impl Pane {
             // a double click (that opens it), not while its own field is already
             // open, and not on the picture wall, which draws no name field.
             let plain = !mods.shift && !mods.ctrl && !mods.command;
-            if click_asks_for_rename(marked_already, plain, resp.double_clicked(), self.pictures)
+            let pick = vctx.pick;
+            if !pick
+                && click_asks_for_rename(marked_already, plain, resp.double_clicked(), self.pictures)
                 && !editing_here
             {
                 if let Some(name) = self.display_entries().get(idx).map(|e| e.name.clone()) {
@@ -2078,7 +2093,19 @@ impl Pane {
             let in_trash = self.is_trash();
             let trash_empty = self.display_entries().is_empty();
             let clipboard_has = !vctx.clipboard.paths.is_empty();
+            // A dialog offers no menu that makes, renames or deletes files; the
+            // one row it does offer is the answer itself. (An empty popup would
+            // still be a popup, so the row is drawn rather than skipped.)
+            let picking = vctx.pick;
             resp.context_menu(|ui| {
+                if picking {
+                    ui.set_min_width(160.0);
+                    if ui.button("Open").clicked() {
+                        vctx.reqs.push(Request::OpenPath(entry.path.clone()));
+                        ui.close();
+                    }
+                    return;
+                }
                 ui.set_min_width(210.0);
                 if in_trash {
                     if ui.button("Restore to Former Location").clicked() {

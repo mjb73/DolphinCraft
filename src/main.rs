@@ -36,6 +36,7 @@ mod config;
 mod copymove;
 mod docs;
 mod findtext;
+mod fm1;
 mod foldercolor;
 mod fsutil;
 mod gallery;
@@ -44,6 +45,7 @@ mod imageresize;
 mod video;
 mod dragout;
 mod panels;
+mod pick;
 mod search;
 mod selectable;
 mod selftest;
@@ -562,6 +564,11 @@ pub struct App {
     /// The About window the menu's row opens. Its own flag rather than a toast:
     /// a message that leaves after two seconds is not a place to read a version.
     pub about_open: bool,
+    /// `--pick`: the window is answering a file dialog, and what it was asked
+    /// for. `None` is an ordinary file manager; `Some` turns the footer into an
+    /// answer, drops the menus that make or change files, and prints what was
+    /// chosen to stdout as the process leaves.
+    pub pick: Option<pick::Pick>,
     /// Added feature: *Check for Updates…* — whether a check or an install is
     /// running, the release offered, and the thread's reply channel.
     pub update: crate::update::Update,
@@ -580,6 +587,9 @@ pub struct App {
     pub info_panel: bool,
     pub clipboard: Clipboard,
     pub thumbs: ThumbCache,
+    /// Added feature: what another program asked the `org.freedesktop.FileManager1`
+    /// service to show, drained once a frame by `poll_background`.
+    pub fm1_rx: Option<std::sync::mpsc::Receiver<fm1::Fm1Call>>,
     pub config: Config,
     pub reqs: Vec<Request>,
     pub confirm: Option<Confirm>,
@@ -993,6 +1003,23 @@ impl App {
         let mut thumbs = ThumbCache::new();
         // `[PreviewSettings] MaximumSize`, in MiB; 0 = files of any size.
         thumbs.set_max_mib(cfg.preview_max_mib);
+        // Added feature: answer another program's "Show in folder" on
+        // `org.freedesktop.FileManager1` (src/fm1.rs). A captured picture must
+        // not take the name from a live window, so a screenshot run leaves the
+        // service alone; a name another manager already holds is reported, not
+        // fought over.
+        let fm1_rx = if shot_mode {
+            None
+        } else {
+            let (tx, rx) = channel();
+            match fm1::start(tx, cc.egui_ctx.clone()) {
+                Ok(()) => Some(rx),
+                Err(e) => {
+                    eprintln!("FileManager1: not serving — {e}");
+                    None
+                }
+            }
+        };
         // Added feature asked for by the person: the tabs of the last run come
         // back, with the tab that was in front in front again. A folder handed
         // over on the command line, a find or the viewer takes precedence, and a
@@ -1042,6 +1069,7 @@ impl App {
             tabs,
             active_tab,
             about_open: false,
+            pick: None,
             update: crate::update::Update::default(),
             open_menu_once: start_menu,
             diag_frames: if start_menu || std::env::var_os("DOLPHINCRAFT_DIAG").is_some() {
@@ -1059,6 +1087,7 @@ impl App {
             info_panel: cfg.info_panel,
             clipboard: Clipboard::new(),
             thumbs,
+            fm1_rx,
             config: cfg,
             reqs: Vec::new(),
             confirm: None,
@@ -1450,7 +1479,7 @@ impl App {
                             |ui| {
                                 ui.set_clip_rect(bar_rect.shrink(1.0));
                                 ui.set_min_height(22.0);
-                                tab.panes[idx].breadcrumb_ui(ui, &mut self.reqs);
+                                tab.panes[idx].breadcrumb_ui(ui, &mut self.reqs, self.pick.is_some());
                             },
                         );
                     } else if show_bar {
@@ -3233,6 +3262,324 @@ inside={} focused={}",
         }
     }
 
+    // -----------------------------------------------------------------------
+    // The file dialog (`--pick`)
+    // -----------------------------------------------------------------------
+
+    /// Narrow the panes to the types the dialog was asked for. Called once at
+    /// startup and again when the filter row changes: the listing is built in
+    /// `Pane::refilter`, so a new filter has to say so or the bar and the list
+    /// would disagree about what the dialog is asking for.
+    pub(crate) fn pick_apply(&mut self) {
+        let Some(pick) = self.pick.as_ref() else {
+            return;
+        };
+        let patterns = pick.patterns();
+        for tab in self.tabs.iter_mut() {
+            for pane in tab.panes.iter_mut() {
+                pane.pick_keep = patterns.clone();
+                pane.sel.clear();
+                pane.cursor = 0;
+                pane.refilter();
+            }
+        }
+    }
+
+    /// The dialog's footer: what is being asked for, the filter rows, the save
+    /// dialog's name field, and the two buttons that end the wait.
+    fn pick_bar(&mut self, ctx: &egui::Context) {
+        // Everything the answer is worked out from is read before the panel
+        // borrows the picker mutably: the marks, the file under the cursor and
+        // the folder on screen.
+        let here = self.pane().current_dir();
+        let marked = self.pane().selected_paths();
+        let cursor = self
+            .pane()
+            .display_entries()
+            .get(self.pane().cursor)
+            .filter(|e| !e.is_dir)
+            .map(|e| e.path.clone());
+        let mut chosen: Option<Vec<PathBuf>> = None;
+        let mut cancelled = false;
+        let mut refilter = false;
+        // A save dialog follows the marked file: marking one puts its name in
+        // the field, until the person types a name of their own. That is what
+        // every other save dialog does, and it is why the field cannot be the
+        // only way to name the file.
+        if let Some(p) = self.pick.as_mut() {
+            if p.mode == pick::Mode::Save && !p.folder && !p.name_touched && marked.len() == 1 {
+                if let Some(name) = marked[0].file_name() {
+                    p.name = name.to_string_lossy().to_string();
+                }
+            }
+        }
+        let answer = self
+            .pick
+            .as_ref()
+            .and_then(|p| pick::candidate(p, &here, &marked, cursor.as_ref()));
+        egui::TopBottomPanel::bottom("pick")
+            .exact_height(52.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::toolbar_bg())
+                    .inner_margin(Margin::symmetric(10, 8)),
+            )
+            .show(ctx, |ui| {
+                let Some(pick) = self.pick.as_mut() else {
+                    return;
+                };
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.label(
+                        egui::RichText::new(pick.title.clone())
+                            .size(12.5)
+                            .color(theme::text_dim()),
+                    );
+                    // The filter rows: a dropdown when there is more than one, a
+                    // word when there is exactly one, nothing when the program
+                    // that asked named no type at all.
+                    let labels = pick.filter_labels();
+                    if labels.len() > 1 {
+                        let mut active = pick.active.min(labels.len() - 1);
+                        egui::ComboBox::from_id_salt("pick-filter")
+                            .selected_text(labels[active].clone())
+                            .width(190.0)
+                            .show_ui(ui, |ui| {
+                                for (i, label) in labels.iter().enumerate() {
+                                    if ui.selectable_label(active == i, label).clicked() {
+                                        active = i;
+                                    }
+                                }
+                            });
+                        if active != pick.active {
+                            pick.active = active;
+                            refilter = true;
+                        }
+                    } else if let Some(label) = labels.first() {
+                        ui.label(
+                            egui::RichText::new(label.clone())
+                                .size(12.0)
+                                .color(theme::text_faint()),
+                        );
+                    }
+                    // The save dialog's name field. Typing in it is what makes
+                    // the marking of a file stop rewriting the name.
+                    if pick.mode == pick::Mode::Save && !pick.folder {
+                        let room = (ui.available_width() - 190.0).clamp(140.0, 380.0);
+                        let field = ui.add(
+                            egui::TextEdit::singleline(&mut pick.name)
+                                .desired_width(room)
+                                .hint_text("Name")
+                                .background_color(theme::view_bg())
+                                .text_color(theme::text())
+                                .font(egui::FontId::proportional(13.0)),
+                        );
+                        if field.changed() {
+                            pick.name_touched = true;
+                        }
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let accept_label = pick.accept.clone();
+                        if ui
+                            .add_enabled(
+                                answer.is_some(),
+                                egui::Button::new(
+                                    egui::RichText::new(accept_label).size(13.0),
+                                )
+                                .fill(theme::action_fill())
+                                .min_size(Vec2::new(96.0, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            chosen = answer.clone();
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("Cancel").size(13.0))
+                                    .fill(theme::header_bg())
+                                    .min_size(Vec2::new(88.0, 28.0)),
+                            )
+                            .clicked()
+                        {
+                            cancelled = true;
+                        }
+                        // What the button will answer with. In a save dialog the
+                        // field already says the name, so the hint names the
+                        // folder it goes into; in an open dialog it names the
+                        // file, or how many are marked.
+                        if let Some(paths) = &answer {
+                            let words = if pick.mode == pick::Mode::Save {
+                                here.display().to_string()
+                            } else if paths.len() > 1 {
+                                format!("{} files", paths.len())
+                            } else {
+                                paths[0]
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| paths[0].display().to_string())
+                            };
+                            ui.label(
+                                egui::RichText::new(words)
+                                    .size(11.5)
+                                    .color(theme::text_faint()),
+                            );
+                        }
+                    });
+                });
+            });
+        if refilter {
+            self.pick_apply();
+        }
+        if let Some(paths) = chosen {
+            Self::pick_finish(Some(paths));
+        }
+        if cancelled {
+            Self::pick_finish(None);
+        }
+    }
+
+    /// End the dialog: the paths go to stdout, one per line, and the process
+    /// leaves. 0 says something was chosen, 1 says the dialog was put away —
+    /// the two answers the portal backend, and a shell script, both read.
+    fn pick_finish(paths: Option<Vec<PathBuf>>) -> ! {
+        use std::io::Write;
+        let status = match paths {
+            Some(list) if !list.is_empty() => {
+                let out = std::io::stdout();
+                let mut lock = out.lock();
+                for path in &list {
+                    let _ = writeln!(lock, "{}", path.display());
+                }
+                let _ = lock.flush();
+                0
+            }
+            _ => 1,
+        };
+        std::process::exit(status);
+    }
+
+    /// The answer a double click or Enter gives, in either mode.
+    fn pick_accept_here(&mut self) -> bool {
+        let here = self.pane().current_dir();
+        let marked = self.pane().selected_paths();
+        let cursor = self
+            .pane()
+            .display_entries()
+            .get(self.pane().cursor)
+            .filter(|e| !e.is_dir)
+            .map(|e| e.path.clone());
+        let answer = self
+            .pick
+            .as_ref()
+            .and_then(|p| pick::candidate(p, &here, &marked, cursor.as_ref()));
+        match answer {
+            Some(paths) => Self::pick_finish(Some(paths)),
+            None => false,
+        }
+    }
+
+    /// One file answered: printed and the process leaves. In a save dialog the
+    /// file's own name goes into the field first, so a double click on a file
+    /// saves over it rather than to whatever name was there.
+    fn pick_file(&mut self, path: PathBuf) {
+        let here = self.pane().current_dir();
+        let Some(pick) = self.pick.as_ref() else {
+            return;
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mode = pick.mode;
+        let allowed = pick::may_answer(pick, &path, &here);
+        let refusal = pick.refusal(&name);
+        if mode == pick::Mode::Save {
+            if let Some(p) = self.pick.as_mut() {
+                p.name = name.clone();
+                p.name_touched = true;
+            }
+            Self::pick_finish(pick::save_target(&here, &name).map(|path| vec![path]));
+        }
+        if !allowed {
+            self.toast(&refusal);
+            return;
+        }
+        Self::pick_finish(Some(vec![path]));
+    }
+
+    /// The keys a dialog answers. Everything this window otherwise binds —
+    /// Delete, F2, F10, the tab keys, paste — has no meaning in an answer, so
+    /// the file window's whole key map is out of reach while one is up.
+    fn pick_keys(&mut self, ctx: &egui::Context) {
+        let typing = ctx.wants_keyboard_input();
+        let (mut down, mut page) = (0i32, 0i32);
+        let mut jump: Option<bool> = None;
+        let mut accept = false;
+        let mut cancel = false;
+        let (mut up_one, mut back) = (false, false);
+        ctx.input_mut(|i| {
+            use egui::Key;
+            if i.consume_key(Modifiers::NONE, Key::Escape) {
+                cancel = true;
+            }
+            if i.consume_key(Modifiers::NONE, Key::Enter) {
+                accept = true;
+            }
+            // While the name field has the keyboard, the arrows belong to the
+            // text, not to the list.
+            if typing {
+                return;
+            }
+            if i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                down += 1;
+            }
+            if i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                down -= 1;
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageDown) {
+                page += 1;
+            }
+            if i.consume_key(Modifiers::NONE, Key::PageUp) {
+                page -= 1;
+            }
+            if i.consume_key(Modifiers::NONE, Key::Home) {
+                jump = Some(true);
+            }
+            if i.consume_key(Modifiers::NONE, Key::End) {
+                jump = Some(false);
+            }
+            if i.consume_key(Modifiers::ALT, Key::ArrowUp) {
+                up_one = true;
+            }
+            if i.consume_key(Modifiers::ALT, Key::ArrowLeft) {
+                back = true;
+            }
+        });
+        if cancel {
+            Self::pick_finish(None);
+        }
+        if accept {
+            // A folder request answers with the folder on screen when nothing is
+            // marked, so Enter is never a dead key.
+            self.pick_accept_here();
+        }
+        for _ in 0..down.abs() {
+            self.move_cursor(if down > 0 { 1 } else { -1 });
+        }
+        for _ in 0..page.abs() {
+            self.pane_mut().page_cursor(if page > 0 { 1 } else { -1 });
+        }
+        if let Some(first) = jump {
+            self.pane_mut().jump_cursor(first);
+        }
+        if up_one {
+            self.pane_mut().go_up();
+        }
+        if back {
+            self.pane_mut().go_back();
+        }
+    }
+
     fn status_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status")
             .exact_height(28.0)
@@ -3496,6 +3843,7 @@ inside={} focused={}",
                         show_location_bar: self.split,
                         other_dir: None,
                         new_docs: crate::docs::enabled(&self.config),
+                        pick: self.pick.is_some(),
                     };
                     tab.panes[0].ui(ui, &mut vctx);
                     tab.active = 0;
@@ -3545,6 +3893,7 @@ inside={} focused={}",
                         show_location_bar: true,
                         other_dir: Some(right_dir),
                         new_docs: crate::docs::enabled(&self.config),
+                        pick: self.pick.is_some(),
                     };
                     let mut child = ui.new_child(
                         egui::UiBuilder::new()
@@ -3564,6 +3913,7 @@ inside={} focused={}",
                         show_location_bar: true,
                         other_dir: Some(left_dir),
                         new_docs: crate::docs::enabled(&self.config),
+                        pick: self.pick.is_some(),
                     };
                     let mut child2 = ui.new_child(
                         egui::UiBuilder::new()
@@ -3858,8 +4208,13 @@ inside={} focused={}",
                     }
                 }
                 Request::OpenPath(path) => {
+                    // In a dialog the same press is the answer: a folder still
+                    // walks (the listing is how the person gets anywhere), a
+                    // file ends the wait.
                     if path.is_dir() {
                         self.pane_mut().navigate(path);
+                    } else if self.pick.is_some() {
+                        self.pick_file(path);
                     } else {
                         fsutil::open_with_default(&path);
                     }
@@ -4145,11 +4500,60 @@ inside={} focused={}",
                 }
             }
         }
-        self.poll_background();
-        let _ = ctx;
+        self.poll_fm1();
+        self.poll_background(ctx);
     }
 
-    fn poll_background(&mut self) {
+    /// Another program's `ShowFolders` / `ShowItems` / `ShowItemProperties`,
+    /// applied to the tab in front. The bus thread wakes the window itself
+    /// (`fm1::start` holds an `egui::Context`), so a request arriving while the
+    /// window sits still is shown at once instead of on the next click.
+    fn poll_fm1(&mut self) {
+        let Some(rx) = self.fm1_rx.as_ref() else {
+            return;
+        };
+        let mut calls = Vec::new();
+        while let Ok(call) = rx.try_recv() {
+            calls.push(call);
+        }
+        for call in calls {
+            let props = matches!(call, fm1::Fm1Call::Properties(_));
+            match call {
+                fm1::Fm1Call::Folders(paths) => {
+                    if let Some(folder) = paths.into_iter().next() {
+                        self.pane_mut().navigate(folder);
+                    }
+                }
+                fm1::Fm1Call::Items(paths) | fm1::Fm1Call::Properties(paths) => {
+                    let Some(target) = paths.into_iter().next() else {
+                        continue;
+                    };
+                    // A folder is shown itself; a file is shown marked in the
+                    // folder that holds it, which is what "show in folder" means.
+                    if target.is_dir() {
+                        self.pane_mut().navigate(target.clone());
+                    } else {
+                        let parent = target
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(fsutil::home_dir);
+                        let name = target
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        self.pane_mut().navigate(parent);
+                        self.pane_mut().pending_select = Some(name);
+                        self.pane_mut().apply_pending_select();
+                    }
+                    if props {
+                        self.reqs.push(Request::Properties(vec![target]));
+                    }
+                }
+            }
+        }
+    }
+
+    fn poll_background(&mut self, ctx: &egui::Context) {
         while let Ok((path, size)) = self.size_rx.try_recv() {
             self.folder_sizes.insert(path, size);
         }
@@ -4876,6 +5280,13 @@ inside={} focused={}",
         // keyboard, so no file-manager shortcut can fire behind it.
         if self.viewer.is_some() {
             self.viewer_keys(ctx);
+            return;
+        }
+        // `--pick`: a dialog answers a handful of keys of its own and nothing
+        // this file window binds. Returned here rather than filtered lower down
+        // so a stray shortcut cannot reach a file.
+        if self.pick.is_some() {
+            self.pick_keys(ctx);
             return;
         }
         let typing = ctx.wants_keyboard_input();
@@ -5715,7 +6126,15 @@ impl eframe::App for App {
         self.top_toolbar(ctx);
         self.places_panel(ctx);
         self.info_panel_ui(ctx);
-        self.status_bar(ctx);
+        // `--pick`: the status line gives way to the dialog's own footer — the
+        // question in words, the filter rows, the name field and the two
+        // buttons that end the wait. The status line's counts belong to a file
+        // window, and a dialog has an answer instead.
+        if self.pick.is_some() {
+            self.pick_bar(ctx);
+        } else {
+            self.status_bar(ctx);
+        }
         self.central(ctx);
         // Added feature, asked for: drag and drop with other programs, both
         // ways — files carried out of the window, and files carried into it.
@@ -5740,7 +6159,9 @@ impl eframe::App for App {
         // anything that differs is written, so a choice made by a button that
         // forgot to announce itself still survives a crash as well as a tidy
         // exit.
-        if self.shot.is_none() {
+        // A dialog neither reads the window's saved state nor writes one: it is
+        // another program's question, not a session of its own.
+        if self.shot.is_none() && self.pick.is_none() {
             if self.frames % 30 == 0 {
                 let sig = settings_signature(&self.config_from_state(Some(ctx)));
                 if sig != self.settings_sig {
@@ -5768,6 +6189,12 @@ impl eframe::App for App {
     /// window size are current even if nothing was marked dirty since the last
     /// save. The original does the same in `DolphinMainWindow::slotSaveSession`.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Closing the dialog is putting it away: nothing is answered and the
+        // process leaves with 1, which is what the portal reads as a cancel.
+        // The settings are not touched either.
+        if self.pick.is_some() {
+            Self::pick_finish(None);
+        }
         self.persist(None);
     }
 }
@@ -6532,6 +6959,10 @@ fn main() -> eframe::Result<()> {
     let mut start_details = false;
     // Added feature: open in light mode without touching the saved setting.
     let mut light_flag = false;
+    // Added feature: `--pick` — the window is a file dialog, and this is what it
+    // was asked for. Read before anything is drawn, because the filter belongs
+    // to the first listing that is read.
+    let mut pending_pick: Option<pick::Pick> = None;
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--selftest") {
         std::process::exit(selftest::run());
@@ -6683,6 +7114,61 @@ fn main() -> eframe::Result<()> {
             "--dims" => start_dims = true,
             "--details" => start_details = true,
             "--light" => light_flag = true,
+            // Added feature: the window as a file dialog. Everything after it
+            // shapes what is asked for; the answer goes to stdout.
+            "--pick" => {
+                let pick = pick::Pick::new(match args.get(i + 1).map(|s| s.as_str()) {
+                    Some("save") | Some("save-file") => pick::Mode::Save,
+                    _ => pick::Mode::Open,
+                });
+                if matches!(args.get(i + 1).map(|s| s.as_str()), Some("save") | Some("save-file") | Some("open") | Some("open-file")) {
+                    i += 1;
+                }
+                pending_pick = Some(pick);
+            }
+            "--folder" | "--directory" => {
+                if let Some(p) = pending_pick.as_mut() {
+                    p.folder = true;
+                    p.accept = "Select Folder".to_string();
+                    if p.title == "Open a file" {
+                        p.title = "Select a folder".to_string();
+                    }
+                }
+            }
+            "--multi" | "--multiple" => {
+                if let Some(p) = pending_pick.as_mut() {
+                    p.multi = true;
+                }
+            }
+            "--name" => {
+                if i + 1 < args.len() {
+                    if let Some(p) = pending_pick.as_mut() {
+                        p.name = args[i + 1].clone();
+                        p.name_touched = !p.name.is_empty();
+                    }
+                    i += 1;
+                }
+            }
+            "--title" => {
+                if i + 1 < args.len() {
+                    if let Some(p) = pending_pick.as_mut() {
+                        p.title = args[i + 1].clone();
+                    }
+                    i += 1;
+                }
+            }
+            // A filter row, as "Label:*.png;*.jpg". Repeated for each row, in
+            // the order the program that asked wants them shown.
+            "--filter" => {
+                if i + 1 < args.len() {
+                    if let Some(row) = pick::parse_filter(&args[i + 1]) {
+                        if let Some(p) = pending_pick.as_mut() {
+                            p.filters.push(row);
+                        }
+                    }
+                    i += 1;
+                }
+            }
             "--play" | "--slideshow" => play = true,
             "--compare" => {
                 start_compare = Some(match args.get(i + 1).map(|s| s.as_str()) {
@@ -6837,6 +7323,13 @@ fn main() -> eframe::Result<()> {
             );
             app.pending_trash_demo = trash_demo.clone();
             app.pending_open_with = open_with_file.clone();
+            // `--pick`: the window is a dialog from its first frame — the
+            // listing is narrowed to the types that were asked for before the
+            // first paint, so the picture and the answer cannot disagree.
+            app.pick = pending_pick.clone();
+            if app.pick.is_some() {
+                app.pick_apply();
+            }
             if start_space {
                 app.pending_space = Some(app.pane().current_dir());
             }

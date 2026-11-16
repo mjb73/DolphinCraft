@@ -242,8 +242,8 @@ impl BigCache {
                     std::thread::sleep(Duration::from_millis(50));
                     continue;
                 };
-                let pixels = match image::open(&job.path) {
-                    Ok(img) => {
+                let pixels = match crate::fsutil::decode_picture(&job.path) {
+                    Some(img) => {
                         let (w, h) = (img.width(), img.height());
                         let img = if w.max(h) > BIG_MAX_EDGE {
                             let scale = BIG_MAX_EDGE as f32 / w.max(h) as f32;
@@ -259,7 +259,7 @@ impl BigCache {
                         let (w, h) = rgba.dimensions();
                         Some((w as usize, h as usize, rgba.into_raw()))
                     }
-                    Err(_) => None,
+                    None => None,
                 };
                 let _ = tx.send(BigResult {
                     path: job.path,

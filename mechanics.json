@@ -1,2251 +1,2323 @@
 {
- "version": 1,
- "values": [
-  {
-   "name": "zoom level minimum",
-   "group": "view",
-   "value": 0,
-   "unit": "level",
-   "source": "ZoomLevelInfo::minimumLevel @0x2a6360"
-  },
-  {
-   "name": "zoom level maximum",
-   "group": "view",
-   "value": 16,
-   "unit": "level",
-   "source": "ZoomLevelInfo::maximumLevel @0x2a6370"
-  },
-  {
-   "name": "icon size at zoom 0",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
-  },
-  {
-   "name": "icon size at zoom 1",
-   "group": "view",
-   "value": 22,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
-  },
-  {
-   "name": "icon size at zoom 2",
-   "group": "view",
-   "value": 32,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
-  },
-  {
-   "name": "icon size at zoom 3",
-   "group": "view",
-   "value": 48,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
-  },
-  {
-   "name": "icon size at zoom 4",
-   "group": "view",
-   "value": 64,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
-  },
-  {
-   "name": "icon size above zoom 4",
-   "group": "view",
-   "value": "level * 16",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
-  },
-  {
-   "name": "icon size at zoom 16",
-   "group": "view",
-   "value": 256,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
-  },
-  {
-   "name": "zoom level from 48 px",
-   "group": "view",
-   "value": 3,
-   "source": "ZoomLevelInfo::zoomLevelForIconSize @0x2a63a0"
-  },
-  {
-   "name": "default zoom, details view",
-   "group": "view",
-   "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
-  },
-  {
-   "name": "default zoom, icons view",
-   "group": "view",
-   "value": 4,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 64 -> zoomLevelForIconSize @0x2a63a0"
-  },
-  {
-   "name": "default zoom, compact view",
-   "group": "view",
-   "value": 3,
-   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
-  },
-  {
-   "name": "details columns",
-   "group": "view",
-   "value": "Name, Type, Size, Modified (a Path column joins them while a deep search is showing)",
-   "source": "live capture of dolphin 26.08.2 details view for the original's Name, Size, Modified; Type is this build's addition (2026-11-09), between Name and Size, and it gives way on a row too narrow to hold it"
-  },
-  {
-   "name": "type written on a document icon",
-   "group": "view",
-   "value": "the file's extension, upper-cased, in the band under the kind glyph and sized to the tile: VECTORCRAFT at 8.6 px on a 96 px tile, nothing below a 6 px floor",
-   "source": "this build (2026-11-09): theme::draw_type_label / type_label_px, solved from Painter::layout_no_wrap at 10 px and the page's own band (PAGE_W_FRAC 0.64, TYPE_AIR 0.92, TYPE_BAND_FRAC 0.12); the person asked for it because two documents from two applications wore the same blank page"
-  },
-  {
-   "name": "details row height",
-   "group": "view",
-   "value": 26,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "places panel width",
-   "group": "view",
-   "value": 208,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "information panel width",
-   "group": "view",
-   "value": 288,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "information panel rows",
-   "group": "view",
-   "value": "Type, Size, Modified, Accessed",
-   "source": "live capture of dolphin 26.08.2 information panel"
-  },
-  {
-   "name": "status bar counts",
-   "group": "view",
-   "value": "0 folders, 0 files / N folders (no size) / N files (size) / N folders, M files (size)",
-   "source": "DolphinView::emitStatusBarText @0x272f40; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
-  },
-  {
-   "name": "status bar selection",
-   "group": "view",
-   "value": "N folder(s) selected, M file(s) selected (size); folders alone carry no size",
-   "source": "DolphinView::emitStatusBarText @0x272f40, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
-  },
-  {
-   "name": "status bar free space",
-   "group": "view",
-   "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
-   "source": "FUN_001e6a00 @0x1e6a00 in /usr/bin/dolphin; strings 0x22ec55 (%1 free), 0x22ec7a (%1 free out of %2), 0x237458 (with the Press line); KCapacityBar::setValue"
-  },
-  {
-   "name": "size unit style",
-   "group": "view",
-   "value": "IEC, one decimal (1718.4 KiB)",
-   "source": "live capture of dolphin 26.08.2 status bar"
-  },
-  {
-   "name": "default sort key",
-   "group": "sorting",
-   "value": "Name",
-   "source": "KFileItemModel::loadSortingSettings @0x194e20 (libdolphinprivate.so.6) leaves the model on its name role; name is the only role whose comparator is built in the constructor (QCollator at +0x58, natural flag at +0x60)"
-  },
-  {
-   "name": "default sort ascending",
-   "group": "sorting",
-   "value": true,
-   "source": "ViewProperties::ViewProperties @0x29fdd0 stores 0 at this+8 = Qt::AscendingOrder (the ctor writes the bytes 0,1,0 at +8,+9,+10)"
-  },
-  {
-   "name": "default folders first",
-   "group": "sorting",
-   "value": true,
-   "source": "ViewProperties::ViewProperties @0x29fdd0 stores 1 at this+9 = sortFoldersFirst (bytes 0,1,0 at +8,+9,+10)"
-  },
-  {
-   "name": "default sorting mode",
-   "group": "sorting",
-   "value": "Natural",
-   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin, ItemEnum SortingChoice default 0 = NaturalSorting"
-  },
-  {
-   "name": "sort options",
-   "group": "sorting",
-   "value": "one menu entry per sortable role, in KFileItemModel::rolesInformation() order, split into submenus where the role carries a group label",
-   "source": "DolphinViewActionHandler::createFileItemRolesActionGroup @0x28d3f0 iterates KFileItemModel::rolesInformation @0x193bd0; the Sort By menu is built with the prefix \"sort_by_\" in createActions @0x28e380"
-  },
-  {
-   "name": "double click opens",
-   "group": "controls",
-   "value": true,
-   "source": "string 'Double-click triggers' in /usr/bin/dolphin"
-  },
-  {
-   "name": "split view",
-   "group": "controls",
-   "value": "F3",
-   "source": "DolphinViewActionHandler split actions, 'Split view' string"
-  },
-  {
-   "name": "toggle information panel",
-   "group": "controls",
-   "value": "F11",
-   "source": "Dolphin action shortcut, information panel string"
-  },
-  {
-   "name": "toggle hidden files",
-   "group": "controls",
-   "value": "Ctrl+H",
-   "source": "Show Hidden Files action string"
-  },
-  {
-   "name": "editable location bar",
-   "group": "controls",
-   "value": "Ctrl+L",
-   "source": "Make location bar editable string"
-  },
-  {
-   "name": "move to trash",
-   "group": "controls",
-   "value": "Del",
-   "source": "Move to Trash action string"
-  },
-  {
-   "name": "permanent delete",
-   "group": "controls",
-   "value": "Shift+Del",
-   "source": "ShowDeleteCommand action string"
-  },
-  {
-   "name": "rename",
-   "group": "controls",
-   "value": "F2",
-   "source": "Rename action string"
-  },
-  {
-   "name": "new folder",
-   "group": "controls",
-   "value": "F10",
-   "source": "create_dir action string"
-  },
-  {
-   "name": "refresh",
-   "group": "controls",
-   "value": "F5",
-   "source": "view_redisplay action string"
-  },
-  {
-   "name": "trash location",
-   "group": "files",
-   "value": "~/.local/share/Trash/{files,info}",
-   "source": "freedesktop trash spec used by dolphin; strings 'Restore to Former Location', 'Empty Trash'"
-  },
-  {
-   "name": "trash record format",
-   "group": "files",
-   "value": "[Trash Info] Path= and DeletionDate=",
-   "source": "freedesktop trash spec used by dolphin"
-  },
-  {
-   "name": "question before a delete",
-   "group": "files",
-   "value": "three switches, read at delete time by KIO",
-   "source": "KIO::WidgetsAskUserActionHandler::askUserDelete @0x1a7980 (libKF6KIOWidgets.so.6.31.0), group [Confirmations] of kiorc (0x21e8ac, 0x21e8c8); page FUN_001d5010 @0x1d5010"
-  },
-  {
-   "name": "hidden file rule",
-   "group": "files",
-   "value": "name starts with a dot",
-   "estimated": true
-  },
-  {
-   "name": "quick look key",
-   "group": "added",
-   "value": "Space",
-   "estimated": true
-  },
-  {
-   "name": "duplicate detection",
-   "group": "added",
-   "value": "size, then SHA-256",
-   "estimated": true
-  },
-  {
-   "name": "bulk rename tokens",
-   "group": "added",
-   "value": "{name} {n} {ext} {date}",
-   "estimated": true
-  },
-  {
-   "name": "shortcut panel rows",
-   "group": "shortcuts",
-   "value": "Home, Desktop, Documents, Downloads, Music, Pictures, Videos, Trash, then pinned folders",
-   "source": "strings PlacesPanel, DolphinPlacesModel, add_to_places, Add to Places; live capture of dolphin 26.08.2"
-  },
-  {
-   "name": "shortcut keys in the panel",
-   "group": "shortcuts",
-   "value": "Alt+1 to Alt+9 on the first nine rows, dim badge at the right edge",
-   "estimated": true
-  },
-  {
-   "name": "shortcut editor key",
-   "group": "shortcuts",
-   "value": "Ctrl+Shift+S",
-   "estimated": true
-  },
-  {
-   "name": "shortcut duplicate rule",
-   "group": "shortcuts",
-   "value": "a standard folder cannot be pinned twice",
-   "source": "own rule; original uses Add to Places for bookmarks only"
-  },
-  {
-   "name": "shortcut persistence",
-   "group": "shortcuts",
-   "value": "config bookmarks array + shortcuts_expanded + shortcut_keys; a group's children and its fold state travel with it",
-   "estimated": true
-  },
-  {
-   "name": "shortcut groups",
-   "group": "shortcuts",
-   "value": "a bookmark row with group set holds other shortcuts: same flag icon, chevron in front, children 14 px in; a click folds it, a row dropped on it joins it, Remove Group dissolves the box and keeps the rows",
-   "source": "own rule, asked for by the person; one level of nesting, and a group takes no Alt+N slot"
-  },
-  {
-   "name": "shortcut hints in menus",
-   "group": "shortcuts",
-   "value": "name left, key right",
-   "source": "strings Shortcuts, KShortcutsDialog, KStandardShortcut (moveToTrash, createFolder, showHideHiddenFiles); menu hints in the original"
-  },
-  {
-   "name": "new window key",
-   "group": "controls",
-   "value": "Ctrl+N",
-   "estimated": true
-  },
-  {
-   "name": "quit key",
-   "group": "controls",
-   "value": "Ctrl+Q",
-   "estimated": true
-  },
-  {
-   "name": "places panel toggle key",
-   "group": "controls",
-   "value": "F9",
-   "source": "show_places_panel / Show Places Panel action strings in /usr/bin/dolphin"
-  },
-  {
-   "name": "find duplicates key",
-   "group": "added",
-   "value": "Ctrl+Shift+D",
-   "estimated": true
-  },
-  {
-   "name": "bulk rename key",
-   "group": "added",
-   "value": "Ctrl+Shift+R",
-   "estimated": true
-  },
-  {
-   "name": "list date format",
-   "group": "view",
-   "value": "dd/MM/yyyy HH:mm",
-   "source": "live capture of dolphin 26.08.2 details view (06/11/2026 18:43)"
-  },
-  {
-   "name": "information panel date wording",
-   "group": "view",
-   "value": "N minute(s) ago, then N hour(s) ago, then a numeric date",
-   "source": "live capture of dolphin 26.08.2 information panel (14 minute(s) ago)"
-  },
-  {
-   "name": "information panel rows, full",
-   "group": "view",
-   "value": "Type, Size, Modified, Accessed, Created, Tags, Rating, Comment",
-   "source": "live capture of dolphin 26.08.2 information panel"
-  },
-  {
-   "name": "location bar editable on click",
-   "group": "controls",
-   "value": "a click to the right of the breadcrumbs",
-   "source": "string 0x132138 in /usr/bin/dolphin (sub_65ec0)"
-  },
-  {
-   "name": "location bar confirm",
-   "group": "controls",
-   "value": "Enter",
-   "source": "string 0x132138 'switch back by confirming the edited location'"
-  },
-  {
-   "name": "location bar cancel",
-   "group": "controls",
-   "value": "Escape",
-   "estimated": true
-  },
-  {
-   "name": "address text selected when the bar opens",
-   "group": "controls",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "address for a file",
-   "group": "controls",
-   "value": "open its folder and select the file",
-   "source": "DolphinView::setUrl @0x17e9b0 loads directories; DolphinView::selectFileOnceAvailable @0x173b40 selects on itemsInserted"
-  },
-  {
-   "name": "file:// links and ~ accepted",
-   "group": "controls",
-   "value": true,
-   "estimated": true
-  },
-  {
-   "name": "address that leads nowhere",
-   "group": "controls",
-   "value": "keep the field open and say so",
-   "estimated": true
-  },
-  {
-   "name": "thumbnail size follows the zoom level",
-   "group": "previews",
-   "value": true,
-   "source": "DolphinItemListView::setZoomLevel @0x26dec0 (clamp 0..16, iconSizeForZoomLevel @0x2a6380, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x26d940"
-  },
-  {
-   "name": "thumbnail fit in the icon box",
-   "group": "previews",
-   "value": "aspect ratio kept, centred, scaled up or down to the icon box",
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 calls KPixmapModifier::scale @0x15e820 with the icon box size"
-  },
-  {
-   "name": "thumbnail re-scaled when the icon size changes",
-   "group": "previews",
-   "value": true,
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 keeps the cached target width and height at +0x1b0/+0x1b4 and rescales when they differ"
-  },
-  {
-   "name": "previews shown at the smallest zoom level",
-   "group": "previews",
-   "value": true,
-   "source": "live capture checks/orig-zoom/details-16px.png: 16 px picture thumbnails in the details view at zoom 0"
-  },
-  {
-   "name": "zoom in enlarges thumbnails in the original",
-   "group": "previews",
-   "value": "64 px to 160 px",
-   "source": "live capture checks/orig-zoom/icons-64px.png and icons-160px.png after six Ctrl+Plus steps"
-  },
-  {
-   "name": "preview size remembered per view mode",
-   "group": "previews",
-   "value": true,
-   "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x26d940 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
-  },
-  {
-   "name": "picture previews for other file types",
-   "group": "previews",
-   "value": "only pictures; other files show a file-type icon that grows with the zoom",
-   "source": "live capture checks/orig-zoom/icons-160px.png; content previews for text and documents come from KIO thumbnail plugins the rebuild does not run"
-  },
-  {
-   "name": "icon grid columns",
-   "group": "icons view",
-   "value": "floor(view width / cell width), at least 1, columns spread evenly",
-   "source": "KItemListViewLayouter::doLayout @0x161bb0 (vdivsd at 0x161c79, truncation at 0x161c8a, clamp to 1 at 0x161c90)"
-  },
-  {
-   "name": "icon grid columns at 64 px (original)",
-   "group": "icons view",
-   "value": 4,
-   "unit": "columns",
-   "source": "measured in checks/orig-zoom/icons-64px.png: 5 items in 4 columns across a 592 px view"
-  },
-  {
-   "name": "icon grid pitch at 64 px (original)",
-   "group": "icons view",
-   "value": 148,
-   "unit": "px",
-   "source": "measured in checks/orig-zoom/icons-64px.png (icon centres 148 px apart, 592 / 4)"
-  },
-  {
-   "name": "icon grid columns at 160 px (original)",
-   "group": "icons view",
-   "value": 3,
-   "unit": "columns",
-   "source": "measured in checks/orig-zoom/icons-160px.png: 5 items in 3 columns across the same 592 px view"
-  },
-  {
-   "name": "icon grid pitch at 160 px (original)",
-   "group": "icons view",
-   "value": 197,
-   "unit": "px",
-   "source": "measured in checks/orig-zoom/icons-160px.png (icon centres 197 px apart, 592 / 3)"
-  },
-  {
-   "name": "icon cell minimum width (rebuild)",
-   "group": "icons view",
-   "value": "max(icon + 24, 88)",
-   "unit": "px",
-   "source": "views::icon_grid; narrower than the original's measured pitch on purpose, as the person asked for more icons per screen"
-  },
-  {
-   "name": "icon grid gap (rebuild)",
-   "group": "icons view",
-   "value": 2,
-   "unit": "px",
-   "source": "views::ICON_CELL_GAP"
-  },
-  {
-   "name": "icon cell height (rebuild)",
-   "group": "icons view",
-   "value": "icon + 46 with two label lines, icon + 32 with one",
-   "unit": "px",
-   "source": "views::icon_cell_height"
-  },
-  {
-   "name": "label lines in icons view",
-   "group": "icons view",
-   "value": "2 at 32 px and above, 1 below",
-   "source": "views::draw_icon_cell; the original wraps icon labels to two lines (KStandardItemListWidget::updateIconsLayoutTextCache @0x1368c0)"
-  },
-  {
-   "name": "label break points (rebuild)",
-   "group": "icons view",
-   "value": "space, hyphen, underscore, dot, slash, then a hard split",
-   "source": "views::wrap_label"
-  },
-  {
-   "name": "icons per 1000 px at 64 px (rebuild)",
-   "group": "icons view",
-   "value": 13,
-   "unit": "columns",
-   "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"the icon grid packs many files into a row\""
-  },
-  {
-   "name": "original icon cell shape",
-   "group": "icons view",
-   "value": "square: a preview is scaled to fit an icon-size square, centred, aspect ratio kept",
-   "source": "KStandardItemListWidget::drawPixmap @0x135bb0 -> KPixmapModifier::scale @0x15e820; KItemListViewLayouter::doLayout @0x261bb0 uses one item width for every column"
-  },
-  {
-   "name": "original column width",
-   "group": "icons view",
-   "value": "item margin + item size (the square icon box), the same for every item in the view",
-   "source": "KItemListViewLayouter::doLayout @0x261bb0: vmaxsd of the item size hint and the configured item width, then columns = floor(width / (margin + item width)) at 0x261c79"
-  },
-  {
-   "name": "icon cell width (rebuild)",
-   "group": "icons view",
-   "value": "max(picture width at this zoom, label floor) + 8",
-   "source": "views::icon_cell_width; the picture width is the aspect-fit width of the square icon box, so a portrait cell is only as wide as the picture needs"
-  },
-  {
-   "name": "picture width in the icon box (rebuild)",
-   "group": "icons view",
-   "value": "icon size x aspect ratio when the picture is taller than wide, otherwise the icon size",
-   "source": "views::thumb_size, matching drawPixmap @0x135bb0's aspect-kept fit into the square box"
-  },
-  {
-   "name": "portrait picture width at 64 px (rebuild)",
-   "group": "icons view",
-   "value": "48 px for a 3:4 photo, 36 px for a 9:16 photo, inside the same 64 px box",
-   "source": "views::thumb_size; read from the file header by search::probe_image_size"
-  },
-  {
-   "name": "label floor (rebuild)",
-   "group": "icons view",
-   "value": "clamp(icon size x 0.75, 40, 96)",
-   "unit": "px",
-   "source": "views::label_floor; stops a narrow portrait cell from squeezing its name below two or three characters a line"
-  },
-  {
-   "name": "row packing (rebuild)",
-   "group": "icons view",
-   "value": "shelf: items left to right, a new row when the next cell no longer fits, one row height for all",
-   "source": "views::pack_icon_rows"
-  },
-  {
-   "name": "icon cell padding (rebuild)",
-   "group": "icons view",
-   "value": 4,
-   "unit": "px",
-   "source": "views::ICON_CELL_PAD, 4 px on each side of the picture and label"
-  },
-  {
-   "name": "label width in a cell (rebuild)",
-   "group": "icons view",
-   "value": "cell width - 6, wrapped to two lines and shortened with an ellipsis",
-   "unit": "px",
-   "source": "views::draw_icon_cell + views::wrap_label"
-  },
-  {
-   "name": "portrait icons per 1000 px at 64 px (rebuild)",
-   "group": "icons view",
-   "value": 17,
-   "unit": "columns",
-   "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"a tall picture gets a tall, narrow cell\""
-  },
-  {
-   "name": "picture shape source (rebuild)",
-   "group": "icons view",
-   "value": "JPEG, PNG, GIF, BMP and WebP headers, read once per file and cached",
-   "source": "search::probe_image_size; a picture whose header cannot be read is treated as square"
-  },
-  {
-   "name": "disk space button hidden when the volume reports no size",
-   "group": "view",
-   "value": true,
-   "source": "FUN_001e6a00 @0x1e6a00: total == 0 falls through to QWidget::hide"
-  },
-  {
-   "name": "used space percent rounding",
-   "group": "view",
-   "value": "(total - free) * 100.0 / total + 0.5, truncated",
-   "source": "FUN_001e6a00 @0x1e6a00"
-  },
-  {
-   "name": "factory icon size, icons view",
-   "group": "view",
-   "value": 32,
-   "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, IconSize default"
-  },
-  {
-   "name": "factory icon size, compact view",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af670, IconSize default"
-  },
-  {
-   "name": "factory icon size, details view",
-   "group": "view",
-   "value": 16,
-   "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, IconSize default at +0x2c"
-  },
-  {
-   "name": "factory preview size, icons view",
-   "group": "previews",
-   "value": 64,
-   "unit": "px",
-   "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, PreviewSize default"
-  },
-  {
-   "name": "factory preview size, compact view",
-   "group": "previews",
-   "value": 48,
-   "unit": "px",
-   "source": "CompactModeSettings::CompactModeSettings @0x2af670, PreviewSize default"
-  },
-  {
-   "name": "factory preview size, details view",
-   "group": "previews",
-   "value": 48,
-   "unit": "px",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, PreviewSize default at +0x30"
-  },
-  {
-   "name": "default zoom with previews off",
-   "group": "view",
-   "value": "2, 0, 0",
-   "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: IconSize 32/16/16 -> zoom 2/0/0"
-  },
-  {
-   "name": "information panel label, several items selected",
-   "group": "view",
-   "value": "%1 items selected, no size, with the dialog-information icon",
-   "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x12ed75; Baloo::FileMetaDataWidget::setItems cleared then QWidget::hide"
-  },
-  {
-   "name": "details row padding",
-   "group": "view",
-   "value": "20 px left and right",
-   "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, LeftPadding/RightPadding"
-  },
-  {
-   "name": "wheel zoom modifier",
-   "group": "view",
-   "value": "Ctrl (Control key held)",
-   "source": "DolphinView::wheelEvent @0x272710, ControlModifier bit test (byte at +0x23 & 4)"
-  },
-  {
-   "name": "wheel units per zoom step",
-   "group": "view",
-   "value": 120,
-   "unit": "1/8-degree wheel units",
-   "source": "DolphinView::wheelEvent @0x272710, threshold 0x78 = 120"
-  },
-  {
-   "name": "wheel zoom step size",
-   "group": "view",
-   "value": 1,
-   "unit": "zoom level",
-   "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level ± 1)"
-  },
-  {
-   "name": "wheel zoom remainder carried between events",
-   "group": "view",
-   "value": true,
-   "source": "DolphinView::wheelEvent @0x272710: after a step it subtracts 0x78 from the stored total instead of clearing it"
-  },
-  {
-   "name": "plain wheel without Ctrl",
-   "group": "view",
-   "value": "scrolls the view, never zooms",
-   "source": "DolphinView::wheelEvent @0x272710 returns without acting when the Control bit is clear"
-  },
-  {
-   "name": "wheel zoom direction",
-   "group": "view",
-   "value": "wheel away from you zooms in",
-   "source": "DolphinView::wheelEvent @0x272710: positive delta reaches +0x78 and calls slotIncreaseZoom"
-  },
-  {
-   "name": "wheel zoom limits",
-   "group": "view",
-   "value": "0 to 16",
-   "unit": "zoom level",
-   "source": "DolphinItemListView::setZoomLevel @0x26dec0 clamps to the pair of bounds at 0x2c31c0"
-  },
-  {
-   "name": "status bar zoom buttons",
-   "group": "view",
-   "value": "- and + step one zoom level each",
-   "source": "KItemListController::increaseZoom @0x1f8c60 emits increaseZoomClicked, wired to DolphinView::slotIncreaseZoom @0x284b00"
-  },
-  {
-   "name": "toolbar row height",
-   "group": "controls",
-   "value": 46,
-   "unit": "px",
-   "source": "live capture of dolphin 26.08.2 toolbar, checks/sort-bar/orig-760.png"
-  },
-  {
-   "name": "toolbar controls keep their width; the location bar takes the rest",
-   "group": "controls",
-   "value": "the location box ends before the right-hand view controls",
-   "source": "live capture of dolphin 26.08.2 toolbar at 760 px, checks/sort-bar/orig-760.png"
-  },
-  {
-   "name": "toolbar control width",
-   "group": "controls",
-   "value": 30,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "location bar minimum width",
-   "group": "controls",
-   "value": 110,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "gap between the location bar and the toolbar controls",
-   "group": "controls",
-   "value": 8,
-   "unit": "px",
-   "estimated": true
-  },
-  {
-   "name": "sort control in the toolbar",
-   "group": "controls",
-   "value": "label \"Sort: Name\" in a wide window, icon only when narrower, hidden before the three words give way; sorting also in the app menu",
-   "source": "app layout rule, changed this round (toolbar_metrics ladder); the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
-  },
-  {
-   "name": "long breadcrumb paths",
-   "group": "controls",
-   "value": "segments drop from the left behind a \"…\"; the current folder stays",
-   "estimated": true
-  },
-  {
-   "name": "shortcut reorder",
-   "group": "shortcuts",
-   "value": "drag a row into the gap between two rows; the gap before the first and the gap after the last are allowed",
-   "source": "KFilePlacesModel::movePlace @0x96220 (Ghidra 0x196220) in libKF6KIOFileWidgets.so.6"
-  },
-  {
-   "name": "shortcut drop position",
-   "group": "shortcuts",
-   "value": "insertion slot: to == from or to == from + 1 is refused, moving down lands at to - 1, moving up at to",
-   "source": "KFilePlacesModel::movePlace @0x96220"
-  },
-  {
-   "name": "shortcut drag stays inside its section",
-   "group": "shortcuts",
-   "value": true,
-   "source": "KFilePlacesModel::movePlace @0x96220, group id at +0x118 clamps the destination"
-  },
-  {
-   "name": "shortcut order storage",
-   "group": "shortcuts",
-   "value": "the order of the bookmarks in the settings; no separate order number",
-   "source": "KFilePlacesModel::movePlace @0x96220 → KBookmarkGroup::moveBookmark"
-  },
-  {
-   "name": "shortcut drop indicator",
-   "group": "shortcuts",
-   "value": "a line drawn in the gap between rows while dragging",
-   "source": "KFilePlacesView::paintEvent @0xadb80 (Ghidra 0x1adb80)"
-  },
-  {
-   "name": "gap chosen under the pointer",
-   "group": "shortcuts",
-   "value": "nearest gap, decided by the row's centre line",
-   "estimated": true
-  },
-  {
-   "name": "shortcut colour choice",
-   "group": "shortcuts",
-   "value": 8,
-   "unit": "colours",
-   "source": "added feature; same palette as the folder colours in app/src/foldercolor.rs"
-  },
-  {
-   "name": "shortcut colour storage",
-   "group": "shortcuts",
-   "value": "the program's settings file, per shortcut path (a panel row has no folder file of its own)",
-   "source": "added feature; the original has no coloured places (only KColorScheme strings in /usr/bin/dolphin)"
-  },
-  {
-   "name": "clearing a shortcut colour",
-   "group": "shortcuts",
-   "value": "\"Normal Colour\" removes the stored entry",
-   "source": "added feature; matches the folder menu's \"Normal Colour\""
-  },
-  {
-   "name": "shortcut colour kept when its row is marked",
-   "group": "shortcuts",
-   "value": true,
-   "source": "person's report 2026-11-06; App::place_icon_colour in app/src/main.rs"
-  },
-  {
-   "name": "marked-row colour lift",
-   "group": "shortcuts",
-   "value": 0.32,
-   "unit": "fraction toward white",
-   "source": "rebuild design choice, theme::SELECTION_LIFT; makes the chosen colour readable on the selection band",
-   "estimated": true
-  },
-  {
-   "name": "marked row with no colour of its own",
-   "group": "shortcuts",
-   "value": "#b8cbd8",
-   "source": "theme::PLACE #96b2c6 lifted by 0.32; measured in app/shots/marked-plain.png"
-  },
-  {
-   "name": "marked row with the Red shortcut colour",
-   "group": "shortcuts",
-   "value": "#d7837e",
-   "source": "palette Red #c44842 lifted by 0.32; measured in app/shots/marked-colour.png"
-  },
-  {
-   "name": "places icon colour in the original",
-   "group": "places",
-   "value": "#fcfcfc, selected and unselected alike",
-   "source": "app/shots/orig-places.png (Dolphin 26.08.2, fresh profile, Home row selected)"
-  },
-  {
-   "name": "location bar resolves dots in a path",
-   "group": "controls",
-   "value": true,
-   "source": "fsutil::tidy_path, called from Pane::load; the original's bar is built from the folder it is in (DolphinView::url @0x173f90)"
-  },
-  {
-   "name": "dot-dot above the root",
-   "group": "controls",
-   "value": "/",
-   "source": "fsutil::tidy_path"
-  },
-  {
-   "name": "virtual locations left as they are",
-   "group": "controls",
-   "value": "trash:/ keeps its spelling",
-   "source": "fsutil::tidy_path"
-  },
-  {
-   "name": "window title",
-   "group": "window",
-   "value": "DolphinCraft - drawn at the left end of the tab strip, before the first tab, and shown by the task switcher; the bar a window manager would draw is gone, because the tab strip is the window's title bar (decorations off, three buttons, drag, double click to maximize, 6 px resize edge)",
-   "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
-  },
-  {
-   "name": "window app id",
-   "group": "window",
-   "value": "dolphincraft",
-   "source": "follows the asked-for window title (the original's desktop id is dolphin)"
-  },
-  {
-   "name": "name comparison modes",
-   "group": "sorting",
-   "value": "Natural, Alphabetical case insensitive, Alphabetical case sensitive — in that row order",
-   "source": "FUN_001e5750 @0x1e5750 in /usr/bin/dolphin; strings at analysed addresses 0x22eaf2, 0x2372e0, 0x22eafa"
-  },
-  {
-   "name": "default name comparison",
-   "group": "sorting",
-   "value": "Natural",
-   "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin (main program): ItemEnum \"SortingChoice\" with NaturalSorting/CaseInsensitiveSorting/CaseSensitiveSorting, default index 0"
-  },
-  {
-   "name": "name comparison config key",
-   "group": "sorting",
-   "value": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting",
-   "source": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting, GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin"
-  },
-  {
-   "name": "status bar capacity bar share",
-   "group": "view",
-   "value": "(total - free) * 100.0 / total + 0.5, truncated — same value as the tooltip",
-   "source": "FUN_001e6a00 @0x1e6a00, KCapacityBar::setValue(iVar4)"
-  },
-  {
-   "name": "icons view maximum width steps",
-   "group": "icons view",
-   "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
-   "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1ac0 TextWidthIndex default 1"
-  },
-  {
-   "name": "details view click-to-open rows",
-   "group": "view",
-   "value": "By clicking anywhere on the row / By clicking on icon or name",
-   "source": "FUN_001dcdb0 @0x1dcdb0 (@option:radio how files/folders are opened)"
-  },
-  {
-   "name": "panel widths",
-   "group": "view",
-   "value": "remembered from the splitter, not fixed in the code",
-   "source": "QSplitter::setSizes call sites 0x90e2a, 0x927f3, 0x94673, 0x986eb in /usr/bin/dolphin (saved config or live widths)"
-  },
-  {
-   "name": "folder size display in the list",
-   "group": "sorting",
-   "value": "the number of items in the folder (no recursive size)",
-   "unit": "enum 0 = ContentCount",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70 in /usr/bin/dolphin, ItemEnum DirectorySizeMode default 0"
-  },
-  {
-   "name": "folder size mode options",
-   "group": "sorting",
-   "value": "0 Show number of items, 1 Show size of contents up to N, 2 Show no size",
-   "source": "FUN_001e5750 @0x1e5750 builds the three radios (strings 0x22eb26, 0x22eb3b, 0x22eb59); FUN_001e7af0 @0x1e7af0 stores DirectorySizeMode 0/1/2"
-  },
-  {
-   "name": "recursive directory size limit",
-   "group": "sorting",
-   "value": 10,
-   "unit": "items",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemUInt RecursiveDirectorySizeLimit default 10"
-  },
-  {
-   "name": "relative dates in the information panel",
-   "group": "details",
-   "value": true,
-   "unit": "bool",
-   "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemBool UseShortRelativeDates default true"
-  },
-  {
-   "name": "sort tie-break",
-   "group": "sorting",
-   "value": "the chosen name comparison, for every sort key",
-   "source": "one SortingChoice (FUN_001e5750 @0x1e5750, saved by FUN_001e7af0 @0x1e7af0) governs name order everywhere; state::sort_entries"
-  },
-  {
-   "name": "thumbnail size minimum",
-   "group": "picture wall",
-   "value": 50,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider min=50"
-  },
-  {
-   "name": "thumbnail size maximum",
-   "group": "picture wall",
-   "value": 400,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider max=400"
-  },
-  {
-   "name": "thumbnail size at first",
-   "group": "picture wall",
-   "value": 200,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider value=200"
-  },
-  {
-   "name": "thumbnail size slider step",
-   "group": "picture wall",
-   "value": 1,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider (range input, whole pixels)"
-  },
-  {
-   "name": "picture wall gap between cards",
-   "group": "picture wall",
-   "value": 12,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), static/css/browser.css .images { gap: 12px }"
-  },
-  {
-   "name": "picture wall padding inside a card",
-   "group": "picture wall",
-   "value": 0,
-   "unit": "px",
-   "source": "this build after the person asked for no wasted bands: the frame is the picture's own shape, so the image browser's 8 px card padding (static/css/browser.css .image { padding: 8px }) is dropped; the 12 px gap between pictures is kept"
-  },
-  {
-   "name": "picture corner radius",
-   "group": "picture wall",
-   "value": 10,
-   "unit": "px",
-   "source": "the person's image browser (image-browser-styled), static/css/browser.css .image img { border-radius: 10px }"
-  },
-  {
-   "name": "dimension caption format",
-   "group": "picture wall",
-   "value": "W×H:AR a.bc:MP d.dd",
-   "unit": "text",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html line 203 (the show_dims block)"
-  },
-  {
-   "name": "caption text size under a picture",
-   "group": "picture wall",
-   "value": 12,
-   "unit": "px",
-   "source": "the person's request (2026-11-07): the size line is drawn the same as the file name; app/src/gallery.rs CAPTION_SIZE, the constant the name itself uses"
-  },
-  {
-   "name": "caption colour under a picture",
-   "group": "picture wall",
-   "value": "#EFF0F1 (white when marked)",
-   "unit": "text",
-   "source": "the person's request (2026-11-07): same colour as the file names; app/src/gallery.rs caption_colour -> theme::TEXT, lifted to white on a selected cell exactly as the name is"
-  },
-  {
-   "name": "caption line step under a picture",
-   "group": "picture wall",
-   "value": 17,
-   "unit": "px",
-   "source": "app/src/gallery.rs CAPTION_STEP: one line plus leading, used for the name and the size line alike, and the room the wall reserves per line (gallery::caption_height)"
-  },
-  {
-   "name": "original's largest preview box",
-   "group": "picture wall",
-   "value": 256,
-   "unit": "px",
-   "source": "decompiled original: ZoomLevelInfo::maximumLevel() @0x2a6370 returns 16, ZoomLevelInfo::iconSizeForZoomLevel(int) @0x2a6380 returns level*16 above 4, so 16..256 px; the 400 px ceiling is the browser's, not the original's"
-  },
-  {
-   "name": "slideshow interval at first",
-   "group": "slideshow",
-   "value": 1.5,
-   "unit": "s",
-   "source": "the person's request (2026-11-07): a show starts at 1.5 s; the image browser's own templates/browser.html #slide-interval starts at 1 s"
-  },
-  {
-   "name": "slideshow interval step",
-   "group": "slideshow",
-   "value": 0.5,
-   "unit": "s",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #slide-interval step=0.5"
-  },
-  {
-   "name": "slideshow interval range",
-   "group": "slideshow",
-   "value": "0.5..30",
-   "unit": "s",
-   "source": "the person's image browser (image-browser-styled), #slide-interval min=0.5; upper limit 30 s chosen in this build"
-  },
-  {
-   "name": "slideshow fade length",
-   "group": "slideshow",
-   "value": 300,
-   "unit": "ms",
-   "source": "the person's image browser (image-browser-styled), static/js/browser.js startSlideshow: setTimeout(..., 300)"
-  },
-  {
-   "name": "slideshow fade on by default",
-   "group": "slideshow",
-   "value": true,
-   "unit": "bool",
-   "source": "the person's image browser (image-browser-styled), the fade is unconditional in startSlideshow; this build makes it a switch that starts on"
-  },
-  {
-   "name": "comparison modes",
-   "group": "comparison",
-   "value": "side, split, overlay",
-   "unit": "text",
-   "source": "the person's image browser (image-browser-styled), #compare-modal toolbar"
-  },
-  {
-   "name": "comparison overlay opacity at first",
-   "group": "comparison",
-   "value": 50,
-   "unit": "%",
-   "source": "the person's image browser (image-browser-styled), templates/browser.html #compareOpacitySlider value=50"
-  },
-  {
-   "name": "comparison zoom range",
-   "group": "comparison",
-   "value": "0.1..20",
-   "unit": "x",
-   "source": "the person's image browser (image-browser-styled), static/js/browser.js stepCompareZoom clamp"
-  },
-  {
-   "name": "comparison zoom button step",
-   "group": "comparison",
-   "value": 1.25,
-   "unit": "x",
-   "source": "the person's image browser (image-browser-styled), static/js/browser.js compareZoomIn / compareZoomOut"
-  },
-  {
-   "name": "comparison wheel zoom",
-   "group": "comparison",
-   "value": "1.1 in, 0.9 out",
-   "unit": "x",
-   "source": "the person's image browser (image-browser-styled), static/js/browser.js initCompareZoomWheel"
-  },
-  {
-   "name": "prompt fields read from a picture",
-   "group": "prompt",
-   "value": "steps, sampler, cfg scale, seed, size, model, denoising strength, prompt, negative prompt",
-   "unit": "text",
-   "source": "PNG tEXt 'parameters' chunk and JPEG Exif UserComment, as written by Stable Diffusion / ComfyUI / A1111; parsed by the rebuild, no original-counterpart in Dolphin"
-  },
-  {
-   "name": "zoom ladder top level (added)",
-   "group": "icons view",
-   "value": 25,
-   "unit": "level",
-   "source": "continuation of ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 (level*16) past ZoomLevelInfo::maximumLevel @0x2a6370, which returns 16"
-  },
-  {
-   "name": "icon size at zoom 25 (added)",
-   "group": "icons view",
-   "value": 400,
-   "unit": "px",
-   "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 formula at level 25"
-  },
-  {
-   "name": "largest thumbnail in the file views (added)",
-   "group": "icons view",
-   "value": 400,
-   "unit": "px",
-   "source": "theme::MAX_ICON_PX; the original clamps DolphinItemListView::setZoomLevel @0x26dec0 to 0..=16 (256 px)"
-  },
-  {
-   "name": "picture corner radius in the file views",
-   "group": "icons view",
-   "value": "clamp(icon size x 0.035, 3, 10)",
-   "unit": "px",
-   "source": "views::picture_radius; 10 px is the picture wall's PICTURE_CORNER (browser CSS .image img border-radius 10px)"
-  },
-  {
-   "name": "picture switches in the file view",
-   "group": "icons view",
-   "value": "Names, Dimensions, Rounded, Previews",
-   "source": "person's report 2026-11-07; the same pane fields the picture wall uses, drawn in a row above the icon grid and in the app menu's Pictures submenu"
-  },
-  {
-   "name": "picture wall row packing",
-   "group": "picture wall",
-   "value": "shelf — every picture is exactly the height on the slider; a row takes pictures until the next no longer fits, so rows keep one size and only the right edge is ragged",
-   "unit": "text",
-   "source": "this build, after the person reported that the last row alone looked 400 px tall while the rows above it did not: the old packer justified every row to the window width, so a full row came out at 380-390 px and a short last row stayed at the 400 px on the slider; gallery.rs wall_rows"
-  },
-  {
-   "name": "picture wall row height",
-   "group": "picture wall",
-   "value": "the slider's 50..400 px on every row, the last one included",
-   "unit": "px",
-   "source": "this build, asked for by the person; slider range unchanged from templates/browser.html #sizeSlider, applied as one height for all rows in gallery.rs wall_rows"
-  },
-  {
-   "name": "picture wall shape range",
-   "group": "picture wall",
-   "value": "1:5 .. 6:1",
-   "unit": "text",
-   "source": "this build: a damaged header or a stitched panorama cannot take a whole row; since the wall holds pictures only (2026-11-07), a folder no longer has a square cell of its own"
-  },
-  {
-   "name": "prompt box height",
-   "group": "prompt",
-   "value": 150,
-   "unit": "px",
-   "source": "added feature (this rebuild): app/src/selectable.rs, cap passed by gallery.rs prompt_panel; the original has no prompt reader"
-  },
-  {
-   "name": "negative prompt box height",
-   "group": "prompt",
-   "value": 96,
-   "unit": "px",
-   "source": "added feature (this rebuild): app/src/selectable.rs via gallery.rs prompt_panel"
-  },
-  {
-   "name": "prompt text font size",
-   "group": "prompt",
-   "value": 11.5,
-   "unit": "px",
-   "source": "added feature (this rebuild): app/src/selectable.rs, proportional 11.5 px to match the information panel's body text"
-  },
-  {
-   "name": "prompt drag auto-scroll edge",
-   "group": "prompt",
-   "value": 12,
-   "unit": "px",
-   "source": "added feature (this rebuild): app/src/selectable.rs EDGE — a drag this close to the top or bottom edge scrolls the box"
-  },
-  {
-   "name": "prompt drag auto-scroll speed",
-   "group": "prompt",
-   "value": 10,
-   "unit": "px per frame",
-   "source": "added feature (this rebuild): app/src/selectable.rs AUTO_SCROLL_STEP, about 600 px/s at 60 Hz"
-  },
-  {
-   "name": "prompt box height snaps to whole text rows",
-   "group": "prompt",
-   "value": true,
-   "source": "added feature (this rebuild): app/src/selectable.rs, height = padding + rows x line height, paint clipped above the bottom padding"
-  },
-  {
-   "name": "prompt selection survives the wheel",
-   "group": "prompt",
-   "value": true,
-   "source": "added feature (this rebuild): the selection lives in egui's temporary store keyed by the block id, so scrolling does not clear it"
-  },
-  {
-   "name": "prompt shift-click extends the selection",
-   "group": "prompt",
-   "value": true,
-   "source": "added feature (this rebuild): app/src/selectable.rs, a press with Shift held keeps the existing anchor"
-  },
-  {
-   "name": "prompt selection keys",
-   "group": "prompt",
-   "value": "Ctrl+A select all, Ctrl+C copy, Esc clear, double-click a word, right-click Select all / Copy selection",
-   "unit": "text",
-   "source": "added feature (this rebuild): app/src/selectable.rs, active only while the block has the focus"
-  },
-  {
-   "name": "prompt option row wraps in a narrow column",
-   "group": "prompt",
-   "value": true,
-   "source": "added feature (this rebuild): gallery.rs prompt_panel lays the four options out with horizontal_wrapped, so Select all / Copy prompt / Copy all / Save move to a second line instead of being clipped"
-  },
-  {
-   "name": "prompt area folds away",
-   "group": "prompt",
-   "value": true,
-   "source": "this build, asked for by the person (\"the prompt area should be collapsable as it is not always needed\"): one click on the block's title row folds it, the choice is kept in the settings"
-  },
-  {
-   "name": "prompt area title row height",
-   "group": "prompt",
-   "value": 22,
-   "unit": "px",
-   "source": "this build: the whole row is one hit target, with a fold arrow that points down while open and right while folded (gallery.rs PROMPT_HEADER_H)"
-  },
-  {
-   "name": "prompt area folded state shows",
-   "group": "prompt",
-   "value": "the title row and one elided line of the prompt",
-   "unit": "text",
-   "source": "this build: so a folded block still says what it holds without taking the panel over"
-  },
-  {
-   "name": "prompt area key in the viewer",
-   "group": "prompt",
-   "value": "P (only while the picture details are showing)",
-   "unit": "text",
-   "source": "this build: the same switch as the fold arrow, next to I for the details panel"
-  },
-  {
-   "name": "comparison sync rule",
-   "group": "comparison",
-   "value": "side mode follows its Sync switch; split and overlay are always locked together",
-   "unit": "text",
-   "source": "the person's image browser (image-browser-styled), static/js/browser.js isCompareSynced / applyCompareTransform"
-  },
-  {
-   "name": "comparison zoom read-out",
-   "group": "comparison",
-   "value": "one percentage when synced, \"A% / B%\" when side mode is not",
-   "unit": "text",
-   "source": "static/js/browser.js updateCompareZoomLabel"
-  },
-  {
-   "name": "comparison zoom anchor",
-   "group": "comparison",
-   "value": "the point under the pointer stays under it, measured from the middle of the pane the pointer is over",
-   "unit": "text",
-   "source": "this build; the browser's stepCompareZoom has no anchor, which is why its own zoom drifted — the person reported the drift"
-  },
-  {
-   "name": "comparison wheel events per notch",
-   "group": "comparison",
-   "value": 2,
-   "unit": "events",
-   "source": "measured in the running window: one xdotool wheel notch reaches the app as a line event for the press and one for the release, 7 ms apart (app/shots/cmp debug log)"
-  },
-  {
-   "name": "comparison duplicate-notch window",
-   "group": "comparison",
-   "value": 0.02,
-   "unit": "s",
-   "source": "this build, estimated: a second line event of the same sign inside 20 ms is the other half of the same notch"
-  },
-  {
-   "name": "comparison pan limit",
-   "group": "comparison",
-   "value": "the picture stops when its own edge meets the pane edge; it does not move at all while it still fits",
-   "estimated": true,
-   "source": "this build; the browser translates freely and can lose a picture off its pane"
-  },
-  {
-   "name": "comparison paint clipping",
-   "group": "comparison",
-   "value": "each picture is clipped to its own pane",
-   "unit": "text",
-   "source": "this build; without it a zoomed right-hand picture covered the whole window (app/shots/cmp/before/01-wheel-right.png)"
-  },
-  {
-   "name": "three toolbar buttons",
-   "group": "toolbar",
-   "value": "Find narrows the list, Open in chooses where the picked item opens, Menu holds the app's own settings and tools",
-   "source": "this build, the person's question; each word on the button, plus the card on F1"
-  },
-  {
-   "name": "menu button opens on",
-   "group": "toolbar",
-   "value": "an ordinary left click",
-   "source": "this build: egui Popup::menu; the previous right-click-only popup (Response::context_menu) left the button dead to a click"
-  },
-  {
-   "name": "find narrows the listing",
-   "group": "toolbar",
-   "value": true,
-   "source": "this build: Pane::refilter from the find bar's change event and at startup; --selftest types ap into a 4-item folder and gets 3, then 4 again after closing"
-  },
-  {
-   "name": "find bar scopes",
-   "group": "toolbar",
-   "value": "This folder: narrow as you type; In subfolders: look through every folder below",
-   "source": "the original's Toggle Search Bar tooltip (string 0x12d7de, action at 0x67fc8) and its separate FilterBar setting"
-  },
-  {
-   "name": "original keeps a filter bar apart from its search bar",
-   "group": "toolbar",
-   "value": true,
-   "source": "GeneralSettings::GeneralSettings: FilterBar bool at this+0x82, default false, string FilterBar @0x002c0a90 referenced at 0x2b8853 and 0x2b8886; Remove Filter @0x12e119 used at 0xbcaef"
-  },
-  {
-   "name": "open in destinations",
-   "group": "toolbar",
-   "value": "a new tab, a new window, the other pane, a terminal",
-   "source": "the original's Open in New Tab / New Window / Split View strings at 0x12da05, 0x12da26, 0x12da39 (actions at 0x6bf86, 0x6c286, 0x6c40a); the other pane and the terminal are this build's additions"
-  },
-  {
-   "name": "toolbar words give way",
-   "group": "toolbar",
-   "value": "after the sort key's name and the sort button, at about 500 px of window width",
-   "source": "this build: toolbar_metrics ladder, held for every width from 360 to 1600 px by --selftest"
-  },
-  {
-   "name": "three-button card",
-   "group": "toolbar",
-   "value": "removed at the person's request: the Menu row, F1 and --guide are gone with it",
-   "source": "this build: the guide_dialog and its row were deleted; the app menu now ends on Sort by"
-  },
-  {
-   "name": "details panel open when a picture opens",
-   "group": "picture viewer",
-   "value": false,
-   "source": "the person's request (2026-11-07): \"the picture details panel should be closed by default\"; app/src/gallery.rs Viewer::new / sync_meta. This viewer is this build's own addition, so there is no original counterpart to read"
-  },
-  {
-   "name": "ways to open the details panel",
-   "group": "picture viewer",
-   "value": "info button in the viewer bar, I, P",
-   "source": "app/src/gallery.rs: bar_button(\"info\"), Key::I, Key::P (P opens the panel, then folds the prompt inside it)"
-  },
-  {
-   "name": "details panel state when paging",
-   "group": "picture viewer",
-   "value": "kept as the person left it",
-   "source": "app/src/gallery.rs (nothing in Viewer::step or sync_meta touches show_info)"
-  },
-  {
-   "name": "PNG pixel size read",
-   "group": "picture viewer",
-   "value": "chunk list walked to IHDR, up to 64 chunks",
-   "source": "app/src/search.rs png_size, written from the PNG chunk layout; the old fixed offset printed 1885434465 x 1835365477 on testdata/long-prompt.png (app/shots/details-closed.png)"
-  },
-  {
-   "name": "message for a picture the decoder refuses",
-   "group": "picture viewer",
-   "value": "This file could not be opened as a picture",
-   "source": "app/src/gallery.rs BigCache::has_failed; before, such a file said Loading picture... for ever (app/shots/details-closed4.png)"
-  },
-  {
-   "name": "ask before moving to the Trash",
-   "group": "files",
-   "value": false,
-   "source": "ConfirmTrash @0x21e8f0 read with default 0 at 0x1a7a3d (kio 6.31.0); page default byte 0x243f02 = 0; ships off here too, and the person asked for no question on Delete"
-  },
-  {
-   "name": "ask before deleting permanently",
-   "group": "files",
-   "value": true,
-   "source": "ConfirmDelete @0x21e8d4 read with default 1 at 0x1a7a31 (kio 6.31.0); page default byte 0x243f00 = 1"
-  },
-  {
-   "name": "ask before emptying the Trash",
-   "group": "files",
-   "value": true,
-   "source": "ConfirmEmptyTrash; kept on here because nothing can be brought back from it"
-  },
-  {
-   "name": "undo offer after a delete",
-   "group": "controls",
-   "value": "Undo button in the toast, 8 s on screen",
-   "source": "this build's own replacement for the question; the original's Undo action says 'This undoes the last change you made to files or folders' (string in /usr/bin/dolphin)"
-  },
-  {
-   "name": "undo key",
-   "group": "controls",
-   "value": "Ctrl+Z",
-   "source": "the original's Edit > Undo action ('This undoes the last change you made to files or folders')"
-  },
-  {
-   "name": "sort by menu shape",
-   "group": "sorting",
-   "value": "sort keys (radio) - separator - Ascending / Descending (radio) - separator - Folders First",
-   "source": "DolphinViewActionHandler::createActions @0x28e380 in libdolphinprivate.so.6: KActionMenu \"Sort By\" (@action:inmenu View, icon view-sort), the role action group, addSeparator, the exclusive ascending/descending pair, then the folders_first toggle"
-  },
-  {
-   "name": "choosing a sort key reverses nothing",
-   "group": "sorting",
-   "value": true,
-   "source": "DolphinViewActionHandler::slotSortTriggered @0x291f30 only sets the ticked action and calls DolphinView::setSortRole; the order changes only through the Ascending / Descending actions"
-  },
-  {
-   "name": "sort direction for a new key",
-   "group": "sorting",
-   "value": "the direction last chosen for that key, otherwise the key's own default",
-   "source": "DolphinView::setSortRole @0x2716d0 asks preferredSortOrder @0x2859a0, which reads the per-role hash at DolphinView+0x130 and falls back to defaultSortOrderForRole @0x273910"
-  },
-  {
-   "name": "keys that start descending",
-   "group": "sorting",
-   "value": "modificationtime, creationtime, accesstime, deletiontime, imageDateTime, releaseYear, size, width, height, pageCount, wordCount, lineCount, rating, duration, bitrate",
-   "source": "DolphinView::defaultSortOrderForRole @0x273910 builds a static set from the 16 pointers at 0x2f3960 (0x2f3960..0x2f39e0); membership means Qt::DescendingOrder"
-  },
-  {
-   "name": "keys that start ascending",
-   "group": "sorting",
-   "value": "every other role, including name, type, permissions, owner, group, path, tags, comment",
-   "source": "DolphinView::defaultSortOrderForRole @0x273910 returns false for roles outside the table at 0x2f3960"
-  },
-  {
-   "name": "direction is remembered per key",
-   "group": "sorting",
-   "value": true,
-   "source": "DolphinViewActionHandler::slotSortOrderChanged @0x292640 calls DolphinView::setPreferredSortOrder with the current role; preferredSortOrder @0x2859a0 reads that per-role hash first"
-  },
-  {
-   "name": "where folders first is stored",
-   "group": "sorting",
-   "value": "per folder, in that folder's view properties",
-   "source": "DolphinView::updateSortFoldersFirst @0x27d7c0: ViewProperties::setSortFoldersFirst for the current URL, then KFileItemModel::setSortDirectoriesFirst"
-  },
-  {
-   "name": "name comparison wiring",
-   "group": "sorting",
-   "value": "Natural = natural compare on, case-insensitive; Alphabetical case insensitive = plain compare, case-insensitive; Alphabetical case sensitive = plain compare, case-sensitive",
-   "source": "KFileItemModel::loadSortingSettings @0x194e20: SortingChoice 1 sets the natural flag to 0 and QCollator case sensitivity to 0, 2 sets it to 0 and 1, 0 (Natural) sets the flag to 1 and case sensitivity to 0"
-  },
-  {
-   "name": "what the picture wall holds",
-   "group": "picture wall",
-   "value": "pictures only; sub-folders and documents are not drawn",
-   "source": "the person's request (2026-11-07): \"in the Pictures - thumbnails of this folder view only pictures should be displayed\"; app/src/state.rs Pane::shown_indices used by app/src/gallery.rs ui_pictures"
-  },
-  {
-   "name": "what counts as a picture on the wall",
-   "group": "picture wall",
-   "value": "png, jpg, jpeg, gif, bmp, webp, tif, tiff, svg, ico, heic, avif, xpm, ppm (file-name extension)",
-   "source": "app/src/fsutil.rs kind_for, the same list the previews, viewer and slideshow use"
-  },
-  {
-   "name": "what Ctrl+A and the arrow keys reach on the wall",
-   "group": "picture wall",
-   "value": "the pictures on screen only",
-   "source": "app/src/state.rs Pane::shown_indices via select_all and select_range, app/src/main.rs App::move_cursor; Pane::set_pictures drops marks the wall does not show"
-  },
-  {
-   "name": "view modes in the original",
-   "group": "view",
-   "value": "Icons, Compact, Details",
-   "source": "strings ViewModeController and DolphinView::setViewMode @0x2710c0 (stores the mode at this+0x58, then ViewProperties::setViewMode); no fourth, picture-only mode exists in the original"
-  },
-  {
-   "name": "preferred program row",
-   "group": "open with",
-   "value": "Open with <name>",
-   "source": "'Open &with %1' @0x11c258 in libKF6KIOWidgets.so.6.31.0, loaded at 0x64d34"
-  },
-  {
-   "name": "submenu row",
-   "group": "open with",
-   "value": "Open With",
-   "source": "'&Open With' @0x11c24a, loaded at 0x64b5e"
-  },
-  {
-   "name": "chooser's last row",
-   "group": "open with",
-   "value": "Other Application…",
-   "source": "'&Other Application' @0x11c387, loaded at 0x6e028"
-  },
-  {
-   "name": "remember tick box",
-   "group": "open with",
-   "value": "Remember this choice for all files of type \"%1\" (%2)",
-   "source": "'&Remember application association for all files of type' @0x120210, drawn by the function at 0x834c0"
-  },
-  {
-   "name": "where a remembered choice is stored",
-   "group": "open with",
-   "value": "[Default Applications] in $XDG_CONFIG_HOME/mimeapps.list",
-   "source": "the original's dialog writes the same file (function 0x834c0 next to the tick box); row layout from the freedesktop mime-apps specification"
-  },
-  {
-   "name": "programs listed in the submenu",
-   "group": "open with",
-   "value": "those whose MimeType= names the file's type",
-   "source": "read from the .desktop entries under $XDG_DATA_DIRS/applications; submenu texts from function 0x646d0"
-  },
-  {
-   "name": "submenu rows shown",
-   "group": "open with",
-   "value": 12,
-   "unit": "rows",
-   "estimated": true
-  },
-  {
-   "name": "chooser order",
-   "group": "open with",
-   "value": "programs that claim the type first, then the rest, each by name",
-   "source": "the original's chooser lists the type's own programs first (window from function 0x6d980); name order inside each half is this build's own arrangement"
-  },
-  {
-   "name": "chooser starts on",
-   "group": "open with",
-   "value": "the desktop's preferred program for the type",
-   "source": "mimeapps.list [Default Applications], the same row the menu's first line names"
-  },
-  {
-   "name": "type of a file whose name says nothing",
-   "group": "open with",
-   "value": "text/plain when its first 1024 bytes are text",
-   "estimated": true
-  },
-  {
-   "name": "text sniff window",
-   "group": "open with",
-   "value": 1024,
-   "unit": "bytes",
-   "estimated": true
-  },
-  {
-   "name": "field codes filled",
-   "group": "open with",
-   "value": "%f %F %u %U %i %c %k %%",
-   "source": "the desktop-entry specification's Exec key, which the original's launch path follows (function 0x646d0 hands the row to KIO)"
-  },
-  {
-   "name": "confirm before emptying the Trash",
-   "group": "files",
-   "value": true,
-   "source": "ConfirmEmptyTrash @0x21f2a8 read with default 1 in askUserDelete @0x1a7980 (kio 6.31.0); page default byte 0x243f01 = 1"
-  },
-  {
-   "name": "the Trash question",
-   "group": "files",
-   "value": "Do you really want to move this item to the Trash? + <filename>%1</filename>",
-   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20 (libKF6KIOWidgets.so.6.31.0)"
-  },
-  {
-   "name": "the permanent-delete question",
-   "group": "files",
-   "value": "Do you really want to permanently delete this item? + name + This action cannot be undone.",
-   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; <emphasis strong='true'> around the warning"
-  },
-  {
-   "name": "the three continue buttons",
-   "group": "files",
-   "value": "Move to Trash / Delete Permanently / Empty Trash",
-   "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; 'Move to Trash' at 0x21e94c, the other two as literals in the same function"
-  },
-  {
-   "name": "delete inside the Trash",
-   "group": "files",
-   "value": "a Trash request from a trash: URL becomes a permanent delete",
-   "source": "KIO::DeleteOrTrashJob::DeleteOrTrashJob @0x1b0fa0 (kio 6.31.0): scheme \"trash\" rewrites type 1 to 0"
-  },
-  {
-   "name": "row-button caption width",
-   "group": "view",
-   "value": "20 x averageCharWidth, then elided",
-   "unit": "px",
-   "source": "FUN_001c81f0 @0x1c81f0 in /usr/bin/dolphin (imul ...,0x14 before QFontMetrics::averageCharWidth)"
-  },
-  {
-   "name": "row-button captions",
-   "group": "view",
-   "value": "Move %2 to the Trash / Permanently Delete %2 / Copy %2 to the Clipboard / Cut %2 to the Clipboard / Duplicate %2 / Rename %2",
-   "source": "FUN_001c81f0 @0x1c81f0; strings 0x22e3e6, 0x22e3b1"
-  },
-  {
-   "name": "recent group heading, original",
-   "group": "recent",
-   "value": "Recent",
-   "source": "sidebar capture rea/orig-default.png: Places, Remote, Recent, Devices"
-  },
-  {
-   "name": "recent row, original",
-   "group": "recent",
-   "value": "Recent Files",
-   "source": "that capture's Recent group, top row (document-with-clock icon)"
-  },
-  {
-   "name": "recent row, original (second)",
-   "group": "recent",
-   "value": "Recent Locations",
-   "source": "same capture, second row (folder-with-clock icon, drawn cut off as 'Recent Locatio...')"
-  },
-  {
-   "name": "empty recent group",
-   "group": "recent",
-   "value": "No recently used items",
-   "source": "'No recently used items' @0x1bf937 in libdolphinprivate.so.6, beside 0x1bf92a 'recentlyused'"
-  },
-  {
-   "name": "where recent files come from",
-   "group": "recent",
-   "value": "~/.local/share/recently-used.xbel",
-   "source": "the freedesktop list KRecentDocument maintains and the kio recentlyused: worker reads"
-  },
-  {
-   "name": "recent files order",
-   "group": "recent",
-   "value": "visited stamp, newest first",
-   "source": "the xbel's own visited attribute, the stamp the recentlyused: worker sorts by; not the file's modification date"
-  },
-  {
-   "name": "recent files shown",
-   "group": "recent",
-   "value": 8,
-   "unit": "rows",
-   "source": "this build's own limit (the original's row opens a full scrolling view); recent_rows() in src/config.rs"
-  },
-  {
-   "name": "recent locations kept",
-   "group": "recent",
-   "value": 6,
-   "unit": "folders",
-   "source": "this build's own limit; RECENT_LOCATIONS_MAX in src/main.rs"
-  },
-  {
-   "name": "folders in recent files",
-   "group": "recent",
-   "value": false,
-   "source": "the list holds files only; a folder bookmark belongs to Recent Locations"
-  },
-  {
-   "name": "recent heading folds",
-   "group": "recent",
-   "value": true,
-   "source": "this build's arrangement: one click folds a group, the count stays on the heading"
-  },
-  {
-   "name": "recent groups drawn",
-   "group": "recent",
-   "value": "two folding headings (original: one Recent heading with two rows)",
-   "source": "this build's arrangement, see MECHANICS.md 'The places panel's recent groups'"
-  },
-  {
-   "name": "toolbar open button",
-   "group": "toolbar",
-   "value": "none - double-click, Enter, Open / Open With",
-   "source": "this build: the Open in button and its four-row menu were removed as duplicates"
-  },
-  {
-   "name": "app menu height",
-   "group": "toolbar",
-   "value": "capped to the window, scrolls",
-   "source": "this build: the last rows fell below an unmaximised window's edge"
-  },
-  {
-   "name": "remote group heading, original",
-   "group": "network",
-   "value": "Remote",
-   "source": "sidebar capture rea/orig-default.png, between Places and Recent"
-  },
-  {
-   "name": "network row, original",
-   "group": "network",
-   "value": "Network",
-   "source": "that capture's Remote group; the row opens the original's network:/ worker"
-  },
-  {
-   "name": "empty network group",
-   "group": "network",
-   "value": "No shared folders found",
-   "source": "'No shared folders found' @0x1bf952 in libdolphinprivate.so.6, beside 0x1bf96a 'network'"
-  },
-  {
-   "name": "where network folders come from",
-   "group": "network",
-   "value": "/proc/mounts network types + /run/user/<uid>/gvfs",
-   "source": "this build: the desktop's own mounts; the original browses network:/ through KIO instead"
-  },
-  {
-   "name": "network filesystem types",
-   "group": "network",
-   "value": "cifs, smbfs, nfs, nfs4, afs, 9p, davfs, davfs2, fuse.sshfs, fuse.rclone, fuse.s3fs, fuse.davfs2",
-   "source": "this build's list, from the Linux mount table"
-  },
-  {
-   "name": "network row label",
-   "group": "network",
-   "value": "the share for an SMB mount, else the last part of the mount point",
-   "source": "this build; e.g. //router/media shows as media"
-  },
-  {
-   "name": "details view side padding (rebuild)",
-   "group": "details",
-   "value": 20,
-   "unit": "px",
-   "source": "app/src/theme.rs DETAILS_SIDE_PAD = 20.0, used by views::Pane::details_columns; original: DetailsModeSettings::DetailsModeSettings @0x2b0f10 sets LeftPadding/RightPadding to 0x14, read by KItemListView::setSidePadding"
-  },
-  {
-   "name": "slider in a one-row strip",
-   "group": "status bar",
-   "value": 18,
-   "unit": "px",
-   "source": "app/src/theme.rs strip_slider: interact_size.y 12 and HandleShape::Circle, so the knob is height/2.5 = 14.2 px; used by the picture strip, the gallery bar and the status bar"
-  },
-  {
-   "name": "slider knob size",
-   "group": "status bar",
-   "value": 14.2,
-   "unit": "px",
-   "source": "egui 0.33 Slider::handle_radius = rect.height() / 2.5, with the 18 px row strip_slider gives it"
-  },
-  {
-   "name": "disk usage window title",
-   "group": "disk usage",
-   "value": "Manage Disk Space Usage",
-   "source": "action label 0x22d931 in /usr/bin/dolphin (manage_disk_space, icon filelight)"
-  },
-  {
-   "name": "disk space submenu builder",
-   "group": "disk usage",
-   "value": "FUN_001e8430 @0x1e8430",
-   "source": "DiskSpaceUsageMenu::aboutToShow in /usr/bin/dolphin: launches org.kde.filelight or offers to install it"
-  },
-  {
-   "name": "free up disk space row",
-   "group": "disk usage",
-   "value": "Free Up Disk Space",
-   "source": "string 0x22ec97 in /usr/bin/dolphin"
-  },
-  {
-   "name": "free space tooltip second line",
-   "group": "disk usage",
-   "value": "Press to manage disk space usage.",
-   "source": "string 0x237458 (0x137465) in /usr/bin/dolphin"
-  },
-  {
-   "name": "disk usage counts hidden files",
-   "group": "disk usage",
-   "value": true,
-   "source": "added: a total that skipped .cache would be wrong"
-  },
-  {
-   "name": "disk usage follows symbolic links",
-   "group": "disk usage",
-   "value": false,
-   "source": "added: a link is counted at its own entry size, never followed"
-  },
-  {
-   "name": "disk usage share rounding",
-   "group": "disk usage",
-   "value": "half up",
-   "source": "FUN_001e6a00 @0x1e6a00, the formula fsutil::used_percent also uses"
-  },
-  {
-   "name": "disk usage largest files kept",
-   "group": "disk usage",
-   "value": 40,
-   "estimated": true,
-   "source": "estimated: a free-up shortlist, not an inventory"
-  },
-  {
-   "name": "disk usage window size",
-   "group": "disk usage",
-   "value": "720x590",
-   "estimated": true
-  },
-  {
-   "name": "archive format written",
-   "group": "archives",
-   "value": "ZIP",
-   "source": "added: the zip program the desktop already has"
-  },
-  {
-   "name": "archive name for several items",
-   "group": "archives",
-   "value": "Archive.zip",
-   "source": "default name of a multi-file archive, compressfileitemaction.so (Ark plugin)"
-  },
-  {
-   "name": "archive name for one folder",
-   "group": "archives",
-   "value": "folder name + .zip",
-   "source": "Ark's Compress to \"%1\" wording (compressfileitemaction.so); added here"
-  },
-  {
-   "name": "archive name when already there",
-   "group": "archives",
-   "value": "photos (1).zip",
-   "source": "added: a second archive of the same name steps aside"
-  },
-  {
-   "name": "zip switches",
-   "group": "archives",
-   "value": "-r -q -y",
-   "source": "added: folders, quiet, and links stored as links"
-  },
-  {
-   "name": "extract folder name",
-   "group": "archives",
-   "value": "archive name without its extension",
-   "source": "added: holiday.tar.gz unpacks into holiday"
-  },
-  {
-   "name": "archives this build opens",
-   "group": "archives",
-   "value": "ZIP and tar",
-   "source": "added: unzip -q -o ... -d for ZIP, tar -xf ... -C for the tar family"
-  },
-  {
-   "name": "original compress and extract plugins",
-   "group": "archives",
-   "value": "compressfileitemaction.so, extractfileitemaction.so",
-   "source": "ark package, /usr/lib/qt6/plugins/kf6/kfileitemaction/"
-  },
-  {
-   "name": "size formatter precision",
-   "group": "view",
-   "value": "1 decimal",
-   "source": "KIO::convertSize @0x1f25f0 in libKF6KIOCore.so.6 calls KFormat::formatByteSize(size, 1, dialect, default) @0x1bb910 in libKF6CoreAddons.so.6"
-  },
-  {
-   "name": "size formatter step (IEC)",
-   "group": "view",
-   "value": 1024,
-   "unit": "bytes",
-   "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 0 and 1"
-  },
-  {
-   "name": "size formatter step (SI)",
-   "group": "view",
-   "value": 1000,
-   "unit": "bytes",
-   "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 2"
-  },
-  {
-   "name": "size formatter rounding",
-   "group": "view",
-   "value": "half away from zero",
-   "source": "KFormat probe of the installed 6.31.0: 1.25 KiB prints 1.3 KiB, 2.25 KiB prints 2.3 KiB"
-  },
-  {
-   "name": "size formatter thousands separator",
-   "group": "view",
-   "value": true,
-   "source": "KFormat probe: 1000 bytes prints 1,000 B and 1,048,575 prints 1,024.0 KiB"
-  },
-  {
-   "name": "size formatter unit labels",
-   "group": "view",
-   "value": "KiB/MiB/GiB by default; KB/MB/GB when dialect 1; kB/MB/GB when dialect 2",
-   "source": "FUN_001ba880 @0x1ba880, the translate() calls at 0x1cbe41 (IEC), 0x1cbe28 (legacy) and 0x1cbbf2 (SI)"
-  },
-  {
-   "name": "size formatter dialect source",
-   "group": "view",
-   "value": "kdeglobals [Locale] BinaryUnitDialect; anything above 2 reads as 0",
-   "source": "KIO::convertSize @0x1f25f0"
-  },
-  {
-   "name": "disk usage submenu scopes",
-   "group": "disk usage",
-   "value": "current folder, current device, all devices",
-   "source": "strings 0x237538, 0x237560, 0x237588 in FUN_001e8430 @0x1e8430"
-  },
-  {
-   "name": "disk usage window scope label",
-   "group": "disk usage",
-   "value": "Disk Usage Statistics - current folder",
-   "source": "added window walks the open folder, so it uses the original's 0x237538 wording"
-  },
-  {
-   "name": "content search modes",
-   "group": "search",
-   "value": "File names, File names and contents, File contents",
-   "source": "/usr/bin/dolphin strings 0x22e0db \"File names and contents\", 0x22e10c \"File contents\", 0x22caf8 \"FileContents\" (ev_5e70a9dd4972bc0597c7868d29d1a9183cab926ed0f8cdd577960ea0bdaeaf2c)"
-  },
-  {
-   "name": "content search reads files up to",
-   "group": "search",
-   "value": 4194304,
-   "unit": "bytes",
-   "source": "added: MAX_BYTES in findtext.rs (4 MiB)"
-  },
-  {
-   "name": "binary file test",
-   "group": "search",
-   "value": "a NUL byte in the first 8 KiB",
-   "source": "added: findtext::looks_binary, SNIFF_BYTES = 8192"
-  },
-  {
-   "name": "hidden folders in a content search",
-   "group": "search",
-   "value": "left out",
-   "source": "added: the original's find dialog leaves them out by default (find help text 0x231b48)"
-  },
-  {
-   "name": "hits kept before the search stops",
-   "group": "search",
-   "value": 300,
-   "unit": "files",
-   "source": "added: MAX_HITS in findtext.rs"
-  },
-  {
-   "name": "files looked at before the search stops",
-   "group": "search",
-   "value": 20000,
-   "unit": "files",
-   "source": "added: MAX_FILES in findtext.rs"
-  },
-  {
-   "name": "matching line shown, longest",
-   "group": "search",
-   "value": 120,
-   "unit": "characters",
-   "source": "added: SNIPPET_CHARS in findtext.rs (one ellipsis added when cut)"
-  },
-  {
-   "name": "megapixel unit",
-   "group": "resize",
-   "value": 1000000,
-   "unit": "pixels",
-   "source": "imageresize::PIXELS_PER_MP, the same reading as gallery::megapixels (the size caption prints MP = width × height ÷ 1 000 000)"
-  },
-  {
-   "name": "resize target, first value",
-   "group": "resize",
-   "value": 2.0,
-   "unit": "MP",
-   "source": "added: DEFAULT_MP in imageresize.rs (lowered to the picture's own size, floored to 0.1 MP, when that is smaller)"
-  },
-  {
-   "name": "resize target, smallest",
-   "group": "resize",
-   "value": 0.01,
-   "unit": "MP",
-   "source": "added: MIN_MP in imageresize.rs"
-  },
-  {
-   "name": "resize target, largest",
-   "group": "resize",
-   "value": 200,
-   "unit": "MP",
-   "source": "added: MAX_MP in imageresize.rs (also the ceiling on the decoded target)"
-  },
-  {
-   "name": "resize resampler",
-   "group": "resize",
-   "value": "Lanczos3",
-   "source": "added: FILTER in imageresize.rs"
-  },
-  {
-   "name": "JPEG quality on save",
-   "group": "resize",
-   "value": 90,
-   "unit": "%",
-   "source": "added: DEFAULT_QUALITY in imageresize.rs (the window's slider runs 40–100)"
-  },
-  {
-   "name": "resized copy name",
-   "group": "resize",
-   "value": "<stem>-<n>MP.<ext>",
-   "source": "added: imageresize::output_path — steps aside to \"<stem>-<n>MP (1).<ext>\" rather than overwrite"
-  },
-  {
-   "name": "Exif orientation applied before scaling",
-   "group": "resize",
-   "value": true,
-   "source": "added: imageresize::resize_file reads ImageDecoder::orientation and calls DynamicImage::apply_orientation"
-  },
-  {
-   "name": "picture formats written",
-   "group": "resize",
-   "value": "PNG, JPEG, WebP, BMP, TIFF",
-   "source": "added: SUPPORTED in imageresize.rs (GIF, SVG, ICO, HEIC and AVIF are refused with a sentence)"
-  },
-  {
-   "name": "drag threshold",
-   "group": "drag",
-   "value": 8,
-   "unit": "logical pixels",
-   "source": "added: THRESHOLD in dragout.rs (how far the pointer travels before a press becomes a drag)"
-  },
-  {
-   "name": "drag types offered",
-   "group": "drag",
-   "value": "text/uri-list, UTF8_STRING, text/plain",
-   "source": "added: send_enter in dragout.rs (three, so all three fit in the XdndEnter message)"
-  },
-  {
-   "name": "chunked transfer threshold",
-   "group": "drag",
-   "value": 98304,
-   "unit": "bytes",
-   "source": "added: INLINE_LIMIT in dragout.rs (96 KB; above it the list goes with INCR)"
-  },
-  {
-   "name": "INCR chunk size",
-   "group": "drag",
-   "value": 65536,
-   "unit": "bytes",
-   "source": "added: write_chunk in dragout.rs"
-  },
-  {
-   "name": "drag poll interval",
-   "group": "drag",
-   "value": 12,
-   "unit": "milliseconds",
-   "source": "added: the follow loop in dragout.rs (a position is sent at most every 20 ms)"
-  },
-  {
-   "name": "video frame ceiling",
-   "group": "video",
-   "value": 2048,
-   "unit": "pixels",
-   "source": "added: MAX_PX in video.rs (the thumbnail cache's own ceiling; the scale filter is clamped to it)"
-  },
-  {
-   "name": "video frame time budget",
-   "group": "video",
-   "value": 30,
-   "unit": "seconds",
-   "source": "added: BUDGET in video.rs (ffmpeg is killed after this; only a damaged file gets there)"
-  },
-  {
-   "name": "video formats with a preview",
-   "group": "video",
-   "value": 10,
-   "unit": "extensions",
-   "source": "added: VIDEO_EXT in fsutil.rs, the same list kind_for reads for Kind::Video"
-  },
-  {
-   "name": "added tools group, folded",
-   "group": "added",
-   "value": "7 rows: Duplicates, Find in Files, Bulk Rename, Quick Look, Disk Space, Compress, Resize Image; folded on a fresh profile, the heading counts its own rows",
-   "source": "own design; the original has no such group (the rows are this build's added tools)"
-  },
-  {
-   "name": "added tools group fold state",
-   "group": "added",
-   "value": "config key tools_expanded, absent = folded",
-   "source": "own design"
-  },
-  {
-   "name": "network group shown",
-   "group": "network",
-   "value": true,
-   "source": "own switch: app menu, View, 'Show Network Shared Folders'; the original's Remote group can only be folded, not hidden"
-  },
-  {
-   "name": "network group hidden",
-   "group": "network",
-   "value": "the heading leaves with the rows; config key network_visible = false",
-   "source": "own switch, asked for by the person; the switch lives in the menu because a hidden group has no heading to click"
-  },
-  {
-   "name": "search results, Path column",
-   "group": "search",
-   "value": "details view, between Name and Size, while the walk covers subfolders and at least one hit lies in a folder below the root",
-   "source": "own addition, asked for by the person; the original's find bar hands its results to KIO's search helper, which has no such column"
-  },
-  {
-   "name": "search results, Path column width",
-   "group": "search",
-   "value": "measured: the widest name and the widest folder in the result, laid out with the row's own fonts (13 px / 12 px); leftover room split evenly; when the row cannot hold both, Size and Modified shrink to what their own cells need (44 / 64 px floors) before anything is elided",
-   "source": "own rule; a fixed share capped at 240 px cut folders, and a character estimate with a 220 px floor for the name cut names"
-  },
-  {
-   "name": "search results, Path text",
-   "group": "search",
-   "value": "the folder relative to the folder searched; an em dash for a file in that folder itself",
-   "source": "own rule; the find bar above already names the root"
-  },
-  {
-   "name": "find bar close button",
-   "group": "controls",
-   "value": "drawn glyph, not a character; laid out against the row's right edge before the field",
-   "source": "own fix: the ✕ character is absent from this app's font and the button was laid out past the window edge while a search ran"
-  },
-  {
-   "name": "the light palette",
-   "group": "colours",
-   "value": "per-role pairs (theme::pair): a dark value and a light value written for paper - view #fbfcfd, panel #eef2f5, toolbar #e6ebf0, ink #1a1d20, accent #1b6e9e, band #2f79ac; theme::c() (hue kept, saturation x0.92, L' = 1 - L^1.6) is left for icon glyphs and the viewer's scrims",
-   "source": "own rule, asked for by the person; the derived palette squashed the ladder into 1.05:1 steps, made the border the brightest line in the window, and left the accent at 2.24:1"
-  },
-  {
-   "name": "the light palette's contrast targets",
-   "group": "colours",
-   "value": "both modes, asserted by --selftest: view<->toolbar >= 1.12:1; view<->panel >= 1.05:1; ink >= 7:1; dim and faint >= 4.5:1 on the panel (faint >= 4.0 on the toolbar); hairline >= 1.18:1; window edge >= 1.25:1 from the toolbar; hover >= 1.10:1; band >= 1.9:1 with white text >= 4.5:1; accent >= 3:1; white on a filled or destructive button >= 4.5:1; no role a pure #000 or #fff",
-   "source": "Hallmark's rule that a second mode is re-derived, never inverted, and held to the same contrast in both; the old check only proved surfaces were light and text was dark"
-  },
-  {
-   "name": "the light palette's shading slider",
-   "group": "colours",
-   "value": "app menu > View > Shading, shown while the light palette is on, 0-100, config key shade, remembered. The view is the anchor and every other shading role is pulled further from it by 1 + 2t: the panel's step below the paper grows from 13 levels to 39, the toolbar's from 21 to 63 (panel #eef2f5 -> #d4dee5, toolbar #e6ebf0 -> #bcc9d6, hairline #d6dde4 -> #8c9fb2, window edge #c4ccd4 -> #566c82, keycap #f2f4f5 -> #e0e4e5). text_dim and text_faint darken with the surfaces they sit on (theme::ink_pair, in linear light, to the strictest floor) so captions keep 4.5:1. The shortcuts panel is included whole - fill, rows, hover, the selected pill (band at 75% alpha, so it darkens with the panel) and its keycaps (theme::key_badge); ink, accent, band, folder icon and page do not take part",
-   "source": "asked for by the person: one of their displays did not show the steps between the light window's surfaces, and scaling the distance from white (half again) was still 6 levels on the panel - invisible"
-  },
-  {
-   "name": "the picture viewer's paging keys",
-   "group": "picture viewer",
-   "value": "Left/Right step one picture and wrap at the ends (unchanged); Page Up/Page Down step one picture back and on (in a viewer a picture is the page); Home is the first picture and End the last, clamped rather than wrapped; a jump resets zoom, pan, fit and the slideshow tick exactly as a page does",
-   "source": "asked for by the person: the usual Home/End/Page Up/Page Down behaviour"
-  },
-  {
-   "name": "Page Up and Page Down in the file views",
-   "group": "view",
-   "value": "one page of the cursor and the window moves with it: Pane::per_page is what the view reported from its own visible range (9 details rows, 72 icon cells, 8 picture-wall cards in a 900x500 window), Pane::scroll_pages is applied by Pane::page_area as the last scroll offset plus one viewport height; Home and End use Pane::jump_cursor + Pane::scroll_edge to reach the first/last shown entry and the top/bottom of the content; the cursor stops at the ends, as the arrows do",
-   "source": "asked for by the person - should be one page down, not one image; the first attempt moved only the cursor, which put the new row below the window and made the key look dead. Home and End had the same fault, reported next: they asked the view to scroll to an entry that was not being drawn"
-  },
-  {
-   "name": "tabs, one browsing session each",
-   "group": "view",
-   "value": "App.tabs holds one Tab { panes, active } per session; SavedTab { path, sort_key, sort_desc, view, pictures } is written for every tab and restored by App::new, with session_tab naming the tab in front. Keys: Ctrl+T new, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+Page Down / Page Up walk (cycle_tab_index wraps; one tab stays put), Ctrl+Shift+T reopens. The tab's right-click menu carries Close Tab (Ctrl+W), Close Other Tabs, Close Tabs to the Right, Duplicate Tab, Reopen Closed Tab (Ctrl+Shift+T); index_after_close keeps the front tab in front; a double click on the empty strip opens a tab; hovering a tab shows its full path; the strip is the window's top row (tab_strip is added to the Context before top_toolbar)",
-   "source": "asked for by the person: multiple tabs representing different sessions, as Windows Explorer has. Tabs existed but kept only a folder and a sort; a tab now returns with its own view mode and picture mode, and the tab strip has walking, closing, duplicating and reopening"
-  },
-  {
-   "name": "the compact view's column width",
-   "group": "view",
-   "value": "cell = max(iconSize + 8 + 5*fontHeight, longest_name_px + icon + 28); the longest name is measured in the cell's 12.5 pt font and cached on the pane (compact_name_px, invalidated by compact_stamp = entry count + total bytes of names), listings over 1500 entries measure the 1500 longest by characters; the label gets cell - icon - 26 px, so every name shows in full unless one name is wider than the view, which elides in the middle",
-   "source": "asked for by the person: filenames must not be truncated in the compact view. The old fixed five-font-height cell showed four characters and an ellipsis on every row of a folder of photographs"
-  },
-  {
-   "name": "a zoom memory for each of the four views",
-   "group": "view",
-   "value": "icons zoom[0], compact zoom[1], details zoom[2] on the 0-25 ladder, and the picture view's thumbnail height in thumb_px (50-400 px) - four independent values, written as they change by App::sync_zoom_config and restored by pane_from_config. The zoom keys, the -/+ buttons and Reset Zoom (Ctrl+0) act on the view on show only (Pane::view_zoom_by / view_zoom_reset), and choosing a list view leaves the picture view",
-   "source": "asked for by the person: a different memory per view type, persistent across sessions. Found by driving the window and reading config.json: the view buttons overwrote the pane's array with the saved one, the picture view stayed up when a list view was chosen, and the zoom keys resized the hidden list ladder instead of the wall"
-  },
-  {
-   "name": "the light palette switch",
-   "group": "colours",
-   "value": "app menu > View > Light Mode; config key light, absent = dark; --light for one session",
-   "source": "own addition; egui's Visuals are set again on the switch (theme::apply_style)"
-  },
-  {
-   "name": "light mode, colours the derivation must not touch",
-   "group": "colours",
-   "value": "image tints are Color32::WHITE; white/black used in blend maths are the constants; strong text is text(); text on a band or a filled button is on_band(), white in both modes; text on a black scrim is on_scrim()",
-   "source": "own fix: a blanket derivation turned every preview black, inverted the folder highlight into a shadow, and made every emphasised name white on white"
-  },
-  {
-   "name": "document icon page edge",
-   "group": "colours",
-   "value": "paper_edge(): the page's own colour in dark mode (invisible), a grey line in light mode where a white page on a white view has no shape",
-   "source": "own fix: file types without a coloured badge read as a floating glyph in light mode"
-  },
-  {
-   "name": "widget strong text",
-   "group": "colours",
-   "value": "Visuals::widgets.active.fg_stroke = text(), because RichText::strong() takes its colour from there",
-   "source": "egui 0.33 style.rs strong_text_color() -> widgets.active.text_color()"
-  },
-  {
-   "name": "create new menu",
-   "group": "controls",
-   "value": "a right-click on the folder's own space (not on an item) opens Create New -> Folder / Text File; either row makes the thing at once under the first free name (New Folder, New Folder (1); New Text File.txt, New Text File (1).txt) and opens the in-place name editor on it with the name selected - no window; the app menu's New group carries New Folder (F10) and New Text File the same way",
-   "source": "libKF6KIOFileWidgets.so.6 strings '@item:inmenu Create New', 'Create New Folder', 'Create New File', 'Enter file name', template 'Name=Text File...'; /usr/bin/dolphin action names 'create_dir' and 'create_file'"
-  },
-  {
-   "name": "new text file",
-   "group": "files",
-   "value": "an empty file made with create_new(true): a name that is already taken is refused, never emptied",
-   "source": "own choice: create_file makes an empty file; create_new keeps a mistyped name from truncating the file that already has it"
-  },
-  {
-   "name": "document types Create New offers",
-   "group": "menu",
-   "value": "every installed application that keeps a document format of its own: the type named after it, the type its MIME package names its icon for, or the type its description names it in",
-   "source": "docs::owns_type + docs::catalog, from apps::catalog + the MIME packages (15 on this machine); the desktop's default applications are deliberately not used: they name who opens a type, not who makes one"
-  },
-  {
-   "name": "document types on by default",
-   "group": "menu",
-   "value": 0,
-   "unit": "types",
-   "source": "config.new_docs starts empty; the ticks are the person's own"
-  },
-  {
-   "name": "where a ticked document type is offered",
-   "group": "menu",
-   "value": "Menu > New > New Document, one row per ticked type; the row is drawn only when something is ticked",
-   "source": "this build: panels.rs menu_new, a menu_button with panels::menu_box width; the folder's Create New keeps its rows flat because it is already a submenu"
-  },
-  {
-   "name": "maximizing on a two-screen desktop",
-   "group": "window",
-   "value": "left to the window manager: the startup fit skips a maximized window, compares only the extent with the monitor's size, and stops at the first press on the title bar, the window buttons or a resize edge",
-   "source": "this build: main.rs window_fits / fit_window_to_monitor / FIT_FRAMES. egui-winit reports outer_rect in screen coordinates but monitor_size as a size without origin, so the old 'far edge <= monitor.x' test read a window at x = 1921 on a 2409-wide second screen as off-screen"
-  },
-  {
-   "name": "update check",
-   "group": "update",
-   "value": "manual only: the menu's *Check for Updates...* row asks api.github.com for mjb73/DolphinCraft's latest release on a worker thread, and offers it when its version is numerically newer",
-   "source": "this build (2026-11-09): src/update.rs check / parse_release / newer; the About line changed from 'Nothing dials out.' to say it dials out only when this row is picked"
-  },
-  {
-   "name": "update install",
-   "group": "update",
-   "value": "the release tarball, checked against its .sha256 before anything is replaced, unpacked and renamed over the running binary; the window then restarts with the same arguments",
-   "source": "this build: download_and_install / install_archive / restart; asset names are packaging/linux-tarball.sh's dolphincraft-<v>-<arch>-linux.tar.gz and .sha256, checked against the real v0.1.6 release"
-  },
-  {
-   "name": "update endpoint override",
-   "group": "update",
-   "value": "DOLPHINCRAFT_UPDATE_ENDPOINT replaces the GitHub URL with any address that answers a release JSON",
-   "source": "this build: update::endpoint; used by the local-server test that drove the whole flow"
-  }
- ]
+  "version": 1,
+  "values": [
+    {
+      "name": "zoom level minimum",
+      "group": "view",
+      "value": 0,
+      "unit": "level",
+      "source": "ZoomLevelInfo::minimumLevel @0x2a6360"
+    },
+    {
+      "name": "zoom level maximum",
+      "group": "view",
+      "value": 16,
+      "unit": "level",
+      "source": "ZoomLevelInfo::maximumLevel @0x2a6370"
+    },
+    {
+      "name": "icon size at zoom 0",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
+    },
+    {
+      "name": "icon size at zoom 1",
+      "group": "view",
+      "value": 22,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
+    },
+    {
+      "name": "icon size at zoom 2",
+      "group": "view",
+      "value": 32,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
+    },
+    {
+      "name": "icon size at zoom 3",
+      "group": "view",
+      "value": 48,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
+    },
+    {
+      "name": "icon size at zoom 4",
+      "group": "view",
+      "value": 64,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380, table @0x2cd960"
+    },
+    {
+      "name": "icon size above zoom 4",
+      "group": "view",
+      "value": "level * 16",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
+    },
+    {
+      "name": "icon size at zoom 16",
+      "group": "view",
+      "value": 256,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380"
+    },
+    {
+      "name": "zoom level from 48 px",
+      "group": "view",
+      "value": 3,
+      "source": "ZoomLevelInfo::zoomLevelForIconSize @0x2a63a0"
+    },
+    {
+      "name": "default zoom, details view",
+      "group": "view",
+      "value": 3,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
+    },
+    {
+      "name": "default zoom, icons view",
+      "group": "view",
+      "value": 4,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 64 -> zoomLevelForIconSize @0x2a63a0"
+    },
+    {
+      "name": "default zoom, compact view",
+      "group": "view",
+      "value": 3,
+      "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: PreviewSize 48 -> zoom 3"
+    },
+    {
+      "name": "details columns",
+      "group": "view",
+      "value": "Name, Type, Size, Modified (a Path column joins them while a deep search is showing)",
+      "source": "live capture of dolphin 26.08.2 details view for the original's Name, Size, Modified; Type is this build's addition (2026-11-09), between Name and Size, and it gives way on a row too narrow to hold it"
+    },
+    {
+      "name": "type written on a document icon",
+      "group": "view",
+      "value": "the file's extension, upper-cased, in the band under the kind glyph and sized to the tile: VECTORCRAFT at 8.6 px on a 96 px tile, nothing below a 6 px floor",
+      "source": "this build (2026-11-09): theme::draw_type_label / type_label_px, solved from Painter::layout_no_wrap at 10 px and the page's own band (PAGE_W_FRAC 0.64, TYPE_AIR 0.92, TYPE_BAND_FRAC 0.12); the person asked for it because two documents from two applications wore the same blank page"
+    },
+    {
+      "name": "details row height",
+      "group": "view",
+      "value": 26,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "places panel width",
+      "group": "view",
+      "value": 208,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "information panel width",
+      "group": "view",
+      "value": 288,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "information panel rows",
+      "group": "view",
+      "value": "Type, Size, Modified, Accessed",
+      "source": "live capture of dolphin 26.08.2 information panel"
+    },
+    {
+      "name": "status bar counts",
+      "group": "view",
+      "value": "0 folders, 0 files / N folders (no size) / N files (size) / N folders, M files (size)",
+      "source": "DolphinView::emitStatusBarText @0x272f40; strings 0x1bf6a0, 0x1bf6b4, 0x1bf6ea, 0x1becea, 0x1bf6c4"
+    },
+    {
+      "name": "status bar selection",
+      "group": "view",
+      "value": "N folder(s) selected, M file(s) selected (size); folders alone carry no size",
+      "source": "DolphinView::emitStatusBarText @0x272f40, selection branch; strings 0x1bf658, 0x1bf66c, 0x1bf67e, 0x1bf690"
+    },
+    {
+      "name": "status bar free space",
+      "group": "view",
+      "value": "%1 free on the button, %1 free out of %2 (%3% used) in the tooltip, plus a capacity bar filled to the same used share",
+      "source": "FUN_001e6a00 @0x1e6a00 in /usr/bin/dolphin; strings 0x22ec55 (%1 free), 0x22ec7a (%1 free out of %2), 0x237458 (with the Press line); KCapacityBar::setValue"
+    },
+    {
+      "name": "size unit style",
+      "group": "view",
+      "value": "IEC, one decimal (1718.4 KiB)",
+      "source": "live capture of dolphin 26.08.2 status bar"
+    },
+    {
+      "name": "default sort key",
+      "group": "sorting",
+      "value": "Name",
+      "source": "KFileItemModel::loadSortingSettings @0x194e20 (libdolphinprivate.so.6) leaves the model on its name role; name is the only role whose comparator is built in the constructor (QCollator at +0x58, natural flag at +0x60)"
+    },
+    {
+      "name": "default sort ascending",
+      "group": "sorting",
+      "value": true,
+      "source": "ViewProperties::ViewProperties @0x29fdd0 stores 0 at this+8 = Qt::AscendingOrder (the ctor writes the bytes 0,1,0 at +8,+9,+10)"
+    },
+    {
+      "name": "default folders first",
+      "group": "sorting",
+      "value": true,
+      "source": "ViewProperties::ViewProperties @0x29fdd0 stores 1 at this+9 = sortFoldersFirst (bytes 0,1,0 at +8,+9,+10)"
+    },
+    {
+      "name": "default sorting mode",
+      "group": "sorting",
+      "value": "Natural",
+      "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin, ItemEnum SortingChoice default 0 = NaturalSorting"
+    },
+    {
+      "name": "sort options",
+      "group": "sorting",
+      "value": "one menu entry per sortable role, in KFileItemModel::rolesInformation() order, split into submenus where the role carries a group label",
+      "source": "DolphinViewActionHandler::createFileItemRolesActionGroup @0x28d3f0 iterates KFileItemModel::rolesInformation @0x193bd0; the Sort By menu is built with the prefix \"sort_by_\" in createActions @0x28e380"
+    },
+    {
+      "name": "double click opens",
+      "group": "controls",
+      "value": true,
+      "source": "string 'Double-click triggers' in /usr/bin/dolphin"
+    },
+    {
+      "name": "split view",
+      "group": "controls",
+      "value": "F3",
+      "source": "DolphinViewActionHandler split actions, 'Split view' string"
+    },
+    {
+      "name": "toggle information panel",
+      "group": "controls",
+      "value": "F11",
+      "source": "Dolphin action shortcut, information panel string"
+    },
+    {
+      "name": "toggle hidden files",
+      "group": "controls",
+      "value": "Ctrl+H",
+      "source": "Show Hidden Files action string"
+    },
+    {
+      "name": "editable location bar",
+      "group": "controls",
+      "value": "Ctrl+L",
+      "source": "Make location bar editable string"
+    },
+    {
+      "name": "move to trash",
+      "group": "controls",
+      "value": "Del",
+      "source": "Move to Trash action string"
+    },
+    {
+      "name": "permanent delete",
+      "group": "controls",
+      "value": "Shift+Del",
+      "source": "ShowDeleteCommand action string"
+    },
+    {
+      "name": "rename",
+      "group": "controls",
+      "value": "F2",
+      "source": "Rename action string"
+    },
+    {
+      "name": "new folder",
+      "group": "controls",
+      "value": "F10",
+      "source": "create_dir action string"
+    },
+    {
+      "name": "refresh",
+      "group": "controls",
+      "value": "F5",
+      "source": "view_redisplay action string"
+    },
+    {
+      "name": "trash location",
+      "group": "files",
+      "value": "~/.local/share/Trash/{files,info}",
+      "source": "freedesktop trash spec used by dolphin; strings 'Restore to Former Location', 'Empty Trash'"
+    },
+    {
+      "name": "trash record format",
+      "group": "files",
+      "value": "[Trash Info] Path= and DeletionDate=",
+      "source": "freedesktop trash spec used by dolphin"
+    },
+    {
+      "name": "question before a delete",
+      "group": "files",
+      "value": "three switches, read at delete time by KIO",
+      "source": "KIO::WidgetsAskUserActionHandler::askUserDelete @0x1a7980 (libKF6KIOWidgets.so.6.31.0), group [Confirmations] of kiorc (0x21e8ac, 0x21e8c8); page FUN_001d5010 @0x1d5010"
+    },
+    {
+      "name": "hidden file rule",
+      "group": "files",
+      "value": "name starts with a dot",
+      "estimated": true
+    },
+    {
+      "name": "quick look key",
+      "group": "added",
+      "value": "Space",
+      "estimated": true
+    },
+    {
+      "name": "duplicate detection",
+      "group": "added",
+      "value": "size, then SHA-256",
+      "estimated": true
+    },
+    {
+      "name": "bulk rename tokens",
+      "group": "added",
+      "value": "{name} {n} {ext} {date}",
+      "estimated": true
+    },
+    {
+      "name": "shortcut panel rows",
+      "group": "shortcuts",
+      "value": "Home, Desktop, Documents, Downloads, Music, Pictures, Videos, Trash, then pinned folders",
+      "source": "strings PlacesPanel, DolphinPlacesModel, add_to_places, Add to Places; live capture of dolphin 26.08.2"
+    },
+    {
+      "name": "shortcut keys in the panel",
+      "group": "shortcuts",
+      "value": "Alt+1 to Alt+9 on the first nine rows, dim badge at the right edge",
+      "estimated": true
+    },
+    {
+      "name": "shortcut editor key",
+      "group": "shortcuts",
+      "value": "Ctrl+Shift+S",
+      "estimated": true
+    },
+    {
+      "name": "shortcut duplicate rule",
+      "group": "shortcuts",
+      "value": "a standard folder cannot be pinned twice",
+      "source": "own rule; original uses Add to Places for bookmarks only"
+    },
+    {
+      "name": "shortcut persistence",
+      "group": "shortcuts",
+      "value": "config bookmarks array + shortcuts_expanded + shortcut_keys; a group's children and its fold state travel with it",
+      "estimated": true
+    },
+    {
+      "name": "shortcut groups",
+      "group": "shortcuts",
+      "value": "a bookmark row with group set holds other shortcuts: same flag icon, chevron in front, children 14 px in; a click folds it, a row dropped on it joins it, Remove Group dissolves the box and keeps the rows",
+      "source": "own rule, asked for by the person; one level of nesting, and a group takes no Alt+N slot"
+    },
+    {
+      "name": "shortcut hints in menus",
+      "group": "shortcuts",
+      "value": "name left, key right",
+      "source": "strings Shortcuts, KShortcutsDialog, KStandardShortcut (moveToTrash, createFolder, showHideHiddenFiles); menu hints in the original"
+    },
+    {
+      "name": "new window key",
+      "group": "controls",
+      "value": "Ctrl+N",
+      "estimated": true
+    },
+    {
+      "name": "quit key",
+      "group": "controls",
+      "value": "Ctrl+Q",
+      "estimated": true
+    },
+    {
+      "name": "places panel toggle key",
+      "group": "controls",
+      "value": "F9",
+      "source": "show_places_panel / Show Places Panel action strings in /usr/bin/dolphin"
+    },
+    {
+      "name": "find duplicates key",
+      "group": "added",
+      "value": "Ctrl+Shift+D",
+      "estimated": true
+    },
+    {
+      "name": "bulk rename key",
+      "group": "added",
+      "value": "Ctrl+Shift+R",
+      "estimated": true
+    },
+    {
+      "name": "list date format",
+      "group": "view",
+      "value": "dd/MM/yyyy HH:mm",
+      "source": "live capture of dolphin 26.08.2 details view (06/11/2026 18:43)"
+    },
+    {
+      "name": "information panel date wording",
+      "group": "view",
+      "value": "N minute(s) ago, then N hour(s) ago, then a numeric date",
+      "source": "live capture of dolphin 26.08.2 information panel (14 minute(s) ago)"
+    },
+    {
+      "name": "information panel rows, full",
+      "group": "view",
+      "value": "Type, Size, Modified, Accessed, Created, Tags, Rating, Comment",
+      "source": "live capture of dolphin 26.08.2 information panel"
+    },
+    {
+      "name": "location bar editable on click",
+      "group": "controls",
+      "value": "a click to the right of the breadcrumbs",
+      "source": "string 0x132138 in /usr/bin/dolphin (sub_65ec0)"
+    },
+    {
+      "name": "location bar confirm",
+      "group": "controls",
+      "value": "Enter",
+      "source": "string 0x132138 'switch back by confirming the edited location'"
+    },
+    {
+      "name": "location bar cancel",
+      "group": "controls",
+      "value": "Escape",
+      "estimated": true
+    },
+    {
+      "name": "address text selected when the bar opens",
+      "group": "controls",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "address for a file",
+      "group": "controls",
+      "value": "open its folder and select the file",
+      "source": "DolphinView::setUrl @0x17e9b0 loads directories; DolphinView::selectFileOnceAvailable @0x173b40 selects on itemsInserted"
+    },
+    {
+      "name": "file:// links and ~ accepted",
+      "group": "controls",
+      "value": true,
+      "estimated": true
+    },
+    {
+      "name": "address that leads nowhere",
+      "group": "controls",
+      "value": "keep the field open and say so",
+      "estimated": true
+    },
+    {
+      "name": "thumbnail size follows the zoom level",
+      "group": "previews",
+      "value": true,
+      "source": "DolphinItemListView::setZoomLevel @0x26dec0 (clamp 0..16, iconSizeForZoomLevel @0x2a6380, stored at +0x200 with previews on / +0x204 with them off) and updateGridSize @0x26d940"
+    },
+    {
+      "name": "thumbnail fit in the icon box",
+      "group": "previews",
+      "value": "aspect ratio kept, centred, scaled up or down to the icon box",
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 calls KPixmapModifier::scale @0x15e820 with the icon box size"
+    },
+    {
+      "name": "thumbnail re-scaled when the icon size changes",
+      "group": "previews",
+      "value": true,
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 keeps the cached target width and height at +0x1b0/+0x1b4 and rescales when they differ"
+    },
+    {
+      "name": "previews shown at the smallest zoom level",
+      "group": "previews",
+      "value": true,
+      "source": "live capture checks/orig-zoom/details-16px.png: 16 px picture thumbnails in the details view at zoom 0"
+    },
+    {
+      "name": "zoom in enlarges thumbnails in the original",
+      "group": "previews",
+      "value": "64 px to 160 px",
+      "source": "live capture checks/orig-zoom/icons-64px.png and icons-160px.png after six Ctrl+Plus steps"
+    },
+    {
+      "name": "preview size remembered per view mode",
+      "group": "previews",
+      "value": true,
+      "source": "DetailsModeSettings / IconsModeSettings / CompactModeSettings read by updateGridSize @0x26d940 (IconSize at +0x2c, PreviewSize at +0x30 for details)"
+    },
+    {
+      "name": "picture previews for other file types",
+      "group": "previews",
+      "value": "only pictures; other files show a file-type icon that grows with the zoom",
+      "source": "live capture checks/orig-zoom/icons-160px.png; content previews for text and documents come from KIO thumbnail plugins the rebuild does not run"
+    },
+    {
+      "name": "icon grid columns",
+      "group": "icons view",
+      "value": "floor(view width / cell width), at least 1, columns spread evenly",
+      "source": "KItemListViewLayouter::doLayout @0x161bb0 (vdivsd at 0x161c79, truncation at 0x161c8a, clamp to 1 at 0x161c90)"
+    },
+    {
+      "name": "icon grid columns at 64 px (original)",
+      "group": "icons view",
+      "value": 4,
+      "unit": "columns",
+      "source": "measured in checks/orig-zoom/icons-64px.png: 5 items in 4 columns across a 592 px view"
+    },
+    {
+      "name": "icon grid pitch at 64 px (original)",
+      "group": "icons view",
+      "value": 148,
+      "unit": "px",
+      "source": "measured in checks/orig-zoom/icons-64px.png (icon centres 148 px apart, 592 / 4)"
+    },
+    {
+      "name": "icon grid columns at 160 px (original)",
+      "group": "icons view",
+      "value": 3,
+      "unit": "columns",
+      "source": "measured in checks/orig-zoom/icons-160px.png: 5 items in 3 columns across the same 592 px view"
+    },
+    {
+      "name": "icon grid pitch at 160 px (original)",
+      "group": "icons view",
+      "value": 197,
+      "unit": "px",
+      "source": "measured in checks/orig-zoom/icons-160px.png (icon centres 197 px apart, 592 / 3)"
+    },
+    {
+      "name": "icon cell minimum width (rebuild)",
+      "group": "icons view",
+      "value": "max(icon + 24, 88)",
+      "unit": "px",
+      "source": "views::icon_grid; narrower than the original's measured pitch on purpose, as the person asked for more icons per screen"
+    },
+    {
+      "name": "icon grid gap (rebuild)",
+      "group": "icons view",
+      "value": 2,
+      "unit": "px",
+      "source": "views::ICON_CELL_GAP"
+    },
+    {
+      "name": "icon cell height (rebuild)",
+      "group": "icons view",
+      "value": "icon + 46 with two label lines, icon + 32 with one",
+      "unit": "px",
+      "source": "views::icon_cell_height"
+    },
+    {
+      "name": "label lines in icons view",
+      "group": "icons view",
+      "value": "2 at 32 px and above, 1 below",
+      "source": "views::draw_icon_cell; the original wraps icon labels to two lines (KStandardItemListWidget::updateIconsLayoutTextCache @0x1368c0)"
+    },
+    {
+      "name": "label break points (rebuild)",
+      "group": "icons view",
+      "value": "space, hyphen, underscore, dot, slash, then a hard split",
+      "source": "views::wrap_label"
+    },
+    {
+      "name": "icons per 1000 px at 64 px (rebuild)",
+      "group": "icons view",
+      "value": 13,
+      "unit": "columns",
+      "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"the icon grid packs many files into a row\""
+    },
+    {
+      "name": "original icon cell shape",
+      "group": "icons view",
+      "value": "square: a preview is scaled to fit an icon-size square, centred, aspect ratio kept",
+      "source": "KStandardItemListWidget::drawPixmap @0x135bb0 -> KPixmapModifier::scale @0x15e820; KItemListViewLayouter::doLayout @0x261bb0 uses one item width for every column"
+    },
+    {
+      "name": "original column width",
+      "group": "icons view",
+      "value": "item margin + item size (the square icon box), the same for every item in the view",
+      "source": "KItemListViewLayouter::doLayout @0x261bb0: vmaxsd of the item size hint and the configured item width, then columns = floor(width / (margin + item width)) at 0x261c79"
+    },
+    {
+      "name": "icon cell width (rebuild)",
+      "group": "icons view",
+      "value": "max(picture width at this zoom, label floor) + 8",
+      "source": "views::icon_cell_width; the picture width is the aspect-fit width of the square icon box, so a portrait cell is only as wide as the picture needs"
+    },
+    {
+      "name": "picture width in the icon box (rebuild)",
+      "group": "icons view",
+      "value": "icon size x aspect ratio when the picture is taller than wide, otherwise the icon size",
+      "source": "views::thumb_size, matching drawPixmap @0x135bb0's aspect-kept fit into the square box"
+    },
+    {
+      "name": "portrait picture width at 64 px (rebuild)",
+      "group": "icons view",
+      "value": "48 px for a 3:4 photo, 36 px for a 9:16 photo, inside the same 64 px box",
+      "source": "views::thumb_size; read from the file header by search::probe_image_size"
+    },
+    {
+      "name": "label floor (rebuild)",
+      "group": "icons view",
+      "value": "clamp(icon size x 0.75, 40, 96)",
+      "unit": "px",
+      "source": "views::label_floor; stops a narrow portrait cell from squeezing its name below two or three characters a line"
+    },
+    {
+      "name": "row packing (rebuild)",
+      "group": "icons view",
+      "value": "shelf: items left to right, a new row when the next cell no longer fits, one row height for all",
+      "source": "views::pack_icon_rows"
+    },
+    {
+      "name": "icon cell padding (rebuild)",
+      "group": "icons view",
+      "value": 4,
+      "unit": "px",
+      "source": "views::ICON_CELL_PAD, 4 px on each side of the picture and label"
+    },
+    {
+      "name": "label width in a cell (rebuild)",
+      "group": "icons view",
+      "value": "cell width - 6, wrapped to two lines and shortened with an ellipsis",
+      "unit": "px",
+      "source": "views::draw_icon_cell + views::wrap_label"
+    },
+    {
+      "name": "portrait icons per 1000 px at 64 px (rebuild)",
+      "group": "icons view",
+      "value": 17,
+      "unit": "columns",
+      "source": "views::icon_cell_width and pack_icon_rows, checked by --selftest \"a tall picture gets a tall, narrow cell\""
+    },
+    {
+      "name": "picture shape source (rebuild)",
+      "group": "icons view",
+      "value": "JPEG, PNG, GIF, BMP and WebP headers, read once per file and cached",
+      "source": "search::probe_image_size; a picture whose header cannot be read is treated as square"
+    },
+    {
+      "name": "disk space button hidden when the volume reports no size",
+      "group": "view",
+      "value": true,
+      "source": "FUN_001e6a00 @0x1e6a00: total == 0 falls through to QWidget::hide"
+    },
+    {
+      "name": "used space percent rounding",
+      "group": "view",
+      "value": "(total - free) * 100.0 / total + 0.5, truncated",
+      "source": "FUN_001e6a00 @0x1e6a00"
+    },
+    {
+      "name": "factory icon size, icons view",
+      "group": "view",
+      "value": 32,
+      "unit": "px",
+      "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, IconSize default"
+    },
+    {
+      "name": "factory icon size, compact view",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "CompactModeSettings::CompactModeSettings @0x2af670, IconSize default"
+    },
+    {
+      "name": "factory icon size, details view",
+      "group": "view",
+      "value": 16,
+      "unit": "px",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, IconSize default at +0x2c"
+    },
+    {
+      "name": "factory preview size, icons view",
+      "group": "previews",
+      "value": 64,
+      "unit": "px",
+      "source": "IconsModeSettings::IconsModeSettings @0x2b1ac0, PreviewSize default"
+    },
+    {
+      "name": "factory preview size, compact view",
+      "group": "previews",
+      "value": 48,
+      "unit": "px",
+      "source": "CompactModeSettings::CompactModeSettings @0x2af670, PreviewSize default"
+    },
+    {
+      "name": "factory preview size, details view",
+      "group": "previews",
+      "value": 48,
+      "unit": "px",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, PreviewSize default at +0x30"
+    },
+    {
+      "name": "default zoom with previews off",
+      "group": "view",
+      "value": "2, 0, 0",
+      "source": "DolphinView::updateDefaultZoomLevel @0x27dd60: IconSize 32/16/16 -> zoom 2/0/0"
+    },
+    {
+      "name": "information panel label, several items selected",
+      "group": "view",
+      "value": "%1 items selected, no size, with the dialog-information icon",
+      "source": "FUN_001f76f0 @0x1f76f0 in /usr/bin/dolphin; string 0x12ed75; Baloo::FileMetaDataWidget::setItems cleared then QWidget::hide"
+    },
+    {
+      "name": "details row padding",
+      "group": "view",
+      "value": "20 px left and right",
+      "source": "DetailsModeSettings::DetailsModeSettings @0x2b0f10, LeftPadding/RightPadding"
+    },
+    {
+      "name": "wheel zoom modifier",
+      "group": "view",
+      "value": "Ctrl (Control key held)",
+      "source": "DolphinView::wheelEvent @0x272710, ControlModifier bit test (byte at +0x23 & 4)"
+    },
+    {
+      "name": "wheel units per zoom step",
+      "group": "view",
+      "value": 120,
+      "unit": "1/8-degree wheel units",
+      "source": "DolphinView::wheelEvent @0x272710, threshold 0x78 = 120"
+    },
+    {
+      "name": "wheel zoom step size",
+      "group": "view",
+      "value": 1,
+      "unit": "zoom level",
+      "source": "DolphinView::slotIncreaseZoom @0x284b00 / slotDecreaseZoom @0x284b30: setZoomLevel(level ± 1)"
+    },
+    {
+      "name": "wheel zoom remainder carried between events",
+      "group": "view",
+      "value": true,
+      "source": "DolphinView::wheelEvent @0x272710: after a step it subtracts 0x78 from the stored total instead of clearing it"
+    },
+    {
+      "name": "plain wheel without Ctrl",
+      "group": "view",
+      "value": "scrolls the view, never zooms",
+      "source": "DolphinView::wheelEvent @0x272710 returns without acting when the Control bit is clear"
+    },
+    {
+      "name": "wheel zoom direction",
+      "group": "view",
+      "value": "wheel away from you zooms in",
+      "source": "DolphinView::wheelEvent @0x272710: positive delta reaches +0x78 and calls slotIncreaseZoom"
+    },
+    {
+      "name": "wheel zoom limits",
+      "group": "view",
+      "value": "0 to 16",
+      "unit": "zoom level",
+      "source": "DolphinItemListView::setZoomLevel @0x26dec0 clamps to the pair of bounds at 0x2c31c0"
+    },
+    {
+      "name": "status bar zoom buttons",
+      "group": "view",
+      "value": "- and + step one zoom level each",
+      "source": "KItemListController::increaseZoom @0x1f8c60 emits increaseZoomClicked, wired to DolphinView::slotIncreaseZoom @0x284b00"
+    },
+    {
+      "name": "toolbar row height",
+      "group": "controls",
+      "value": 46,
+      "unit": "px",
+      "source": "live capture of dolphin 26.08.2 toolbar, checks/sort-bar/orig-760.png"
+    },
+    {
+      "name": "toolbar controls keep their width; the location bar takes the rest",
+      "group": "controls",
+      "value": "the location box ends before the right-hand view controls",
+      "source": "live capture of dolphin 26.08.2 toolbar at 760 px, checks/sort-bar/orig-760.png"
+    },
+    {
+      "name": "toolbar control width",
+      "group": "controls",
+      "value": 30,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "location bar minimum width",
+      "group": "controls",
+      "value": 110,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "gap between the location bar and the toolbar controls",
+      "group": "controls",
+      "value": 8,
+      "unit": "px",
+      "estimated": true
+    },
+    {
+      "name": "sort control in the toolbar",
+      "group": "controls",
+      "value": "label \"Sort: Name\" in a wide window, icon only when narrower, hidden before the three words give way; sorting also in the app menu",
+      "source": "app layout rule, changed this round (toolbar_metrics ladder); the original keeps sorting out of the toolbar (capture checks/sort-bar/orig-760.png)"
+    },
+    {
+      "name": "long breadcrumb paths",
+      "group": "controls",
+      "value": "segments drop from the left behind a \"…\"; the current folder stays",
+      "estimated": true
+    },
+    {
+      "name": "shortcut reorder",
+      "group": "shortcuts",
+      "value": "drag a row into the gap between two rows; the gap before the first and the gap after the last are allowed",
+      "source": "KFilePlacesModel::movePlace @0x96220 (Ghidra 0x196220) in libKF6KIOFileWidgets.so.6"
+    },
+    {
+      "name": "shortcut drop position",
+      "group": "shortcuts",
+      "value": "insertion slot: to == from or to == from + 1 is refused, moving down lands at to - 1, moving up at to",
+      "source": "KFilePlacesModel::movePlace @0x96220"
+    },
+    {
+      "name": "shortcut drag stays inside its section",
+      "group": "shortcuts",
+      "value": true,
+      "source": "KFilePlacesModel::movePlace @0x96220, group id at +0x118 clamps the destination"
+    },
+    {
+      "name": "shortcut order storage",
+      "group": "shortcuts",
+      "value": "the order of the bookmarks in the settings; no separate order number",
+      "source": "KFilePlacesModel::movePlace @0x96220 → KBookmarkGroup::moveBookmark"
+    },
+    {
+      "name": "shortcut drop indicator",
+      "group": "shortcuts",
+      "value": "a line drawn in the gap between rows while dragging",
+      "source": "KFilePlacesView::paintEvent @0xadb80 (Ghidra 0x1adb80)"
+    },
+    {
+      "name": "gap chosen under the pointer",
+      "group": "shortcuts",
+      "value": "nearest gap, decided by the row's centre line",
+      "estimated": true
+    },
+    {
+      "name": "shortcut colour choice",
+      "group": "shortcuts",
+      "value": 8,
+      "unit": "colours",
+      "source": "added feature; same palette as the folder colours in app/src/foldercolor.rs"
+    },
+    {
+      "name": "shortcut colour storage",
+      "group": "shortcuts",
+      "value": "the program's settings file, per shortcut path (a panel row has no folder file of its own)",
+      "source": "added feature; the original has no coloured places (only KColorScheme strings in /usr/bin/dolphin)"
+    },
+    {
+      "name": "clearing a shortcut colour",
+      "group": "shortcuts",
+      "value": "\"Normal Colour\" removes the stored entry",
+      "source": "added feature; matches the folder menu's \"Normal Colour\""
+    },
+    {
+      "name": "shortcut colour kept when its row is marked",
+      "group": "shortcuts",
+      "value": true,
+      "source": "person's report 2026-11-06; App::place_icon_colour in app/src/main.rs"
+    },
+    {
+      "name": "marked-row colour lift",
+      "group": "shortcuts",
+      "value": 0.32,
+      "unit": "fraction toward white",
+      "source": "rebuild design choice, theme::SELECTION_LIFT; makes the chosen colour readable on the selection band",
+      "estimated": true
+    },
+    {
+      "name": "marked row with no colour of its own",
+      "group": "shortcuts",
+      "value": "#b8cbd8",
+      "source": "theme::PLACE #96b2c6 lifted by 0.32; measured in app/shots/marked-plain.png"
+    },
+    {
+      "name": "marked row with the Red shortcut colour",
+      "group": "shortcuts",
+      "value": "#d7837e",
+      "source": "palette Red #c44842 lifted by 0.32; measured in app/shots/marked-colour.png"
+    },
+    {
+      "name": "places icon colour in the original",
+      "group": "places",
+      "value": "#fcfcfc, selected and unselected alike",
+      "source": "app/shots/orig-places.png (Dolphin 26.08.2, fresh profile, Home row selected)"
+    },
+    {
+      "name": "location bar resolves dots in a path",
+      "group": "controls",
+      "value": true,
+      "source": "fsutil::tidy_path, called from Pane::load; the original's bar is built from the folder it is in (DolphinView::url @0x173f90)"
+    },
+    {
+      "name": "dot-dot above the root",
+      "group": "controls",
+      "value": "/",
+      "source": "fsutil::tidy_path"
+    },
+    {
+      "name": "virtual locations left as they are",
+      "group": "controls",
+      "value": "trash:/ keeps its spelling",
+      "source": "fsutil::tidy_path"
+    },
+    {
+      "name": "window title",
+      "group": "window",
+      "value": "DolphinCraft - drawn at the left end of the tab strip, before the first tab, and shown by the task switcher; the bar a window manager would draw is gone, because the tab strip is the window's title bar (decorations off, three buttons, drag, double click to maximize, 6 px resize edge)",
+      "source": "asked for by the person; the original declares its own name \"Dolphin\" at 0x12d350 in /usr/bin/dolphin (KAboutData @title)"
+    },
+    {
+      "name": "window app id",
+      "group": "window",
+      "value": "dolphincraft",
+      "source": "follows the asked-for window title (the original's desktop id is dolphin)"
+    },
+    {
+      "name": "name comparison modes",
+      "group": "sorting",
+      "value": "Natural, Alphabetical case insensitive, Alphabetical case sensitive — in that row order",
+      "source": "FUN_001e5750 @0x1e5750 in /usr/bin/dolphin; strings at analysed addresses 0x22eaf2, 0x2372e0, 0x22eafa"
+    },
+    {
+      "name": "default name comparison",
+      "group": "sorting",
+      "value": "Natural",
+      "source": "GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin (main program): ItemEnum \"SortingChoice\" with NaturalSorting/CaseInsensitiveSorting/CaseSensitiveSorting, default index 0"
+    },
+    {
+      "name": "name comparison config key",
+      "group": "sorting",
+      "value": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting",
+      "source": "[General] SortingChoice=NaturalSorting|CaseInsensitiveSorting|CaseSensitiveSorting, GeneralSettings::GeneralSettings @0x2b8630 in /usr/bin/dolphin"
+    },
+    {
+      "name": "status bar capacity bar share",
+      "group": "view",
+      "value": "(total - free) * 100.0 / total + 0.5, truncated — same value as the tooltip",
+      "source": "FUN_001e6a00 @0x1e6a00, KCapacityBar::setValue(iVar4)"
+    },
+    {
+      "name": "icons view maximum width steps",
+      "group": "icons view",
+      "value": "Unlimited, Small, Medium, Large (TextWidthIndex 0..3, factory 1)",
+      "source": "FUN_001dcdb0 @0x1dcdb0 (@item:inlistbox Maximum width); IconsModeSettings ctor @0x2b1ac0 TextWidthIndex default 1"
+    },
+    {
+      "name": "details view click-to-open rows",
+      "group": "view",
+      "value": "By clicking anywhere on the row / By clicking on icon or name",
+      "source": "FUN_001dcdb0 @0x1dcdb0 (@option:radio how files/folders are opened)"
+    },
+    {
+      "name": "panel widths",
+      "group": "view",
+      "value": "remembered from the splitter, not fixed in the code",
+      "source": "QSplitter::setSizes call sites 0x90e2a, 0x927f3, 0x94673, 0x986eb in /usr/bin/dolphin (saved config or live widths)"
+    },
+    {
+      "name": "folder size display in the list",
+      "group": "sorting",
+      "value": "the number of items in the folder (no recursive size)",
+      "unit": "enum 0 = ContentCount",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70 in /usr/bin/dolphin, ItemEnum DirectorySizeMode default 0"
+    },
+    {
+      "name": "folder size mode options",
+      "group": "sorting",
+      "value": "0 Show number of items, 1 Show size of contents up to N, 2 Show no size",
+      "source": "FUN_001e5750 @0x1e5750 builds the three radios (strings 0x22eb26, 0x22eb3b, 0x22eb59); FUN_001e7af0 @0x1e7af0 stores DirectorySizeMode 0/1/2"
+    },
+    {
+      "name": "recursive directory size limit",
+      "group": "sorting",
+      "value": 10,
+      "unit": "items",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemUInt RecursiveDirectorySizeLimit default 10"
+    },
+    {
+      "name": "relative dates in the information panel",
+      "group": "details",
+      "value": true,
+      "unit": "bool",
+      "source": "ContentDisplaySettings::ContentDisplaySettings @0x2b2b70, ItemBool UseShortRelativeDates default true"
+    },
+    {
+      "name": "sort tie-break",
+      "group": "sorting",
+      "value": "the chosen name comparison, for every sort key",
+      "source": "one SortingChoice (FUN_001e5750 @0x1e5750, saved by FUN_001e7af0 @0x1e7af0) governs name order everywhere; state::sort_entries"
+    },
+    {
+      "name": "thumbnail size minimum",
+      "group": "picture wall",
+      "value": 50,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider min=50"
+    },
+    {
+      "name": "thumbnail size maximum",
+      "group": "picture wall",
+      "value": 400,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider max=400"
+    },
+    {
+      "name": "thumbnail size at first",
+      "group": "picture wall",
+      "value": 200,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider value=200"
+    },
+    {
+      "name": "thumbnail size slider step",
+      "group": "picture wall",
+      "value": 1,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #sizeSlider (range input, whole pixels)"
+    },
+    {
+      "name": "picture wall gap between cards",
+      "group": "picture wall",
+      "value": 12,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), static/css/browser.css .images { gap: 12px }"
+    },
+    {
+      "name": "picture wall padding inside a card",
+      "group": "picture wall",
+      "value": 0,
+      "unit": "px",
+      "source": "this build after the person asked for no wasted bands: the frame is the picture's own shape, so the image browser's 8 px card padding (static/css/browser.css .image { padding: 8px }) is dropped; the 12 px gap between pictures is kept"
+    },
+    {
+      "name": "picture corner radius",
+      "group": "picture wall",
+      "value": 10,
+      "unit": "px",
+      "source": "the person's image browser (image-browser-styled), static/css/browser.css .image img { border-radius: 10px }"
+    },
+    {
+      "name": "dimension caption format",
+      "group": "picture wall",
+      "value": "W×H:AR a.bc:MP d.dd",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html line 203 (the show_dims block)"
+    },
+    {
+      "name": "caption text size under a picture",
+      "group": "picture wall",
+      "value": 12,
+      "unit": "px",
+      "source": "the person's request (2026-11-07): the size line is drawn the same as the file name; app/src/gallery.rs CAPTION_SIZE, the constant the name itself uses"
+    },
+    {
+      "name": "caption colour under a picture",
+      "group": "picture wall",
+      "value": "#EFF0F1 (white when marked)",
+      "unit": "text",
+      "source": "the person's request (2026-11-07): same colour as the file names; app/src/gallery.rs caption_colour -> theme::TEXT, lifted to white on a selected cell exactly as the name is"
+    },
+    {
+      "name": "caption line step under a picture",
+      "group": "picture wall",
+      "value": 17,
+      "unit": "px",
+      "source": "app/src/gallery.rs CAPTION_STEP: one line plus leading, used for the name and the size line alike, and the room the wall reserves per line (gallery::caption_height)"
+    },
+    {
+      "name": "original's largest preview box",
+      "group": "picture wall",
+      "value": 256,
+      "unit": "px",
+      "source": "decompiled original: ZoomLevelInfo::maximumLevel() @0x2a6370 returns 16, ZoomLevelInfo::iconSizeForZoomLevel(int) @0x2a6380 returns level*16 above 4, so 16..256 px; the 400 px ceiling is the browser's, not the original's"
+    },
+    {
+      "name": "slideshow interval at first",
+      "group": "slideshow",
+      "value": 1.5,
+      "unit": "s",
+      "source": "the person's request (2026-11-07): a show starts at 1.5 s; the image browser's own templates/browser.html #slide-interval starts at 1 s"
+    },
+    {
+      "name": "slideshow interval step",
+      "group": "slideshow",
+      "value": 0.5,
+      "unit": "s",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #slide-interval step=0.5"
+    },
+    {
+      "name": "slideshow interval range",
+      "group": "slideshow",
+      "value": "0.5..30",
+      "unit": "s",
+      "source": "the person's image browser (image-browser-styled), #slide-interval min=0.5; upper limit 30 s chosen in this build"
+    },
+    {
+      "name": "slideshow fade length",
+      "group": "slideshow",
+      "value": 300,
+      "unit": "ms",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js startSlideshow: setTimeout(..., 300)"
+    },
+    {
+      "name": "slideshow fade on by default",
+      "group": "slideshow",
+      "value": true,
+      "unit": "bool",
+      "source": "the person's image browser (image-browser-styled), the fade is unconditional in startSlideshow; this build makes it a switch that starts on"
+    },
+    {
+      "name": "comparison modes",
+      "group": "comparison",
+      "value": "side, split, overlay",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), #compare-modal toolbar"
+    },
+    {
+      "name": "comparison overlay opacity at first",
+      "group": "comparison",
+      "value": 50,
+      "unit": "%",
+      "source": "the person's image browser (image-browser-styled), templates/browser.html #compareOpacitySlider value=50"
+    },
+    {
+      "name": "comparison zoom range",
+      "group": "comparison",
+      "value": "0.1..20",
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js stepCompareZoom clamp"
+    },
+    {
+      "name": "comparison zoom button step",
+      "group": "comparison",
+      "value": 1.25,
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js compareZoomIn / compareZoomOut"
+    },
+    {
+      "name": "comparison wheel zoom",
+      "group": "comparison",
+      "value": "1.1 in, 0.9 out",
+      "unit": "x",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js initCompareZoomWheel"
+    },
+    {
+      "name": "prompt fields read from a picture",
+      "group": "prompt",
+      "value": "steps, sampler, cfg scale, seed, size, model, denoising strength, prompt, negative prompt",
+      "unit": "text",
+      "source": "PNG tEXt 'parameters' chunk and JPEG Exif UserComment, as written by Stable Diffusion / ComfyUI / A1111; parsed by the rebuild, no original-counterpart in Dolphin"
+    },
+    {
+      "name": "zoom ladder top level (added)",
+      "group": "icons view",
+      "value": 25,
+      "unit": "level",
+      "source": "continuation of ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 (level*16) past ZoomLevelInfo::maximumLevel @0x2a6370, which returns 16"
+    },
+    {
+      "name": "icon size at zoom 25 (added)",
+      "group": "icons view",
+      "value": 400,
+      "unit": "px",
+      "source": "ZoomLevelInfo::iconSizeForZoomLevel @0x2a6380 formula at level 25"
+    },
+    {
+      "name": "largest thumbnail in the file views (added)",
+      "group": "icons view",
+      "value": 400,
+      "unit": "px",
+      "source": "theme::MAX_ICON_PX; the original clamps DolphinItemListView::setZoomLevel @0x26dec0 to 0..=16 (256 px)"
+    },
+    {
+      "name": "picture corner radius in the file views",
+      "group": "icons view",
+      "value": "clamp(icon size x 0.035, 3, 10)",
+      "unit": "px",
+      "source": "views::picture_radius; 10 px is the picture wall's PICTURE_CORNER (browser CSS .image img border-radius 10px)"
+    },
+    {
+      "name": "picture switches in the file view",
+      "group": "icons view",
+      "value": "Names, Dimensions, Rounded, Previews",
+      "source": "person's report 2026-11-07; the same pane fields the picture wall uses, drawn in a row above the icon grid and in the app menu's Pictures submenu"
+    },
+    {
+      "name": "picture wall row packing",
+      "group": "picture wall",
+      "value": "shelf — every picture is exactly the height on the slider; a row takes pictures until the next no longer fits, so rows keep one size and only the right edge is ragged",
+      "unit": "text",
+      "source": "this build, after the person reported that the last row alone looked 400 px tall while the rows above it did not: the old packer justified every row to the window width, so a full row came out at 380-390 px and a short last row stayed at the 400 px on the slider; gallery.rs wall_rows"
+    },
+    {
+      "name": "picture wall row height",
+      "group": "picture wall",
+      "value": "the slider's 50..400 px on every row, the last one included",
+      "unit": "px",
+      "source": "this build, asked for by the person; slider range unchanged from templates/browser.html #sizeSlider, applied as one height for all rows in gallery.rs wall_rows"
+    },
+    {
+      "name": "picture wall shape range",
+      "group": "picture wall",
+      "value": "1:5 .. 6:1",
+      "unit": "text",
+      "source": "this build: a damaged header or a stitched panorama cannot take a whole row; since the wall holds pictures only (2026-11-07), a folder no longer has a square cell of its own"
+    },
+    {
+      "name": "prompt box height",
+      "group": "prompt",
+      "value": 150,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs, cap passed by gallery.rs prompt_panel; the original has no prompt reader"
+    },
+    {
+      "name": "negative prompt box height",
+      "group": "prompt",
+      "value": 96,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs via gallery.rs prompt_panel"
+    },
+    {
+      "name": "prompt text font size",
+      "group": "prompt",
+      "value": 11.5,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs, proportional 11.5 px to match the information panel's body text"
+    },
+    {
+      "name": "prompt drag auto-scroll edge",
+      "group": "prompt",
+      "value": 12,
+      "unit": "px",
+      "source": "added feature (this rebuild): app/src/selectable.rs EDGE — a drag this close to the top or bottom edge scrolls the box"
+    },
+    {
+      "name": "prompt drag auto-scroll speed",
+      "group": "prompt",
+      "value": 10,
+      "unit": "px per frame",
+      "source": "added feature (this rebuild): app/src/selectable.rs AUTO_SCROLL_STEP, about 600 px/s at 60 Hz"
+    },
+    {
+      "name": "prompt box height snaps to whole text rows",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): app/src/selectable.rs, height = padding + rows x line height, paint clipped above the bottom padding"
+    },
+    {
+      "name": "prompt selection survives the wheel",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): the selection lives in egui's temporary store keyed by the block id, so scrolling does not clear it"
+    },
+    {
+      "name": "prompt shift-click extends the selection",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): app/src/selectable.rs, a press with Shift held keeps the existing anchor"
+    },
+    {
+      "name": "prompt selection keys",
+      "group": "prompt",
+      "value": "Ctrl+A select all, Ctrl+C copy, Esc clear, double-click a word, right-click Select all / Copy selection",
+      "unit": "text",
+      "source": "added feature (this rebuild): app/src/selectable.rs, active only while the block has the focus"
+    },
+    {
+      "name": "prompt option row wraps in a narrow column",
+      "group": "prompt",
+      "value": true,
+      "source": "added feature (this rebuild): gallery.rs prompt_panel lays the four options out with horizontal_wrapped, so Select all / Copy prompt / Copy all / Save move to a second line instead of being clipped"
+    },
+    {
+      "name": "prompt area folds away",
+      "group": "prompt",
+      "value": true,
+      "source": "this build, asked for by the person (\"the prompt area should be collapsable as it is not always needed\"): one click on the block's title row folds it, the choice is kept in the settings"
+    },
+    {
+      "name": "prompt area title row height",
+      "group": "prompt",
+      "value": 22,
+      "unit": "px",
+      "source": "this build: the whole row is one hit target, with a fold arrow that points down while open and right while folded (gallery.rs PROMPT_HEADER_H)"
+    },
+    {
+      "name": "prompt area folded state shows",
+      "group": "prompt",
+      "value": "the title row and one elided line of the prompt",
+      "unit": "text",
+      "source": "this build: so a folded block still says what it holds without taking the panel over"
+    },
+    {
+      "name": "prompt area key in the viewer",
+      "group": "prompt",
+      "value": "P (only while the picture details are showing)",
+      "unit": "text",
+      "source": "this build: the same switch as the fold arrow, next to I for the details panel"
+    },
+    {
+      "name": "comparison sync rule",
+      "group": "comparison",
+      "value": "side mode follows its Sync switch; split and overlay are always locked together",
+      "unit": "text",
+      "source": "the person's image browser (image-browser-styled), static/js/browser.js isCompareSynced / applyCompareTransform"
+    },
+    {
+      "name": "comparison zoom read-out",
+      "group": "comparison",
+      "value": "one percentage when synced, \"A% / B%\" when side mode is not",
+      "unit": "text",
+      "source": "static/js/browser.js updateCompareZoomLabel"
+    },
+    {
+      "name": "comparison zoom anchor",
+      "group": "comparison",
+      "value": "the point under the pointer stays under it, measured from the middle of the pane the pointer is over",
+      "unit": "text",
+      "source": "this build; the browser's stepCompareZoom has no anchor, which is why its own zoom drifted — the person reported the drift"
+    },
+    {
+      "name": "comparison wheel events per notch",
+      "group": "comparison",
+      "value": 2,
+      "unit": "events",
+      "source": "measured in the running window: one xdotool wheel notch reaches the app as a line event for the press and one for the release, 7 ms apart (app/shots/cmp debug log)"
+    },
+    {
+      "name": "comparison duplicate-notch window",
+      "group": "comparison",
+      "value": 0.02,
+      "unit": "s",
+      "source": "this build, estimated: a second line event of the same sign inside 20 ms is the other half of the same notch"
+    },
+    {
+      "name": "comparison pan limit",
+      "group": "comparison",
+      "value": "the picture stops when its own edge meets the pane edge; it does not move at all while it still fits",
+      "estimated": true,
+      "source": "this build; the browser translates freely and can lose a picture off its pane"
+    },
+    {
+      "name": "comparison paint clipping",
+      "group": "comparison",
+      "value": "each picture is clipped to its own pane",
+      "unit": "text",
+      "source": "this build; without it a zoomed right-hand picture covered the whole window (app/shots/cmp/before/01-wheel-right.png)"
+    },
+    {
+      "name": "three toolbar buttons",
+      "group": "toolbar",
+      "value": "Find narrows the list, Open in chooses where the picked item opens, Menu holds the app's own settings and tools",
+      "source": "this build, the person's question; each word on the button, plus the card on F1"
+    },
+    {
+      "name": "menu button opens on",
+      "group": "toolbar",
+      "value": "an ordinary left click",
+      "source": "this build: egui Popup::menu; the previous right-click-only popup (Response::context_menu) left the button dead to a click"
+    },
+    {
+      "name": "find narrows the listing",
+      "group": "toolbar",
+      "value": true,
+      "source": "this build: Pane::refilter from the find bar's change event and at startup; --selftest types ap into a 4-item folder and gets 3, then 4 again after closing"
+    },
+    {
+      "name": "find bar scopes",
+      "group": "toolbar",
+      "value": "This folder: narrow as you type; In subfolders: look through every folder below",
+      "source": "the original's Toggle Search Bar tooltip (string 0x12d7de, action at 0x67fc8) and its separate FilterBar setting"
+    },
+    {
+      "name": "original keeps a filter bar apart from its search bar",
+      "group": "toolbar",
+      "value": true,
+      "source": "GeneralSettings::GeneralSettings: FilterBar bool at this+0x82, default false, string FilterBar @0x002c0a90 referenced at 0x2b8853 and 0x2b8886; Remove Filter @0x12e119 used at 0xbcaef"
+    },
+    {
+      "name": "open in destinations",
+      "group": "toolbar",
+      "value": "a new tab, a new window, the other pane, a terminal",
+      "source": "the original's Open in New Tab / New Window / Split View strings at 0x12da05, 0x12da26, 0x12da39 (actions at 0x6bf86, 0x6c286, 0x6c40a); the other pane and the terminal are this build's additions"
+    },
+    {
+      "name": "toolbar words give way",
+      "group": "toolbar",
+      "value": "after the sort key's name and the sort button, at about 500 px of window width",
+      "source": "this build: toolbar_metrics ladder, held for every width from 360 to 1600 px by --selftest"
+    },
+    {
+      "name": "three-button card",
+      "group": "toolbar",
+      "value": "removed at the person's request: the Menu row, F1 and --guide are gone with it",
+      "source": "this build: the guide_dialog and its row were deleted; the app menu now ends on Sort by"
+    },
+    {
+      "name": "details panel open when a picture opens",
+      "group": "picture viewer",
+      "value": false,
+      "source": "the person's request (2026-11-07): \"the picture details panel should be closed by default\"; app/src/gallery.rs Viewer::new / sync_meta. This viewer is this build's own addition, so there is no original counterpart to read"
+    },
+    {
+      "name": "ways to open the details panel",
+      "group": "picture viewer",
+      "value": "info button in the viewer bar, I, P",
+      "source": "app/src/gallery.rs: bar_button(\"info\"), Key::I, Key::P (P opens the panel, then folds the prompt inside it)"
+    },
+    {
+      "name": "details panel state when paging",
+      "group": "picture viewer",
+      "value": "kept as the person left it",
+      "source": "app/src/gallery.rs (nothing in Viewer::step or sync_meta touches show_info)"
+    },
+    {
+      "name": "PNG pixel size read",
+      "group": "picture viewer",
+      "value": "chunk list walked to IHDR, up to 64 chunks",
+      "source": "app/src/search.rs png_size, written from the PNG chunk layout; the old fixed offset printed 1885434465 x 1835365477 on testdata/long-prompt.png (app/shots/details-closed.png)"
+    },
+    {
+      "name": "message for a picture the decoder refuses",
+      "group": "picture viewer",
+      "value": "This file could not be opened as a picture",
+      "source": "app/src/gallery.rs BigCache::has_failed; before, such a file said Loading picture... for ever (app/shots/details-closed4.png)"
+    },
+    {
+      "name": "ask before moving to the Trash",
+      "group": "files",
+      "value": false,
+      "source": "ConfirmTrash @0x21e8f0 read with default 0 at 0x1a7a3d (kio 6.31.0); page default byte 0x243f02 = 0; ships off here too, and the person asked for no question on Delete"
+    },
+    {
+      "name": "ask before deleting permanently",
+      "group": "files",
+      "value": true,
+      "source": "ConfirmDelete @0x21e8d4 read with default 1 at 0x1a7a31 (kio 6.31.0); page default byte 0x243f00 = 1"
+    },
+    {
+      "name": "ask before emptying the Trash",
+      "group": "files",
+      "value": true,
+      "source": "ConfirmEmptyTrash; kept on here because nothing can be brought back from it"
+    },
+    {
+      "name": "undo offer after a delete",
+      "group": "controls",
+      "value": "Undo button in the toast, 8 s on screen",
+      "source": "this build's own replacement for the question; the original's Undo action says 'This undoes the last change you made to files or folders' (string in /usr/bin/dolphin)"
+    },
+    {
+      "name": "undo key",
+      "group": "controls",
+      "value": "Ctrl+Z",
+      "source": "the original's Edit > Undo action ('This undoes the last change you made to files or folders')"
+    },
+    {
+      "name": "sort by menu shape",
+      "group": "sorting",
+      "value": "sort keys (radio) - separator - Ascending / Descending (radio) - separator - Folders First",
+      "source": "DolphinViewActionHandler::createActions @0x28e380 in libdolphinprivate.so.6: KActionMenu \"Sort By\" (@action:inmenu View, icon view-sort), the role action group, addSeparator, the exclusive ascending/descending pair, then the folders_first toggle"
+    },
+    {
+      "name": "choosing a sort key reverses nothing",
+      "group": "sorting",
+      "value": true,
+      "source": "DolphinViewActionHandler::slotSortTriggered @0x291f30 only sets the ticked action and calls DolphinView::setSortRole; the order changes only through the Ascending / Descending actions"
+    },
+    {
+      "name": "sort direction for a new key",
+      "group": "sorting",
+      "value": "the direction last chosen for that key, otherwise the key's own default",
+      "source": "DolphinView::setSortRole @0x2716d0 asks preferredSortOrder @0x2859a0, which reads the per-role hash at DolphinView+0x130 and falls back to defaultSortOrderForRole @0x273910"
+    },
+    {
+      "name": "keys that start descending",
+      "group": "sorting",
+      "value": "modificationtime, creationtime, accesstime, deletiontime, imageDateTime, releaseYear, size, width, height, pageCount, wordCount, lineCount, rating, duration, bitrate",
+      "source": "DolphinView::defaultSortOrderForRole @0x273910 builds a static set from the 16 pointers at 0x2f3960 (0x2f3960..0x2f39e0); membership means Qt::DescendingOrder"
+    },
+    {
+      "name": "keys that start ascending",
+      "group": "sorting",
+      "value": "every other role, including name, type, permissions, owner, group, path, tags, comment",
+      "source": "DolphinView::defaultSortOrderForRole @0x273910 returns false for roles outside the table at 0x2f3960"
+    },
+    {
+      "name": "direction is remembered per key",
+      "group": "sorting",
+      "value": true,
+      "source": "DolphinViewActionHandler::slotSortOrderChanged @0x292640 calls DolphinView::setPreferredSortOrder with the current role; preferredSortOrder @0x2859a0 reads that per-role hash first"
+    },
+    {
+      "name": "where folders first is stored",
+      "group": "sorting",
+      "value": "per folder, in that folder's view properties",
+      "source": "DolphinView::updateSortFoldersFirst @0x27d7c0: ViewProperties::setSortFoldersFirst for the current URL, then KFileItemModel::setSortDirectoriesFirst"
+    },
+    {
+      "name": "name comparison wiring",
+      "group": "sorting",
+      "value": "Natural = natural compare on, case-insensitive; Alphabetical case insensitive = plain compare, case-insensitive; Alphabetical case sensitive = plain compare, case-sensitive",
+      "source": "KFileItemModel::loadSortingSettings @0x194e20: SortingChoice 1 sets the natural flag to 0 and QCollator case sensitivity to 0, 2 sets it to 0 and 1, 0 (Natural) sets the flag to 1 and case sensitivity to 0"
+    },
+    {
+      "name": "what the picture wall holds",
+      "group": "picture wall",
+      "value": "pictures only; sub-folders and documents are not drawn",
+      "source": "the person's request (2026-11-07): \"in the Pictures - thumbnails of this folder view only pictures should be displayed\"; app/src/state.rs Pane::shown_indices used by app/src/gallery.rs ui_pictures"
+    },
+    {
+      "name": "how a preview decides what a file is",
+      "group": "picture wall",
+      "value": "by the file's own bytes (with_guessed_format), not by its extension",
+      "source": "app/src/fsutil.rs decode_picture; a PNG named .jpg was refused by image::open with \"Illegal start bytes\" and the folder showed no thumbnails"
+    },
+    {
+      "name": "the wall's sub-folders switch",
+      "group": "picture wall",
+      "value": "walks the folder and everything below it, pictures only, in batches; off restores the folder's own listing",
+      "source": "app/src/state.rs Pane::set_pictures_below + SearchFilters::pictures_only; Pane::visible/shown_indices read display_entries so the walk's results are the list the wall draws"
+    },
+    {
+      "name": "what counts as a picture on the wall",
+      "group": "picture wall",
+      "value": "png, jpg, jpeg, gif, bmp, webp, tif, tiff, svg, ico, heic, avif, xpm, ppm (file-name extension)",
+      "source": "app/src/fsutil.rs kind_for, the same list the previews, viewer and slideshow use"
+    },
+    {
+      "name": "what Ctrl+A and the arrow keys reach on the wall",
+      "group": "picture wall",
+      "value": "the pictures on screen only",
+      "source": "app/src/state.rs Pane::shown_indices via select_all and select_range, app/src/main.rs App::move_cursor; Pane::set_pictures drops marks the wall does not show"
+    },
+    {
+      "name": "view modes in the original",
+      "group": "view",
+      "value": "Icons, Compact, Details",
+      "source": "strings ViewModeController and DolphinView::setViewMode @0x2710c0 (stores the mode at this+0x58, then ViewProperties::setViewMode); no fourth, picture-only mode exists in the original"
+    },
+    {
+      "name": "preferred program row",
+      "group": "open with",
+      "value": "Open with <name>",
+      "source": "'Open &with %1' @0x11c258 in libKF6KIOWidgets.so.6.31.0, loaded at 0x64d34"
+    },
+    {
+      "name": "submenu row",
+      "group": "open with",
+      "value": "Open With",
+      "source": "'&Open With' @0x11c24a, loaded at 0x64b5e"
+    },
+    {
+      "name": "chooser's last row",
+      "group": "open with",
+      "value": "Other Application…",
+      "source": "'&Other Application' @0x11c387, loaded at 0x6e028"
+    },
+    {
+      "name": "remember tick box",
+      "group": "open with",
+      "value": "Remember this choice for all files of type \"%1\" (%2)",
+      "source": "'&Remember application association for all files of type' @0x120210, drawn by the function at 0x834c0"
+    },
+    {
+      "name": "where a remembered choice is stored",
+      "group": "open with",
+      "value": "[Default Applications] in $XDG_CONFIG_HOME/mimeapps.list",
+      "source": "the original's dialog writes the same file (function 0x834c0 next to the tick box); row layout from the freedesktop mime-apps specification"
+    },
+    {
+      "name": "programs listed in the submenu",
+      "group": "open with",
+      "value": "those whose MimeType= names the file's type",
+      "source": "read from the .desktop entries under $XDG_DATA_DIRS/applications; submenu texts from function 0x646d0"
+    },
+    {
+      "name": "submenu rows shown",
+      "group": "open with",
+      "value": 12,
+      "unit": "rows",
+      "estimated": true
+    },
+    {
+      "name": "chooser order",
+      "group": "open with",
+      "value": "programs that claim the type first, then the rest, each by name",
+      "source": "the original's chooser lists the type's own programs first (window from function 0x6d980); name order inside each half is this build's own arrangement"
+    },
+    {
+      "name": "chooser starts on",
+      "group": "open with",
+      "value": "the desktop's preferred program for the type",
+      "source": "mimeapps.list [Default Applications], the same row the menu's first line names"
+    },
+    {
+      "name": "type of a file whose name says nothing",
+      "group": "open with",
+      "value": "text/plain when its first 1024 bytes are text",
+      "estimated": true
+    },
+    {
+      "name": "text sniff window",
+      "group": "open with",
+      "value": 1024,
+      "unit": "bytes",
+      "estimated": true
+    },
+    {
+      "name": "field codes filled",
+      "group": "open with",
+      "value": "%f %F %u %U %i %c %k %%",
+      "source": "the desktop-entry specification's Exec key, which the original's launch path follows (function 0x646d0 hands the row to KIO)"
+    },
+    {
+      "name": "confirm before emptying the Trash",
+      "group": "files",
+      "value": true,
+      "source": "ConfirmEmptyTrash @0x21f2a8 read with default 1 in askUserDelete @0x1a7980 (kio 6.31.0); page default byte 0x243f01 = 1"
+    },
+    {
+      "name": "the Trash question",
+      "group": "files",
+      "value": "Do you really want to move this item to the Trash? + <filename>%1</filename>",
+      "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20 (libKF6KIOWidgets.so.6.31.0)"
+    },
+    {
+      "name": "the permanent-delete question",
+      "group": "files",
+      "value": "Do you really want to permanently delete this item? + name + This action cannot be undone.",
+      "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; <emphasis strong='true'> around the warning"
+    },
+    {
+      "name": "the three continue buttons",
+      "group": "files",
+      "value": "Move to Trash / Delete Permanently / Empty Trash",
+      "source": "KIO::JobUiDelegate::askDeleteConfirmation @0x1a8a20; 'Move to Trash' at 0x21e94c, the other two as literals in the same function"
+    },
+    {
+      "name": "delete inside the Trash",
+      "group": "files",
+      "value": "a Trash request from a trash: URL becomes a permanent delete",
+      "source": "KIO::DeleteOrTrashJob::DeleteOrTrashJob @0x1b0fa0 (kio 6.31.0): scheme \"trash\" rewrites type 1 to 0"
+    },
+    {
+      "name": "row-button caption width",
+      "group": "view",
+      "value": "20 x averageCharWidth, then elided",
+      "unit": "px",
+      "source": "FUN_001c81f0 @0x1c81f0 in /usr/bin/dolphin (imul ...,0x14 before QFontMetrics::averageCharWidth)"
+    },
+    {
+      "name": "row-button captions",
+      "group": "view",
+      "value": "Move %2 to the Trash / Permanently Delete %2 / Copy %2 to the Clipboard / Cut %2 to the Clipboard / Duplicate %2 / Rename %2",
+      "source": "FUN_001c81f0 @0x1c81f0; strings 0x22e3e6, 0x22e3b1"
+    },
+    {
+      "name": "recent group heading, original",
+      "group": "recent",
+      "value": "Recent",
+      "source": "sidebar capture rea/orig-default.png: Places, Remote, Recent, Devices"
+    },
+    {
+      "name": "recent row, original",
+      "group": "recent",
+      "value": "Recent Files",
+      "source": "that capture's Recent group, top row (document-with-clock icon)"
+    },
+    {
+      "name": "recent row, original (second)",
+      "group": "recent",
+      "value": "Recent Locations",
+      "source": "same capture, second row (folder-with-clock icon, drawn cut off as 'Recent Locatio...')"
+    },
+    {
+      "name": "empty recent group",
+      "group": "recent",
+      "value": "No recently used items",
+      "source": "'No recently used items' @0x1bf937 in libdolphinprivate.so.6, beside 0x1bf92a 'recentlyused'"
+    },
+    {
+      "name": "where recent files come from",
+      "group": "recent",
+      "value": "~/.local/share/recently-used.xbel",
+      "source": "the freedesktop list KRecentDocument maintains and the kio recentlyused: worker reads"
+    },
+    {
+      "name": "recent files order",
+      "group": "recent",
+      "value": "visited stamp, newest first",
+      "source": "the xbel's own visited attribute, the stamp the recentlyused: worker sorts by; not the file's modification date"
+    },
+    {
+      "name": "recent files shown",
+      "group": "recent",
+      "value": 8,
+      "unit": "rows",
+      "source": "this build's own limit (the original's row opens a full scrolling view); recent_rows() in src/config.rs"
+    },
+    {
+      "name": "recent locations kept",
+      "group": "recent",
+      "value": 6,
+      "unit": "folders",
+      "source": "this build's own limit; RECENT_LOCATIONS_MAX in src/main.rs"
+    },
+    {
+      "name": "folders in recent files",
+      "group": "recent",
+      "value": false,
+      "source": "the list holds files only; a folder bookmark belongs to Recent Locations"
+    },
+    {
+      "name": "recent heading folds",
+      "group": "recent",
+      "value": true,
+      "source": "this build's arrangement: one click folds a group, the count stays on the heading"
+    },
+    {
+      "name": "recent groups drawn",
+      "group": "recent",
+      "value": "two folding headings (original: one Recent heading with two rows)",
+      "source": "this build's arrangement, see MECHANICS.md 'The places panel's recent groups'"
+    },
+    {
+      "name": "toolbar open button",
+      "group": "toolbar",
+      "value": "none - double-click, Enter, Open / Open With",
+      "source": "this build: the Open in button and its four-row menu were removed as duplicates"
+    },
+    {
+      "name": "app menu height",
+      "group": "toolbar",
+      "value": "capped to the window, scrolls",
+      "source": "this build: the last rows fell below an unmaximised window's edge"
+    },
+    {
+      "name": "remote group heading, original",
+      "group": "network",
+      "value": "Remote",
+      "source": "sidebar capture rea/orig-default.png, between Places and Recent"
+    },
+    {
+      "name": "network row, original",
+      "group": "network",
+      "value": "Network",
+      "source": "that capture's Remote group; the row opens the original's network:/ worker"
+    },
+    {
+      "name": "empty network group",
+      "group": "network",
+      "value": "No shared folders found",
+      "source": "'No shared folders found' @0x1bf952 in libdolphinprivate.so.6, beside 0x1bf96a 'network'"
+    },
+    {
+      "name": "where network folders come from",
+      "group": "network",
+      "value": "/proc/mounts network types + /run/user/<uid>/gvfs",
+      "source": "this build: the desktop's own mounts; the original browses network:/ through KIO instead"
+    },
+    {
+      "name": "network filesystem types",
+      "group": "network",
+      "value": "cifs, smbfs, nfs, nfs4, afs, 9p, davfs, davfs2, fuse.sshfs, fuse.rclone, fuse.s3fs, fuse.davfs2",
+      "source": "this build's list, from the Linux mount table"
+    },
+    {
+      "name": "network row label",
+      "group": "network",
+      "value": "the share for an SMB mount, else the last part of the mount point",
+      "source": "this build; e.g. //router/media shows as media"
+    },
+    {
+      "name": "details view side padding (rebuild)",
+      "group": "details",
+      "value": 20,
+      "unit": "px",
+      "source": "app/src/theme.rs DETAILS_SIDE_PAD = 20.0, used by views::Pane::details_columns; original: DetailsModeSettings::DetailsModeSettings @0x2b0f10 sets LeftPadding/RightPadding to 0x14, read by KItemListView::setSidePadding"
+    },
+    {
+      "name": "slider in a one-row strip",
+      "group": "status bar",
+      "value": 18,
+      "unit": "px",
+      "source": "app/src/theme.rs strip_slider: interact_size.y 12 and HandleShape::Circle, so the knob is height/2.5 = 14.2 px; used by the picture strip, the gallery bar and the status bar"
+    },
+    {
+      "name": "slider knob size",
+      "group": "status bar",
+      "value": 14.2,
+      "unit": "px",
+      "source": "egui 0.33 Slider::handle_radius = rect.height() / 2.5, with the 18 px row strip_slider gives it"
+    },
+    {
+      "name": "disk usage window title",
+      "group": "disk usage",
+      "value": "Manage Disk Space Usage",
+      "source": "action label 0x22d931 in /usr/bin/dolphin (manage_disk_space, icon filelight)"
+    },
+    {
+      "name": "disk space submenu builder",
+      "group": "disk usage",
+      "value": "FUN_001e8430 @0x1e8430",
+      "source": "DiskSpaceUsageMenu::aboutToShow in /usr/bin/dolphin: launches org.kde.filelight or offers to install it"
+    },
+    {
+      "name": "free up disk space row",
+      "group": "disk usage",
+      "value": "Free Up Disk Space",
+      "source": "string 0x22ec97 in /usr/bin/dolphin"
+    },
+    {
+      "name": "free space tooltip second line",
+      "group": "disk usage",
+      "value": "Press to manage disk space usage.",
+      "source": "string 0x237458 (0x137465) in /usr/bin/dolphin"
+    },
+    {
+      "name": "disk usage counts hidden files",
+      "group": "disk usage",
+      "value": true,
+      "source": "added: a total that skipped .cache would be wrong"
+    },
+    {
+      "name": "disk usage follows symbolic links",
+      "group": "disk usage",
+      "value": false,
+      "source": "added: a link is counted at its own entry size, never followed"
+    },
+    {
+      "name": "disk usage share rounding",
+      "group": "disk usage",
+      "value": "half up",
+      "source": "FUN_001e6a00 @0x1e6a00, the formula fsutil::used_percent also uses"
+    },
+    {
+      "name": "disk usage largest files kept",
+      "group": "disk usage",
+      "value": 40,
+      "estimated": true,
+      "source": "estimated: a free-up shortlist, not an inventory"
+    },
+    {
+      "name": "disk usage window size",
+      "group": "disk usage",
+      "value": "720x590",
+      "estimated": true
+    },
+    {
+      "name": "archive format written",
+      "group": "archives",
+      "value": "ZIP",
+      "source": "added: the zip program the desktop already has"
+    },
+    {
+      "name": "archive name for several items",
+      "group": "archives",
+      "value": "Archive.zip",
+      "source": "default name of a multi-file archive, compressfileitemaction.so (Ark plugin)"
+    },
+    {
+      "name": "archive name for one folder",
+      "group": "archives",
+      "value": "folder name + .zip",
+      "source": "Ark's Compress to \"%1\" wording (compressfileitemaction.so); added here"
+    },
+    {
+      "name": "archive name when already there",
+      "group": "archives",
+      "value": "photos (1).zip",
+      "source": "added: a second archive of the same name steps aside"
+    },
+    {
+      "name": "zip switches",
+      "group": "archives",
+      "value": "-r -q -y",
+      "source": "added: folders, quiet, and links stored as links"
+    },
+    {
+      "name": "extract folder name",
+      "group": "archives",
+      "value": "archive name without its extension",
+      "source": "added: holiday.tar.gz unpacks into holiday"
+    },
+    {
+      "name": "archives this build opens",
+      "group": "archives",
+      "value": "ZIP and tar",
+      "source": "added: unzip -q -o ... -d for ZIP, tar -xf ... -C for the tar family"
+    },
+    {
+      "name": "original compress and extract plugins",
+      "group": "archives",
+      "value": "compressfileitemaction.so, extractfileitemaction.so",
+      "source": "ark package, /usr/lib/qt6/plugins/kf6/kfileitemaction/"
+    },
+    {
+      "name": "size formatter precision",
+      "group": "view",
+      "value": "1 decimal",
+      "source": "KIO::convertSize @0x1f25f0 in libKF6KIOCore.so.6 calls KFormat::formatByteSize(size, 1, dialect, default) @0x1bb910 in libKF6CoreAddons.so.6"
+    },
+    {
+      "name": "size formatter step (IEC)",
+      "group": "view",
+      "value": 1024,
+      "unit": "bytes",
+      "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 0 and 1"
+    },
+    {
+      "name": "size formatter step (SI)",
+      "group": "view",
+      "value": 1000,
+      "unit": "bytes",
+      "source": "KFormat formatter FUN_001ba880 @0x1ba880, dialect 2"
+    },
+    {
+      "name": "size formatter rounding",
+      "group": "view",
+      "value": "half away from zero",
+      "source": "KFormat probe of the installed 6.31.0: 1.25 KiB prints 1.3 KiB, 2.25 KiB prints 2.3 KiB"
+    },
+    {
+      "name": "size formatter thousands separator",
+      "group": "view",
+      "value": true,
+      "source": "KFormat probe: 1000 bytes prints 1,000 B and 1,048,575 prints 1,024.0 KiB"
+    },
+    {
+      "name": "size formatter unit labels",
+      "group": "view",
+      "value": "KiB/MiB/GiB by default; KB/MB/GB when dialect 1; kB/MB/GB when dialect 2",
+      "source": "FUN_001ba880 @0x1ba880, the translate() calls at 0x1cbe41 (IEC), 0x1cbe28 (legacy) and 0x1cbbf2 (SI)"
+    },
+    {
+      "name": "size formatter dialect source",
+      "group": "view",
+      "value": "kdeglobals [Locale] BinaryUnitDialect; anything above 2 reads as 0",
+      "source": "KIO::convertSize @0x1f25f0"
+    },
+    {
+      "name": "disk usage submenu scopes",
+      "group": "disk usage",
+      "value": "current folder, current device, all devices",
+      "source": "strings 0x237538, 0x237560, 0x237588 in FUN_001e8430 @0x1e8430"
+    },
+    {
+      "name": "disk usage window scope label",
+      "group": "disk usage",
+      "value": "Disk Usage Statistics - current folder",
+      "source": "added window walks the open folder, so it uses the original's 0x237538 wording"
+    },
+    {
+      "name": "content search modes",
+      "group": "search",
+      "value": "File names, File names and contents, File contents",
+      "source": "/usr/bin/dolphin strings 0x22e0db \"File names and contents\", 0x22e10c \"File contents\", 0x22caf8 \"FileContents\" (ev_5e70a9dd4972bc0597c7868d29d1a9183cab926ed0f8cdd577960ea0bdaeaf2c)"
+    },
+    {
+      "name": "content search reads files up to",
+      "group": "search",
+      "value": 4194304,
+      "unit": "bytes",
+      "source": "added: MAX_BYTES in findtext.rs (4 MiB)"
+    },
+    {
+      "name": "binary file test",
+      "group": "search",
+      "value": "a NUL byte in the first 8 KiB",
+      "source": "added: findtext::looks_binary, SNIFF_BYTES = 8192"
+    },
+    {
+      "name": "hidden folders in a content search",
+      "group": "search",
+      "value": "left out",
+      "source": "added: the original's find dialog leaves them out by default (find help text 0x231b48)"
+    },
+    {
+      "name": "hits kept before the search stops",
+      "group": "search",
+      "value": 300,
+      "unit": "files",
+      "source": "added: MAX_HITS in findtext.rs"
+    },
+    {
+      "name": "files looked at before the search stops",
+      "group": "search",
+      "value": 20000,
+      "unit": "files",
+      "source": "added: MAX_FILES in findtext.rs"
+    },
+    {
+      "name": "matching line shown, longest",
+      "group": "search",
+      "value": 120,
+      "unit": "characters",
+      "source": "added: SNIPPET_CHARS in findtext.rs (one ellipsis added when cut)"
+    },
+    {
+      "name": "megapixel unit",
+      "group": "resize",
+      "value": 1000000,
+      "unit": "pixels",
+      "source": "imageresize::PIXELS_PER_MP, the same reading as gallery::megapixels (the size caption prints MP = width × height ÷ 1 000 000)"
+    },
+    {
+      "name": "resize target, first value",
+      "group": "resize",
+      "value": 2.0,
+      "unit": "MP",
+      "source": "added: DEFAULT_MP in imageresize.rs (lowered to the picture's own size, floored to 0.1 MP, when that is smaller)"
+    },
+    {
+      "name": "resize target, smallest",
+      "group": "resize",
+      "value": 0.01,
+      "unit": "MP",
+      "source": "added: MIN_MP in imageresize.rs"
+    },
+    {
+      "name": "resize target, largest",
+      "group": "resize",
+      "value": 200,
+      "unit": "MP",
+      "source": "added: MAX_MP in imageresize.rs (also the ceiling on the decoded target)"
+    },
+    {
+      "name": "resize resampler",
+      "group": "resize",
+      "value": "Lanczos3",
+      "source": "added: FILTER in imageresize.rs"
+    },
+    {
+      "name": "JPEG quality on save",
+      "group": "resize",
+      "value": 90,
+      "unit": "%",
+      "source": "added: DEFAULT_QUALITY in imageresize.rs (the window's slider runs 40–100)"
+    },
+    {
+      "name": "resized copy name",
+      "group": "resize",
+      "value": "<stem>-<n>MP.<ext>",
+      "source": "added: imageresize::output_path — steps aside to \"<stem>-<n>MP (1).<ext>\" rather than overwrite"
+    },
+    {
+      "name": "Exif orientation applied before scaling",
+      "group": "resize",
+      "value": true,
+      "source": "added: imageresize::resize_file reads ImageDecoder::orientation and calls DynamicImage::apply_orientation"
+    },
+    {
+      "name": "picture formats written",
+      "group": "resize",
+      "value": "PNG, JPEG, WebP, BMP, TIFF",
+      "source": "added: SUPPORTED in imageresize.rs (GIF, SVG, ICO, HEIC and AVIF are refused with a sentence)"
+    },
+    {
+      "name": "drag threshold",
+      "group": "drag",
+      "value": 8,
+      "unit": "logical pixels",
+      "source": "added: THRESHOLD in dragout.rs (how far the pointer travels before a press becomes a drag)"
+    },
+    {
+      "name": "drag types offered",
+      "group": "drag",
+      "value": "text/uri-list, UTF8_STRING, text/plain",
+      "source": "added: send_enter in dragout.rs (three, so all three fit in the XdndEnter message)"
+    },
+    {
+      "name": "chunked transfer threshold",
+      "group": "drag",
+      "value": 98304,
+      "unit": "bytes",
+      "source": "added: INLINE_LIMIT in dragout.rs (96 KB; above it the list goes with INCR)"
+    },
+    {
+      "name": "INCR chunk size",
+      "group": "drag",
+      "value": 65536,
+      "unit": "bytes",
+      "source": "added: write_chunk in dragout.rs"
+    },
+    {
+      "name": "drag poll interval",
+      "group": "drag",
+      "value": 12,
+      "unit": "milliseconds",
+      "source": "added: the follow loop in dragout.rs (a position is sent at most every 20 ms)"
+    },
+    {
+      "name": "video frame ceiling",
+      "group": "video",
+      "value": 2048,
+      "unit": "pixels",
+      "source": "added: MAX_PX in video.rs (the thumbnail cache's own ceiling; the scale filter is clamped to it)"
+    },
+    {
+      "name": "video frame time budget",
+      "group": "video",
+      "value": 30,
+      "unit": "seconds",
+      "source": "added: BUDGET in video.rs (ffmpeg is killed after this; only a damaged file gets there)"
+    },
+    {
+      "name": "video formats with a preview",
+      "group": "video",
+      "value": 10,
+      "unit": "extensions",
+      "source": "added: VIDEO_EXT in fsutil.rs, the same list kind_for reads for Kind::Video"
+    },
+    {
+      "name": "added tools group, folded",
+      "group": "added",
+      "value": "7 rows: Duplicates, Find in Files, Bulk Rename, Quick Look, Disk Space, Compress, Resize Image; folded on a fresh profile, the heading counts its own rows",
+      "source": "own design; the original has no such group (the rows are this build's added tools)"
+    },
+    {
+      "name": "added tools group fold state",
+      "group": "added",
+      "value": "config key tools_expanded, absent = folded",
+      "source": "own design"
+    },
+    {
+      "name": "network group shown",
+      "group": "network",
+      "value": true,
+      "source": "own switch: app menu, View, 'Show Network Shared Folders'; the original's Remote group can only be folded, not hidden"
+    },
+    {
+      "name": "network group hidden",
+      "group": "network",
+      "value": "the heading leaves with the rows; config key network_visible = false",
+      "source": "own switch, asked for by the person; the switch lives in the menu because a hidden group has no heading to click"
+    },
+    {
+      "name": "search results, Path column",
+      "group": "search",
+      "value": "details view, between Name and Size, while the walk covers subfolders and at least one hit lies in a folder below the root",
+      "source": "own addition, asked for by the person; the original's find bar hands its results to KIO's search helper, which has no such column"
+    },
+    {
+      "name": "search results, Path column width",
+      "group": "search",
+      "value": "measured: the widest name and the widest folder in the result, laid out with the row's own fonts (13 px / 12 px); leftover room split evenly; when the row cannot hold both, Size and Modified shrink to what their own cells need (44 / 64 px floors) before anything is elided",
+      "source": "own rule; a fixed share capped at 240 px cut folders, and a character estimate with a 220 px floor for the name cut names"
+    },
+    {
+      "name": "search results, Path text",
+      "group": "search",
+      "value": "the folder relative to the folder searched; an em dash for a file in that folder itself",
+      "source": "own rule; the find bar above already names the root"
+    },
+    {
+      "name": "find bar close button",
+      "group": "controls",
+      "value": "drawn glyph, not a character; laid out against the row's right edge before the field",
+      "source": "own fix: the ✕ character is absent from this app's font and the button was laid out past the window edge while a search ran"
+    },
+    {
+      "name": "the light palette",
+      "group": "colours",
+      "value": "per-role pairs (theme::pair): a dark value and a light value written for paper - view #fbfcfd, panel #eef2f5, toolbar #e6ebf0, ink #1a1d20, accent #1b6e9e, band #2f79ac; theme::c() (hue kept, saturation x0.92, L' = 1 - L^1.6) is left for icon glyphs and the viewer's scrims",
+      "source": "own rule, asked for by the person; the derived palette squashed the ladder into 1.05:1 steps, made the border the brightest line in the window, and left the accent at 2.24:1"
+    },
+    {
+      "name": "the light palette's contrast targets",
+      "group": "colours",
+      "value": "both modes, asserted by --selftest: view<->toolbar >= 1.12:1; view<->panel >= 1.05:1; ink >= 7:1; dim and faint >= 4.5:1 on the panel (faint >= 4.0 on the toolbar); hairline >= 1.18:1; window edge >= 1.25:1 from the toolbar; hover >= 1.10:1; band >= 1.9:1 with white text >= 4.5:1; accent >= 3:1; white on a filled or destructive button >= 4.5:1; no role a pure #000 or #fff",
+      "source": "Hallmark's rule that a second mode is re-derived, never inverted, and held to the same contrast in both; the old check only proved surfaces were light and text was dark"
+    },
+    {
+      "name": "the light palette's shading slider",
+      "group": "colours",
+      "value": "app menu > View > Shading, shown while the light palette is on, 0-100, config key shade, remembered. The view is the anchor and every other shading role is pulled further from it by 1 + 2t: the panel's step below the paper grows from 13 levels to 39, the toolbar's from 21 to 63 (panel #eef2f5 -> #d4dee5, toolbar #e6ebf0 -> #bcc9d6, hairline #d6dde4 -> #8c9fb2, window edge #c4ccd4 -> #566c82, keycap #f2f4f5 -> #e0e4e5). text_dim and text_faint darken with the surfaces they sit on (theme::ink_pair, in linear light, to the strictest floor) so captions keep 4.5:1. The shortcuts panel is included whole - fill, rows, hover, the selected pill (band at 75% alpha, so it darkens with the panel) and its keycaps (theme::key_badge); ink, accent, band, folder icon and page do not take part",
+      "source": "asked for by the person: one of their displays did not show the steps between the light window's surfaces, and scaling the distance from white (half again) was still 6 levels on the panel - invisible"
+    },
+    {
+      "name": "the picture viewer's paging keys",
+      "group": "picture viewer",
+      "value": "Left/Right step one picture and wrap at the ends (unchanged); Page Up/Page Down step one picture back and on (in a viewer a picture is the page); Home is the first picture and End the last, clamped rather than wrapped; a jump resets zoom, pan, fit and the slideshow tick exactly as a page does",
+      "source": "asked for by the person: the usual Home/End/Page Up/Page Down behaviour"
+    },
+    {
+      "name": "Page Up and Page Down in the file views",
+      "group": "view",
+      "value": "one page of the cursor and the window moves with it: Pane::per_page is what the view reported from its own visible range (9 details rows, 72 icon cells, 8 picture-wall cards in a 900x500 window), Pane::scroll_pages is applied by Pane::page_area as the last scroll offset plus one viewport height; Home and End use Pane::jump_cursor + Pane::scroll_edge to reach the first/last shown entry and the top/bottom of the content; the cursor stops at the ends, as the arrows do",
+      "source": "asked for by the person - should be one page down, not one image; the first attempt moved only the cursor, which put the new row below the window and made the key look dead. Home and End had the same fault, reported next: they asked the view to scroll to an entry that was not being drawn"
+    },
+    {
+      "name": "tabs, one browsing session each",
+      "group": "view",
+      "value": "App.tabs holds one Tab { panes, active } per session; SavedTab { path, sort_key, sort_desc, view, pictures } is written for every tab and restored by App::new, with session_tab naming the tab in front. Keys: Ctrl+T new, Ctrl+W close, Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+Page Down / Page Up walk (cycle_tab_index wraps; one tab stays put), Ctrl+Shift+T reopens. The tab's right-click menu carries Close Tab (Ctrl+W), Close Other Tabs, Close Tabs to the Right, Duplicate Tab, Reopen Closed Tab (Ctrl+Shift+T); index_after_close keeps the front tab in front; a double click on the empty strip opens a tab; hovering a tab shows its full path; the strip is the window's top row (tab_strip is added to the Context before top_toolbar)",
+      "source": "asked for by the person: multiple tabs representing different sessions, as Windows Explorer has. Tabs existed but kept only a folder and a sort; a tab now returns with its own view mode and picture mode, and the tab strip has walking, closing, duplicating and reopening"
+    },
+    {
+      "name": "the compact view's column width",
+      "group": "view",
+      "value": "cell = max(iconSize + 8 + 5*fontHeight, longest_name_px + icon + 28); the longest name is measured in the cell's 12.5 pt font and cached on the pane (compact_name_px, invalidated by compact_stamp = entry count + total bytes of names), listings over 1500 entries measure the 1500 longest by characters; the label gets cell - icon - 26 px, so every name shows in full unless one name is wider than the view, which elides in the middle",
+      "source": "asked for by the person: filenames must not be truncated in the compact view. The old fixed five-font-height cell showed four characters and an ellipsis on every row of a folder of photographs"
+    },
+    {
+      "name": "a zoom memory for each of the four views",
+      "group": "view",
+      "value": "icons zoom[0], compact zoom[1], details zoom[2] on the 0-25 ladder, and the picture view's thumbnail height in thumb_px (50-400 px) - four independent values, written as they change by App::sync_zoom_config and restored by pane_from_config. The zoom keys, the -/+ buttons and Reset Zoom (Ctrl+0) act on the view on show only (Pane::view_zoom_by / view_zoom_reset), and choosing a list view leaves the picture view",
+      "source": "asked for by the person: a different memory per view type, persistent across sessions. Found by driving the window and reading config.json: the view buttons overwrote the pane's array with the saved one, the picture view stayed up when a list view was chosen, and the zoom keys resized the hidden list ladder instead of the wall"
+    },
+    {
+      "name": "the light palette switch",
+      "group": "colours",
+      "value": "app menu > View > Light Mode; config key light, absent = dark; --light for one session",
+      "source": "own addition; egui's Visuals are set again on the switch (theme::apply_style)"
+    },
+    {
+      "name": "light mode, colours the derivation must not touch",
+      "group": "colours",
+      "value": "image tints are Color32::WHITE; white/black used in blend maths are the constants; strong text is text(); text on a band or a filled button is on_band(), white in both modes; text on a black scrim is on_scrim()",
+      "source": "own fix: a blanket derivation turned every preview black, inverted the folder highlight into a shadow, and made every emphasised name white on white"
+    },
+    {
+      "name": "document icon page edge",
+      "group": "colours",
+      "value": "paper_edge(): the page's own colour in dark mode (invisible), a grey line in light mode where a white page on a white view has no shape",
+      "source": "own fix: file types without a coloured badge read as a floating glyph in light mode"
+    },
+    {
+      "name": "widget strong text",
+      "group": "colours",
+      "value": "Visuals::widgets.active.fg_stroke = text(), because RichText::strong() takes its colour from there",
+      "source": "egui 0.33 style.rs strong_text_color() -> widgets.active.text_color()"
+    },
+    {
+      "name": "create new menu",
+      "group": "controls",
+      "value": "a right-click on the folder's own space (not on an item) opens Create New -> Folder / Text File; either row makes the thing at once under the first free name (New Folder, New Folder (1); New Text File.txt, New Text File (1).txt) and opens the in-place name editor on it with the name selected - no window; the app menu's New group carries New Folder (F10) and New Text File the same way",
+      "source": "libKF6KIOFileWidgets.so.6 strings '@item:inmenu Create New', 'Create New Folder', 'Create New File', 'Enter file name', template 'Name=Text File...'; /usr/bin/dolphin action names 'create_dir' and 'create_file'"
+    },
+    {
+      "name": "new text file",
+      "group": "files",
+      "value": "an empty file made with create_new(true): a name that is already taken is refused, never emptied",
+      "source": "own choice: create_file makes an empty file; create_new keeps a mistyped name from truncating the file that already has it"
+    },
+    {
+      "name": "document types Create New offers",
+      "group": "menu",
+      "value": "every installed application that keeps a document format of its own: the type named after it, the type its MIME package names its icon for, or the type its description names it in",
+      "source": "docs::owns_type + docs::catalog, from apps::catalog + the MIME packages (15 on this machine); the desktop's default applications are deliberately not used: they name who opens a type, not who makes one"
+    },
+    {
+      "name": "document types on by default",
+      "group": "menu",
+      "value": 0,
+      "unit": "types",
+      "source": "config.new_docs starts empty; the ticks are the person's own"
+    },
+    {
+      "name": "where a ticked document type is offered",
+      "group": "menu",
+      "value": "Menu > New > New Document, one row per ticked type; the row is drawn only when something is ticked",
+      "source": "this build: panels.rs menu_new, a menu_button with panels::menu_box width; the folder's Create New keeps its rows flat because it is already a submenu"
+    },
+    {
+      "name": "maximizing on a two-screen desktop",
+      "group": "window",
+      "value": "left to the window manager: the startup fit skips a maximized window, compares only the extent with the monitor's size, and stops at the first press on the title bar, the window buttons or a resize edge",
+      "source": "this build: main.rs window_fits / fit_window_to_monitor / FIT_FRAMES. egui-winit reports outer_rect in screen coordinates but monitor_size as a size without origin, so the old 'far edge <= monitor.x' test read a window at x = 1921 on a 2409-wide second screen as off-screen"
+    },
+    {
+      "name": "update check",
+      "group": "update",
+      "value": "manual only: the menu's *Check for Updates...* row asks api.github.com for mjb73/DolphinCraft's latest release on a worker thread, and offers it when its version is numerically newer",
+      "source": "this build (2026-11-09): src/update.rs check / parse_release / newer; the About line changed from 'Nothing dials out.' to say it dials out only when this row is picked"
+    },
+    {
+      "name": "who answers org.freedesktop.FileManager1",
+      "group": "desktop integration",
+      "value": "DolphinCraft: the window claims the bus name on start and serves ShowFolders / ShowItems / ShowItemProperties / DesktopName; on a stock Plasma session it is Dolphin's plasma-dolphin.service that answers it",
+      "source": "app/src/fm1.rs; measured with busctl --user list, and dbus-send driving a window that was open on another folder"
+    },
+    {
+      "name": "what a Show in folder request does here",
+      "group": "desktop integration",
+      "value": "ShowFolders navigates to the folder; ShowItems shows the folder and marks the item; ShowItemProperties also opens Properties; only file:// URIs (empty or localhost authority, %XX unescaped) are taken",
+      "source": "app/src/fm1.rs paths_of + App::poll_fm1, Pane::pending_select"
+    },
+    {
+      "name": "update install",
+      "group": "update",
+      "value": "the release tarball, checked against its .sha256 before anything is replaced, unpacked and renamed over the running binary; the window then restarts with the same arguments",
+      "source": "this build: download_and_install / install_archive / restart; asset names are packaging/linux-tarball.sh's dolphincraft-<v>-<arch>-linux.tar.gz and .sha256, checked against the real v0.1.6 release"
+    },
+    {
+      "name": "update endpoint override",
+      "group": "update",
+      "value": "DOLPHINCRAFT_UPDATE_ENDPOINT replaces the GitHub URL with any address that answers a release JSON",
+      "source": "this build: update::endpoint; used by the local-server test that drove the whole flow"
+    },
+    {
+      "name": "pick exit codes",
+      "group": "pick",
+      "value": "--pick prints one absolute path per line on stdout and exits 0 when something was chosen, 1 when the dialog was put away; the portal backend, and a shell script, read the same thing",
+      "source": "this build: App::pick_finish; the dialog's Cancel, Escape and the window's close button all reach it"
+    },
+    {
+      "name": "pick filter matching",
+      "group": "pick",
+      "value": "glob patterns from the asking program: * takes any run, ? exactly one, case-insensitive; two-pointer walk with a remembered star, so a pattern can never hang the dialog",
+      "source": "this build: pick::glob_matches; patterns arrive as the portal's a(sa(us)) filters or as --filter \"Label:*.png;*.jpg\""
+    },
+    {
+      "name": "pick listing narrowing",
+      "group": "pick",
+      "value": "the dialog's filter narrows the shown listing in Pane::refilter, folders kept always, the find bar's own text applied second",
+      "source": "this build: Pane::pick_keep / Pane::refilter; checked at 2 kept then 1"
+    },
+    {
+      "name": "pick answer",
+      "group": "pick",
+      "value": "one function decides: the marked files the filter keeps, else the file under the cursor, else (a folder request) the folder on screen; a single-file request truncates to one",
+      "source": "this build: pick::candidate / pick::may_answer; the button's enabled state, Enter and the double click all read it"
+    },
+    {
+      "name": "pick chrome",
+      "group": "pick",
+      "value": "a dialog draws no menu that makes, renames or deletes files: the row menu is one Open row, the background and location menus are not drawn, the rename-on-second-click is off, and the file window's key map is not read",
+      "source": "this build: ViewCtx::pick, App::pick_keys"
+    },
+    {
+      "name": "portal file chooser",
+      "group": "portal",
+      "value": "org.freedesktop.impl.portal.FileChooser version 3 (OpenFile, SaveFile, SaveFiles) on org.freedesktop.impl.portal.desktop.dolphincraft, plus org.freedesktop.impl.portal.Request.Close on each call's handle so a caller's cancel ends the window",
+      "source": "this build: packaging/portal/dolphincraft-portal; version read back as 3 over D-Bus"
+    },
+    {
+      "name": "portal routing",
+      "group": "portal",
+      "value": "~/.config/xdg-desktop-portal/portals.conf names dolphincraft for FileChooser only; the base is the copy taken before the first install, so secrets, settings and notifications keep their backends",
+      "source": "this build: packaging/portal/install-portal.sh; on this machine base /usr/share/xdg-desktop-portal/kde-portals.conf keeps Secret=kwallet, Settings=kde;gtk;, Notification=plasmanotify"
+    },
+    {
+      "name": "portal reply codes",
+      "group": "portal",
+      "value": "no paths is response 1 (cancelled) whatever ended the dialog; paths are response 0 with {\"uris\": as}",
+      "source": "this build: the backend's wait_for; proved in a private session for open, save and cancel"
+    }
+  ]
 }

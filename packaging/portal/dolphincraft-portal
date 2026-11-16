@@ -1,0 +1,285 @@
+#!/usr/bin/python3
+# DolphinCraft as the desktop's file dialog.
+#
+# xdg-desktop-portal asks a backend to answer `org.freedesktop.impl.portal.FileChooser`
+# whenever a program asks for a file (a flatpak always, a GTK, Electron or
+# Firefox program when it has been told to use the portal). This backend runs
+# `dolphincraft --pick …`, waits for the window to be answered, and hands the
+# chosen paths back as file URIs. The picker prints one absolute path per line
+# on stdout and leaves with 0 (answered) or 1 (put away), which is the whole of
+# the contract between the two.
+#
+# Nothing here reads or writes the person's settings: the window is a dialog,
+# and the dialog is the answer.
+
+import os
+import shutil
+import subprocess
+import sys
+
+import gi
+
+gi.require_version("Gio", "2.0")
+gi.require_version("GLib", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+BUS_NAME = "org.freedesktop.impl.portal.desktop.dolphincraft"
+OBJECT_PATH = "/org/freedesktop/portal/desktop"
+INTERFACE = "org.freedesktop.impl.portal.FileChooser"
+VERSION = 3
+
+#: Where the picker lives. `install-portal.sh` writes the path it found into the
+#: D-Bus service file, so this is only the fallback for a hand-written launcher.
+def configured_picker():
+    """The binary to run: the file `install-portal.sh` leaves beside this script
+    first, then the environment, then whatever is on PATH."""
+    beside = os.path.join(os.path.dirname(os.path.abspath(__file__)), "picker-path")
+    if os.path.exists(beside):
+        with open(beside, encoding="utf-8") as handle:
+            path = handle.read().strip()
+        if path:
+            return path
+    return os.environ.get("DOLPHINCRAFT_BIN") or shutil.which("dolphincraft") or "dolphincraft"
+
+
+PICKER = configured_picker()
+
+INTROSPECTION = """
+<node>
+  <interface name="org.freedesktop.impl.portal.FileChooser">
+    <method name="OpenFile">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="s" name="title" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="SaveFile">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="s" name="title" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <method name="SaveFiles">
+      <arg type="o" name="handle" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="parent_window" direction="in"/>
+      <arg type="s" name="title" direction="in"/>
+      <arg type="a{sv}" name="options" direction="in"/>
+      <arg type="u" name="response" direction="out"/>
+      <arg type="a{sv}" name="results" direction="out"/>
+    </method>
+    <property name="version" type="u" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.impl.portal.Request">
+    <method name="Close"/>
+  </interface>
+</node>
+"""
+
+NODE = Gio.DBusNodeInfo.new_for_xml(INTROSPECTION)
+
+#: Response codes from the portal's own vocabulary.
+RESPONSE_SUCCESS = 0
+RESPONSE_CANCELLED = 1
+RESPONSE_OTHER = 2
+
+
+def log(words):
+    print(f"dolphincraft-portal: {words}", file=sys.stderr, flush=True)
+
+
+def option(options, key, default=None):
+    """One entry of the `a{sv}` options dict, unwrapped."""
+    value = options.get(key)
+    return default if value is None else value
+
+
+def option_directory(options):
+    """`current_folder` arrives as a NUL-terminated byte array."""
+    raw = option(options, "current_folder")
+    if raw is None:
+        return None
+    try:
+        text = bytes(raw).split(b"\0")[0].decode("utf-8", "surrogateescape")
+    except (TypeError, ValueError):
+        return None
+    return text or None
+
+
+def option_filters(options):
+    """The filter rows as `(label, [patterns])`.
+
+    The portal's shape is `a(s a(us))`: a label and a list of `(flags, pattern)`
+    pairs, where the flags say which of name / mime-type / hidden the pattern
+    is about. Only the name patterns mean anything to a listing, so the ones
+    that are not name patterns are simply not passed on.
+    """
+    rows = []
+    for entry in option(options, "filters", []) or []:
+        try:
+            label, patterns = entry
+        except (TypeError, ValueError):
+            continue
+        names = [text for _flags, text in patterns if text and not text.startswith(".")]
+        if names:
+            rows.append((label or ", ".join(names), names))
+    return rows
+
+
+def picker_argv(mode, options, title):
+    """The command line for one question."""
+    argv = [PICKER, "--pick", mode]
+    if option(options, "multiple", False):
+        argv.append("--multi")
+    if mode == "open" and option(options, "directory", False):
+        argv.append("--folder")
+    folder = option_directory(options)
+    if folder:
+        argv += ["--dir", folder]
+    name = option(options, "current_name")
+    if name and mode == "save":
+        argv += ["--name", name]
+    if title:
+        argv += ["--title", title]
+    for label, patterns in option_filters(options):
+        argv += ["--filter", f"{label}:{';'.join(patterns)}"]
+    return argv
+
+
+class Backend:
+    def __init__(self):
+        self.conn = None
+        self.loop = GLib.MainLoop()
+        # handle object path -> running picker
+        self.running = {}
+        self.registered = set()
+
+    # -- D-Bus plumbing ---------------------------------------------------
+    def on_bus(self, conn, _name):
+        self.conn = conn
+        info = NODE.lookup_interface(INTERFACE)
+        conn.register_object(OBJECT_PATH, info, self.on_call, self.get_property, None)
+        request = NODE.lookup_interface("org.freedesktop.impl.portal.Request")
+        self.request_info = request
+        log(f"answering on {BUS_NAME} (version {VERSION}), picker {PICKER}")
+
+    def on_call(self, conn, sender, path, iface, method, params, invocation):
+        options = None
+        if method == "OpenFile":
+            handle, _app_id, _parent, title, options = params
+            self.start(invocation, handle, "open", title, options)
+        elif method == "SaveFile":
+            handle, _app_id, _parent, title, options = params
+            self.start(invocation, handle, "save", title, options)
+        elif method == "SaveFiles":
+            handle, _app_id, _parent, title, options = params
+            self.start(invocation, handle, "save", title, options)
+        else:
+            invocation.return_dbus_error(
+                "org.freedesktop.portal.Error.NotImplemented", method
+            )
+
+    # -- one question -----------------------------------------------------
+    def start(self, invocation, handle, mode, title, options):
+        argv = picker_argv(mode, options, title)
+        log(f"{mode}: {' '.join(argv)}")
+        try:
+            child = subprocess.Popen(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as why:
+            log(f"could not start the picker: {why}")
+            invocation.return_value(GLib.Variant("(ua{sv})", (RESPONSE_OTHER, {})))
+            return
+        self.running[handle] = child
+        self.watch_close(handle, child)
+        # The window runs for as long as the person takes; a thread waits for it
+        # and hands the answer back on the main loop, where D-Bus lives.
+        import threading
+
+        threading.Thread(
+            target=self.wait_for, args=(invocation, handle, child, mode), daemon=True
+        ).start()
+
+    def watch_close(self, handle, child):
+        """Let the portal cancel: `Close` on the handle ends the picker."""
+        if handle in self.registered or not self.conn:
+            return
+        try:
+            self.conn.register_object(handle, self.request_info, self.on_close, None, None)
+            self.registered.add(handle)
+        except GLib.Error as why:
+            # A handle path another backend already owns is not fatal: the
+            # dialog still answers, it just cannot be closed from outside.
+            log(f"could not watch {handle}: {why.message}")
+
+    def on_close(self, conn, sender, path, iface, method, params, invocation):
+        child = self.running.get(path)
+        if child is not None and child.poll() is None:
+            child.terminate()
+        invocation.return_value(None)
+
+    def wait_for(self, invocation, handle, child, mode):
+        try:
+            out, err = child.communicate()
+        except Exception as why:  # noqa: BLE001 - the child is not ours to trust
+            log(f"the picker could not be read: {why}")
+            out, err = b"", b""
+        if err:
+            log(f"picker said: {err.decode('utf-8', 'replace').strip()}")
+        paths = [
+            line.decode("utf-8", "surrogateescape")
+            for line in (out or b"").splitlines()
+            if line.strip()
+        ]
+        # No paths means the dialog was put away — by Escape, by closing the
+        # window, or because the caller cancelled and the portal asked us to
+        # close it. All three are the same answer to the program that asked.
+        code = RESPONSE_SUCCESS if paths else RESPONSE_CANCELLED
+        uri = GLib.Variant("as", [GLib.filename_to_uri(p, None) for p in paths])
+
+        def reply():
+            try:
+                invocation.return_value(
+                    GLib.Variant("(ua{sv})", (code, {"uris": uri}))
+                )
+            except GLib.Error as why:
+                # The caller went away while the window was open.
+                log(f"could not answer: {why.message}")
+            finally:
+                self.running.pop(handle, None)
+            return False
+
+        GLib.idle_add(reply)
+
+    def get_property(self, conn, sender, path, iface, prop):
+        if prop == "version":
+            return GLib.Variant("u", VERSION)
+        return None
+
+    def run(self):
+        Gio.bus_own_name(
+            Gio.BusType.SESSION,
+            BUS_NAME,
+            Gio.BusNameOwnerFlags.NONE,
+            self.on_bus,
+            None,
+            lambda *_: log("the name could not be taken — another backend is running"),
+        )
+        self.loop.run()
+
+
+if __name__ == "__main__":
+    if not os.path.exists(PICKER) and not shutil.which(PICKER):
+        log(f"no picker at {PICKER}; set DOLPHINCRAFT_BIN or install the binary")
+    Backend().run()

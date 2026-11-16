@@ -232,6 +232,21 @@ What the rebuild does (`app/src/search.rs`, `app/src/views.rs`):
 * decoding runs on one worker per core (at most eight). A folder with 76
   pictures fills every visible tile while the window is still opening, instead
   of the first dozen only.
+* a preview is decoded **by the file's own bytes**, not by its extension:
+  `fsutil::decode_picture` opens with `with_guessed_format`, so a PNG that
+  arrived named `.jpg` (a civitai export, a renamed download) shows its picture.
+  `image::open` picks the decoder from the name and refused those files with
+  "Illegal start bytes", which is the whole of a folder showing no thumbnails.
+  The viewer decodes through the same helper.
+* a video is recognized by its magic as well as its name (`fsutil::looks_like_video`:
+  `ftyp` at offset 4, Matroska's EBML header, `RIFF…AVI `), so a clip renamed
+  `.jpg` still gets its first frame from ffmpeg.
+* the wall's **Sub-folders** switch runs the same walk the find bar uses with
+  `pictures_only` set, and the results are the list the wall draws from
+  (`display_entries`). `Pane::visible` and `Pane::shown_indices` read
+  `display_entries`, never `self.entries`: while that walk is up the two lists
+  differ, and indexing the folder listing with results indices drew an empty
+  wall — 150 pictures found below, nothing on screen.
 
 Checked by driving the built window on a virtual display: starting at 64 px,
 six clicks on the `+` at the bottom right took the status bar to 160 px and the
@@ -972,9 +987,9 @@ version, and the row was the one below the fold of a menu twelve tool rows long.
 `App::app_menu_footer` is therefore drawn after the `ScrollArea` in the popup, not
 inside it — a fixed footer at the popup's bottom edge — so both rows are on screen at
 any window height. The row's label and its right-hand column come from
-`about_menu_row()`: `About DolphinCraft` and `0.1.7`, so the number is readable in
+`about_menu_row()`: `About DolphinCraft` and `0.1.8`, so the number is readable in
 the menu itself. Clicking it opens `about_dialog`, a small window (the original's
-*Help → About Dolphin* is a dialog too) carrying the name at 17 px, `Version 0.1.7`,
+*Help → About Dolphin* is a dialog too) carrying the name at 17 px, `Version 0.1.8`,
 the one line, the tag the binary was cut from, the licence, and a Close button;
 Escape closes it through the same ladder in `handle_shortcuts` that closes the
 other windows. `--selftest` asserts the row's two halves (`the app menu's About row names
@@ -1508,7 +1523,7 @@ declared application title.
 | --- | --- | --- | --- |
 | title bar text | `Dolphin` | `DolphinCraft` | original: the NUL-terminated string `"Dolphin"` at **0x12d350** in `/usr/bin/dolphin`, immediately after the `@title` tag of its KAboutData block (next to `"File Manager"` and the authors) — i.e. the program's declared name, not a translated label. Rename asked for by the person. |
 | `WM_CLASS` / app id | `dolphin` | `dolphincraft` | the original's desktop file / QGuiApplication application id; the copy follows the new title so the task switcher groups it as its own app |
-| name shown in the About row | — | `About DolphinCraft` with `0.1.7` in its right-hand column, opening a small window with the version | asked for by the person; the original's About box is a KAboutData dialog, which this build now answers with its own dialog rather than a toast |
+| name shown in the About row | — | `About DolphinCraft` with `0.1.8` in its right-hand column, opening a small window with the version | asked for by the person; the original's About box is a KAboutData dialog, which this build now answers with its own dialog rather than a toast |
 
 Both the viewport title and the name handed to `eframe::run_native` were changed
 together, so the X11 `_NET_WM_NAME` and the Wayland title agree. Checked on a
@@ -2030,7 +2045,7 @@ tab strip carries what that bar carried:
 
 * the **window's name and its release** at its left end, before the first tab, with
   ten pixels of padding either side: `title_row_text()` gives the two strings,
-  `DolphinCraft` at 12.5 px in `text()` and `0.1.7` six pixels after it at 11.5 px in
+  `DolphinCraft` at 12.5 px in `text()` and `0.1.8` six pixels after it at 11.5 px in
   `text_dim()`, so the number is on the bar itself and reads as a version rather
   than part of the name. The whole block drags and double-clicks like the strip's
   empty space, being part of the same bar;
@@ -3751,3 +3766,140 @@ have to hold:
 The field is the one every view draws (`rename_editor`), with the whole name
 selected, and `--selftest` holds the truth table (`a second click on the marked
 item is a rename, not a double click and not a fresh mark`).
+
+## The desktop's file manager: `org.freedesktop.FileManager1`
+
+Other programs do not look a file manager up in `mimeapps.list` when they want a
+folder put on screen — a browser's *Show in folder*, a mount the device notifier
+just made, a chat client's *Open containing folder*. They call the D-Bus name
+`org.freedesktop.FileManager1`, which on a stock Plasma session is answered by
+`plasma-dolphin.service` (`/usr/bin/dolphin --daemon`, activated by
+`/usr/share/dbus-1/services/org.kde.dolphin.FileManager1.service`, and holding
+the name `org.freedesktop.FileManager1` in `busctl`). Every file association here
+already named DolphinCraft; those three requests still opened Dolphin, because
+the association answers *who opens this type*, not *who shows me a folder*.
+
+`src/fm1.rs` answers the interface on the window's own thread budget:
+
+* `ShowFolders(as uris)` — the first `file://` URI that is a folder is navigated
+  to. `ShowItems(as uris, s startup_id)` — a folder is shown itself, a file is
+  shown **marked in the folder that holds it** (`Pane::pending_select` +
+  `apply_pending_select`, the same mechanism a typed address for a file uses).
+  `ShowItemProperties(as uris, s startup_id)` — the same, then
+  `Request::Properties`. `DesktopName` answers `DolphinCraft`.
+* URI handling is deliberately narrow: `file://`, an empty or `localhost`
+  authority, `%XX` unescaping; a `smb://` or `sftp://` request is dropped rather
+  than opened as a local path, because this window browses the file system.
+* the bus runs on its own thread with a blocking `zbus` connection (`zbus` with
+  `async-io` + `blocking-api`); what arrives crosses to the window as an
+  `Fm1Call` on a channel drained once a frame, and the bus thread calls
+  `ctx.request_repaint()` itself — the window only repaints on input otherwise,
+  so a request that arrives while it sits still would wait for the next click.
+* a name another manager already holds is reported on stderr and the window
+  carries on without the service; `request_name` refuses rather than stealing.
+* a `--screenshot` run does not claim the name, so a captured picture can never
+  take it from the live window.
+
+Proved on this machine with the daemon stopped: `busctl --user list` showed
+`org.freedesktop.FileManager1 … dolphincraft`; `dbus-send … ShowFolders
+array:string:"file:///home/mjbayes/Pictures"` moved a window opened in `/tmp` to
+Pictures; `ShowItems` on a picture left the status bar reading *1 file selected
+(1.0 MiB)* in `~/Pictures`; `ShowItemProperties` opened the Properties window for
+that picture; and with nothing running at all, the same `ShowFolders` call
+auto-started the window through `plasma-dolphin.service`, which now runs
+DolphinCraft instead of Dolphin (the unit keeps its old name only because the
+session bus caches the service file it read at startup; from the next login the
+bus reads `~/.local/share/dbus-1/services/org.freedesktop.FileManager1.service`
+and starts `org.freedesktop.FileManager1.service`).
+
+## The file dialog: `--pick`, and the portal backend that answers with it
+
+A file dialog is the one thing every program has to ask the desktop for. On this
+machine the answer was `xdg-desktop-portal-kde`'s own QML dialog, and there is no
+setting anywhere for "which application draws the dialog" — the portal's
+`FileChooser` is an *implementation interface*, not a launcher. So the feature is
+two halves: the window learned to be a dialog, and a backend was written to hand
+the portal's questions to it.
+
+**The contract is stdout, not D-Bus.** `dolphincraft --pick open|save` prints the
+chosen paths, one absolute path per line, and leaves: status 0 when something was
+chosen, 1 when the dialog was put away. The backend runs the binary, reads those
+lines and turns them into `file://` URIs. Both halves can therefore be tested
+apart — a shell script uses the picker exactly as the backend does:
+
+```sh
+file=$(dolphincraft --pick open --dir ~/Documents --filter "Images:*.png")
+```
+
+- `--pick open` answers files, `--pick save` answers the folder on screen plus
+  the name field, `--folder` answers a folder (the portal's `directory` option),
+  `--multi` allows more than one (its `multiple`), `--name` and `--title` carry
+  its `current_name` and title, `--filter "Label:*.png;*.jpg"` repeats per row of
+  its `a(sa(us))` filters, and `--dir` is its `current_folder`.
+- **The listing is narrowed by the filter in `Pane::refilter`, and folders are
+  never narrowed away** — a dialog you cannot walk through is not a dialog. There
+  the picker's patterns are applied first and the find bar's own text second, so
+  two narrowings cannot disagree about what the cursor and the marks point into.
+  The matcher is `pick::glob_matches`: `*`, `?`, case-insensitive, a two-pointer
+  walk with a remembered star — patterns arrive from another program, and a dialog
+  must not be able to hang on one.
+- **One function decides the answer**: `pick::candidate(pick, dir, marked, cursor)`
+  returns the paths the button would print, and the button's enabled state, the
+  double click, Enter and the save hint all read it. A file a filter refuses is
+  never the marked candidate, and a folder request never answers a file.
+- **A dialog offers no destructive chrome.** The row's right-click menu is one row
+  ("Open"), the folder's own menu and the location bar's menu are not drawn, the
+  second click that turns a row into a name field is off (`ViewCtx::pick`), the
+  file window's key map is not read at all (a dialog answers Enter, Escape, the
+  arrows, the page keys, Home/End, Alt+Left/Up), and the window writes no settings
+  — the dialog is another program's question, not a session.
+- **Closing the window is a cancel**: `on_exit` prints nothing and exits 1, so a
+  window closed from the title bar and one answered with Cancel reach the asking
+  program the same way.
+
+**The backend** (`packaging/portal/dolphincraft-portal`, Python + Gio) implements
+`org.freedesktop.impl.portal.FileChooser` version 3 — `OpenFile`, `SaveFile`,
+`SaveFiles` — on the name
+`org.freedesktop.impl.portal.desktop.dolphincraft`, runs the picker for each
+question, and also implements `org.freedesktop.impl.portal.Request.Close` on the
+per-call handle, so a program that cancels ends the window. No paths is
+`RESPONSE_CANCELLED` (1) whatever ended it; paths are `RESPONSE_SUCCESS` (0) with
+`{"uris": as}`.
+
+Three pieces of plumbing are what make it the system's dialog, and each of them
+fails in a way that looks like a broken backend:
+
+- **`portals.conf` is per interface, and the desktop's own file is the base.**
+  `~/.config/xdg-desktop-portal/portals.conf` is written from the copy taken
+  before the first install (`portals.conf.dolphincraft-backup`, else whatever is
+  there, else `${XDG_CURRENT_DESKTOP}-portals.conf` from `/usr/share`) with one
+  line appended: `org.freedesktop.impl.portal.FileChooser=dolphincraft`. A second
+  run that re-derives from its own output dropped
+  `Secret=kwallet`/`Settings=kde;gtk;`/`Notification=plasmanotify` and left the
+  keyring on `default=kde` — the fix is the backup as the base, always.
+- **`XDG_CURRENT_DESKTOP` is empty in a shell started by a service.** The desktop
+  is then read from the running backend instead, with `pgrep -f
+  "/xdg-desktop-portal-<impl>$"` — `pgrep -x` cannot see it, because a process
+  name is cut to fifteen characters and `xdg-desktop-portal-kde` reads as
+  `xdg-desktop-portal`.
+- **A `.service` file written while the session bus is running is not
+  activatable.** This session's bus is dbus-broker, which reads
+  `~/.local/share/dbus-1/services` once at start; until it is told, every call
+  fails with *The name is not activatable*, which reads exactly like a backend
+  that crashes. One `busctl --user call org.freedesktop.DBus /
+  org.freedesktop.DBus ReloadConfig` is the whole fix, and the install script
+  does it before restarting `xdg-desktop-portal`.
+
+**Proved** on this machine. Under Xvfb, with `xdotool`: `--pick open --filter
+"Images:*.png"` on a folder holding `shot.png`, `notes.txt` and `sub/` listed only
+the picture and the folder, Enter on the picture printed `/tmp/picktest/shot.png`
+and exited 0, Escape printed nothing, `--pick save --name "typed name.png"` printed
+`/tmp/picktest/typed name.png`, and `--folder` answered the folder shown. Then the
+whole stack in a private D-Bus session (`dbus-run-session` + `/usr/lib/xdg-desktop-portal`
++ a Gio client): `OpenFile` answered `file:///tmp/picktest/shot.png` with response
+0, `SaveFile` answered `file:///tmp/picktest/client%20typed.png` from the client's
+own `current_name`, and a cancel answered response 1. On the live session after
+`install-portal.sh`, the same call started
+`dolphincraft --pick open --dir /tmp/picktest --title "Live routing check"
+--filter Images:*.png` — the client's options as this build's arguments — and
+answered 1 when the window was put away.

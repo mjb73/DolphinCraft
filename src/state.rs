@@ -509,6 +509,12 @@ pub struct Pane {
     pub filter: String,
     pub filter_on: bool,
     pub filter_focus: bool,
+    /// `--pick`: the name patterns the file dialog is asking for, or `None` in
+    /// normal use. Folders are never narrowed away — the dialog has to be
+    /// walkable — and this is applied in `refilter`, the one place the shown
+    /// listing is built, so a folder change and a filter change cannot
+    /// disagree about what is on screen.
+    pub pick_keep: Option<Vec<String>>,
     /// Added: the find bar's scope. `false` = match names in this folder only
     /// (a live filter); `true` = search everything below it as well. The
     /// original spends a hidden keystroke (Enter) on that choice; here it is a
@@ -609,6 +615,7 @@ impl Pane {
             filter: String::new(),
             filter_on: false,
             filter_focus: false,
+            pick_keep: None,
             find_deep: false,
             location_edit: None,
             location_focus: false,
@@ -912,25 +919,50 @@ impl Pane {
     /// the selection indices point at stay the same list.
     pub fn refilter(&mut self) {
         let needle = self.filter.trim().to_lowercase();
+        // `--pick`: the dialog narrows the listing to the types it was asked
+        // for, and keeps every folder, before the find bar's own text is
+        // applied on top. Both narrowings are read here so the drawn listing,
+        // the cursor and the marks always point into the same list.
+        let keep = self.pick_keep.clone();
+        let narrowed: Vec<Entry> = match keep {
+            None => self.all.clone(),
+            Some(patterns) => self
+                .all
+                .iter()
+                .filter(|e| {
+                    e.is_dir
+                        || patterns
+                            .iter()
+                            .any(|p| crate::pick::glob_matches(p, &e.name))
+                })
+                .cloned()
+                .collect(),
+        };
         if !self.filter_on || needle.is_empty() {
-            self.entries = self.all.clone();
+            self.entries = narrowed;
             return;
         }
-        self.entries = self
-            .all
-            .iter()
+        self.entries = narrowed
+            .into_iter()
             .filter(|e| e.name.to_lowercase().contains(&needle))
-            .cloned()
             .collect();
     }
 
+    /// The indices the view draws, into the list the view draws from.
+    ///
+    /// Those are the *same* list: `display_entries` is the search result while a
+    /// walk is running and the folder's own listing otherwise. Reading
+    /// `self.entries` here made every index point into the folder listing, which
+    /// is why the wall's "Sub-folders" switch drew nothing — the walk found 150
+    /// pictures in the folders below and the wall then asked the 75 *folder*
+    /// entries of the folder itself whether they were pictures, and none were.
     pub fn visible(&self) -> Vec<usize> {
+        let list = self.display_entries();
         if !self.filter_on || self.filter.trim().is_empty() {
-            return (0..self.entries.len()).collect();
+            return (0..list.len()).collect();
         }
         let needle = self.filter.to_lowercase();
-        self.entries
-            .iter()
+        list.iter()
             .enumerate()
             .filter(|(_, e)| e.name.to_lowercase().contains(&needle))
             .map(|(i, _)| i)
@@ -940,7 +972,7 @@ impl Pane {
     pub fn selected_paths(&self) -> Vec<PathBuf> {
         self.sel
             .iter()
-            .filter_map(|i| self.entries.get(*i).map(|e| e.path.clone()))
+            .filter_map(|i| self.display_entries().get(*i).map(|e| e.path.clone()))
             .collect()
     }
 
@@ -948,8 +980,8 @@ impl Pane {
         self.sel
             .iter()
             .next()
-            .and_then(|i| self.entries.get(*i))
-            .or_else(|| self.entries.get(self.cursor))
+            .and_then(|i| self.display_entries().get(*i))
+            .or_else(|| self.display_entries().get(self.cursor))
     }
 
     pub fn select_single(&mut self, idx: usize) {
@@ -976,9 +1008,9 @@ impl Pane {
     pub fn shown_indices(&self) -> Vec<usize> {
         let mut shown = self.visible();
         if self.pictures {
+            let list = self.display_entries();
             shown.retain(|i| {
-                self.entries
-                    .get(*i)
+                list.get(*i)
                     .map(|e| !e.is_dir && e.is_image())
                     .unwrap_or(false)
             });

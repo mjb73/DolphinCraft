@@ -151,6 +151,46 @@ pub fn kind_of(path: &Path, is_dir: bool, mode: u32) -> Kind {
     kind_for(path, is_dir, mode)
 }
 
+/// Decode a picture by what its **bytes** say it is, not what its name says.
+///
+/// `image::open` picks the decoder from the extension, so a PNG that arrived
+/// named `.jpg` — a civitai export, a renamed download — fails with "Illegal
+/// start bytes" and the file gets no thumbnail and no viewer even though it is
+/// a perfectly good picture. `with_guessed_format` sniffs the file's own header
+/// instead, which is what the person sees when they open it anywhere else.
+pub fn decode_picture(path: &Path) -> Option<image::DynamicImage> {
+    image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()
+}
+
+/// Whether a file's first bytes name a video container, whatever its name says.
+///
+/// A video renamed `.jpg` gets no frame from the `image` crate and would be
+/// refused by `is_video_path` too, so the preview has nothing to show. The
+/// magic is what ffmpeg reads: `ftyp` at offset 4 (MP4/MOV/M4V), Matroska's
+/// EBML header, or a RIFF AVI.
+pub fn looks_like_video(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 12];
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(n) = f.read(&mut head) else {
+        return false;
+    };
+    if n >= 12 && &head[4..8] == b"ftyp" {
+        return true;
+    }
+    if n >= 4 && head[..4] == [0x1a, 0x45, 0xdf, 0xa3] {
+        return true;
+    }
+    n >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"AVI "
+}
+
 /// Whether a name is one of the video formats this build can show a frame of.
 /// The list is the one `kind_for` sorts into `Kind::Video`, kept in one place so
 /// a format added there is picked up by the previews too.

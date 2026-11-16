@@ -285,7 +285,7 @@ impl ThumbCache {
                 // new sizes pay for decoding the original picture.
                 let mut thumb = cache_file
                     .as_ref()
-                    .and_then(|p| image::open(p).ok())
+                    .and_then(|p| crate::fsutil::decode_picture(p))
                     .and_then(|img| {
                         let rgba = img.to_rgba8();
                         let (w, h) = rgba.dimensions();
@@ -294,14 +294,20 @@ impl ThumbCache {
                 if thumb.is_none() {
                     // A picture decodes here; a video has no decoder in the
                     // `image` crate, so its first frame is taken by ffmpeg — the
-                    // program the machine already has for video.
-                    let frame = image::open(&job.path).ok().or_else(|| {
-                        if crate::fsutil::is_video_path(&job.path) {
-                            crate::video::first_frame(&job.path, job.size)
-                        } else {
-                            None
-                        }
-                    });
+                    // program the machine already has for video. Both are asked
+                    // by content: the decoder sniffs the header, and a video
+                    // renamed `.jpg` still gets its frame.
+                    let frame =
+                        crate::fsutil::decode_picture(&job.path).or_else(|| {
+                            if crate::fsutil::is_video_path(&job.path)
+                                || crate::fsutil::looks_like_video(&job.path)
+                            {
+                                crate::video::first_frame(&job.path, job.size)
+                            } else {
+                                None
+                            }
+                        });
+
                     if let Some(img) = frame {
                         let rgba = img.thumbnail(job.size, job.size).to_rgba8();
                         let (w, h) = rgba.dimensions();

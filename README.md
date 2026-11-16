@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 
 `install.sh` needs no root: it unpacks the release into `~/.local/bin/dolphincraft`, writes
 `~/.local/share/applications/dolphincraft.desktop` with an absolute path, and refreshes the
-release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.7` to pin a
+release. Set `PREFIX` to install elsewhere, or `DOLPHINCRAFT_VERSION=v0.1.8` to pin a
 release.
 
 The tarballs are built on Debian 12 on purpose, so the binary asks for glibc 2.35 — Debian 12,
@@ -34,7 +34,7 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   it keeps them.
 - **Tabs**, one per browsing session, in the window's own title row across the very
   top — the tab strip *is* the title bar, so there is one line where there used to be
-  two: the window's name and its release (`DolphinCraft 0.1.7`) sit at its left end,
+  two: the window's name and its release (`DolphinCraft 0.1.8`) sit at its left end,
   before the first tab; drag the bar to move the window, double-click its empty
   space to maximize, and the
   minimize/maximize/close buttons sit at its right end (the toolbar below it belongs
@@ -108,7 +108,9 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   names. Enter it with the picture button in the toolbar. The wall holds the
   folder's pictures and nothing else: sub-folders and documents stay in the icon
   and list views, and the path bar above the wall is how you step into a
-  sub-folder. Marking, Ctrl+A, Shift+click and the arrow keys follow the pictures
+  sub-folder. A **Sub-folders** switch reaches into the folders below the one you
+  are in — pictures only, every level down — so a library sorted into year or
+  month folders reads as one wall; untick it to come back to this folder alone. Marking, Ctrl+A, Shift+click and the arrow keys follow the pictures
   on screen, so a hidden document can never be caught up in a selection.
 - **Picture viewer and slideshow**: open a picture and page through the folder,
   zoom, and read the generation prompt, negative prompt, steps, sampler, CFG
@@ -204,6 +206,26 @@ Ubuntu 22.04+, Mint 21+, Fedora 36+ and newer. A Wayland or X11 session plus an 
   `mimeapps.list`, so the first row changes here and in every other program. A
   file whose name says nothing (a `Makefile`, a `Cargo.lock`) is read, so editors
   are offered for it instead of nothing.
+- **The desktop's file manager**, on `org.freedesktop.FileManager1`: another
+  program's *Show in folder* — a finished download, a mounted device — opens
+  DolphinCraft with the file marked in its folder, *Show item properties* opens
+  it with the Properties window up, and a request that arrives with no window
+  open starts one. `DesktopName` answers `DolphinCraft`. This is the service
+  Plasma's Dolphin daemon answered before, so nothing has to be set for it: the
+  window claims the name when it starts.
+- **The system's file dialog**, asked for on purpose: `dolphincraft --pick open`
+  (or `--pick save`) is this window as an *Open* / *Save* dialog — the places,
+  the views, the find bar and the type-ahead, with a footer carrying the
+  question, the type filter, the save field and Cancel / Open. It prints what was
+  chosen, one path per line, and leaves; `--folder` asks for a folder instead,
+  `--multi` allows several, `--filter "Images:*.png;*.jpg"` repeats for each row,
+  `--name` fills the save field and `--title` says what is being asked. With the
+  small backend in `packaging/portal/` the desktop's own file dialogs are
+  answered by it: every program that asks `xdg-desktop-portal` for a file — a
+  Flatpak or Snap always, a GTK, Electron or Firefox program when it has been
+  told to use the portal — gets this window instead of plasma's, while
+  everything else (secrets, settings, notifications) stays on the desktop's own
+  backends. See *Making it the file dialog* below.
 - **Network group** in the sidebar, where the original's *Remote* group is: it
   lists the network folders this computer already has — SMB, NFS and SSH shares in
   the mount table, and shares opened through the desktop's own file choosers —
@@ -350,11 +372,46 @@ Options:
                           (used to photograph it)
 --drag-out <file>...       hand those files to another program as a drag, for
                           checking the hand-over without a mouse
+--pick open|save          be a file dialog: choose a file (or save one), print the
+                          answer on stdout, one path per line, and exit 0; exit 1
+                          when the dialog is put away
+--folder                  with --pick, the answer is a folder
+--multi                   with --pick, more than one file may be answered
+--title <text>            with --pick, the words in the dialog's footer
+--name <text>             with --pick save, the name the field starts with
+--filter "Label:*.png;*.jpg"  with --pick, one filter row (repeatable)
 --size <WxH>              open the window at a given size
 --light                   open in the light palette for this run, without changing
                           the saved setting
 --selftest                run the built-in checks and exit
 ```
+
+## Making it the file dialog
+
+`packaging/portal/` holds the small backend that answers the desktop portal's
+file chooser with this window. Nothing there needs root:
+
+```
+cargo build --release
+sh packaging/portal/install-portal.sh                  # or: … /path/to/dolphincraft
+sh packaging/portal/install-portal.sh --uninstall      # put it back as it was
+```
+
+It installs the backend under `~/.local/share/dolphincraft/`, registers its
+D-Bus name, and writes `~/.config/xdg-desktop-portal/portals.conf` with exactly
+one line changed — `org.freedesktop.impl.portal.FileChooser=dolphincraft` — so
+secrets, settings and notifications keep the backends the desktop gave them.
+The desktop's own `portals.conf` is kept beside it as
+`portals.conf.dolphincraft-backup` and restored by `--uninstall`. Then it
+restarts `xdg-desktop-portal` and reloads the session bus, because a service
+file written while the bus is running is not noticed until it is told.
+
+Which programs this reaches: Flatpak and Snap applications always (their
+dialogs can only come through the portal); GTK, Electron and Firefox programs
+when they have been told to use it (`GTK_USE_PORTAL=1`,
+`widget.use-xdg-desktop-portal.file-picker=1`, `--enable-features=…Portal`).
+KDE and Qt programs draw their own dialog from KIO inside their own process and
+never ask the portal, so they keep it — replacing that would mean forking KIO.
 
 ## Where the numbers come from
 

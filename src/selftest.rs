@@ -1207,6 +1207,113 @@ pub fn run() -> i32 {
     );
 
     r.check(
+        "a picture named .jpg that is really a PNG still gets a preview",
+        (|| {
+            use crate::search::ThumbCache;
+            let dir = base.join("thumbs");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            // A civitai export (and any renamed download) carries PNG bytes
+            // under a .jpg name. `image::open` picks its decoder from the
+            // extension and refuses the file, which is the reported "no
+            // thumbnails in this folder".
+            let misleading = dir.join("renamed.jpg");
+            let img = image::RgbaImage::from_fn(200, 100, |x, y| {
+                image::Rgba([(x % 256) as u8, 40, (y % 256) as u8, 255])
+            });
+            // Written through an explicit format: `.save()` would obey the
+            // misleading name and try to encode JPEG too.
+            img.save_with_format(&misleading, image::ImageFormat::Png)
+                .map_err(|e| e.to_string())?;
+            if image::open(&misleading).is_ok() {
+                return Err("the decoder now reads an extension it is not given".into());
+            }
+            if crate::fsutil::decode_picture(&misleading).is_none() {
+                return Err("the file's own header was not trusted".into());
+            }
+            let ctx = eframe::egui::Context::default();
+            let mut cache = ThumbCache::new();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                if let Some(tex) = cache.get(&ctx, &misleading, 64) {
+                    let (w, h) = (tex.size()[0], tex.size()[1]);
+                    if w == 0 || h == 0 {
+                        return Err("the preview arrived empty".into());
+                    }
+                    return Ok(format!("200×100 PNG under a .jpg name drew {w}×{h}"));
+                }
+                if Instant::now() > deadline {
+                    return Err("no thumbnail arrived for a PNG named .jpg".into());
+                }
+                cache.poll(&ctx);
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        })(),
+    );
+
+    r.check(
+        "another program's Show in folder request becomes a path",
+        (|| {
+            use crate::fm1::{path_of_uri, paths_of};
+            // The three shapes the bus sends: an escaped name, a bare folder,
+            // and a localhost authority.
+            let space = path_of_uri("file:///home/a%20b/My%20Pictures")
+                .ok_or("an escaped path was refused")?;
+            if space != std::path::PathBuf::from("/home/a b/My Pictures") {
+                return Err(format!("the escaped path became {}", space.display()));
+            }
+            let folder = path_of_uri("file:///tmp").ok_or("a bare folder was refused")?;
+            if folder != std::path::PathBuf::from("/tmp") {
+                return Err(format!("file:///tmp became {}", folder.display()));
+            }
+            let local = path_of_uri("file://localhost/tmp/x.png")
+                .ok_or("a localhost authority was refused")?;
+            if local != std::path::PathBuf::from("/tmp/x.png") {
+                return Err(format!("the localhost URI became {}", local.display()));
+            }
+            // A remote URI is not this window's business, and a broken escape
+            // keeps its own text instead of losing the character.
+            if path_of_uri("smb://host/share").is_some() {
+                return Err("a remote URI was taken as a local path".into());
+            }
+            let kept = paths_of(&[
+                "sftp://host/x".to_string(),
+                "file:///tmp/%zz".to_string(),
+            ]);
+            if kept.len() != 1 {
+                return Err(format!("{kept:?} came out of two URIs"));
+            }
+            Ok("file:// escaped + bare + localhost, remote rejected".into())
+        })(),
+    );
+
+    r.check(
+        "a video named .jpg is recognised by its own bytes",
+        (|| {
+            let dir = base.join("thumbs");
+            fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let fake = dir.join("clip.jpg");
+            let mut head = Vec::from([0u8, 0, 0, 0x18]);
+            head.extend_from_slice(b"ftypisom");
+            head.extend_from_slice(&[0u8; 16]);
+            fs::write(&fake, &head).map_err(|e| e.to_string())?;
+            if crate::fsutil::is_video_path(&fake) {
+                return Err("the name was expected to hide the container".into());
+            }
+            if !crate::fsutil::looks_like_video(&fake) {
+                return Err("an ftyp box was not read as a video".into());
+            }
+            let png = dir.join("still.png");
+            image::RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+                .save(&png)
+                .map_err(|e| e.to_string())?;
+            if crate::fsutil::looks_like_video(&png) {
+                return Err("a PNG was read as a video".into());
+            }
+            Ok("ftyp is a video, a PNG is not".into())
+        })(),
+    );
+
+    r.check(
         "the icon grid sizes cells the way the original does",
         (|| {
             let row_of = |w: f32| {
@@ -2078,6 +2185,7 @@ pub fn run() -> i32 {
                                 show_location_bar: false,
                                 other_dir: None,
                                 new_docs: Vec::new(),
+                                pick: false,
                             };
                             layout = Some(pane.find_bar(ui, &mut vctx));
                         });
@@ -2835,6 +2943,73 @@ pub fn run() -> i32 {
         })(),
     );
     r.check(
+        "the wall's Sub-folders switch draws the pictures in the folders below",
+        (|| {
+            use crate::state::Pane;
+            let wall = base.join("wall-below");
+            write(&wall.join("one/a.png"), &png_with_prompt("first"))?;
+            write(&wall.join("two/b.png"), &png_with_prompt("second"))?;
+            write(&wall.join("two/deeper/c.png"), &png_with_prompt("third"))?;
+            write(&wall.join("two/deeper/notes.txt"), b"words\n")?;
+            let mut pane = Pane::new(3, wall.clone());
+            pane.set_pictures(true);
+            // Nothing is at the top of this folder: every picture is one or two
+            // folders down, which is the case the switch exists for.
+            if !pane.shown_indices().is_empty() {
+                return Err("the wall found pictures before the switch was on".into());
+            }
+            pane.set_pictures_below(true);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let done = pane
+                    .search
+                    .as_mut()
+                    .map(|s| {
+                        s.poll();
+                        s.done
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+                if Instant::now() > deadline {
+                    return Err("the walk of the folders below never finished".into());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // The wall asks the list it draws for its indices, so the walk's
+            // results have to be that list — reading the folder listing here
+            // drew nothing at all.
+            let shown: Vec<String> = pane
+                .shown_indices()
+                .iter()
+                .filter_map(|i| pane.display_entries().get(*i))
+                .map(|e| {
+                    e.path
+                        .strip_prefix(&wall)
+                        .unwrap_or(&e.path)
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .collect();
+            if shown.len() != 3 {
+                return Err(format!("the wall drew {shown:?}, not the three pictures below"));
+            }
+            if pane.gallery_images().len() != 3 {
+                return Err(format!(
+                    "the viewer would page through {} pictures",
+                    pane.gallery_images().len()
+                ));
+            }
+            // Off puts the folder's own listing back, folders and all.
+            pane.set_pictures_below(false);
+            if pane.search.is_some() {
+                return Err("the walk outlived the switch".into());
+            }
+            Ok(format!("3 pictures two folders down: {shown:?}"))
+        })(),
+    );
+    r.check(
         "a 400 px thumbnail is drawn 400 px across in the file view",
         (|| {
             use crate::theme::{icon_size_for_zoom, zoom_for_icon_size};
@@ -3293,6 +3468,7 @@ pub fn run() -> i32 {
                                     show_location_bar: false,
                                     other_dir: None,
                                 new_docs: Vec::new(),
+                                pick: false,
                                 };
                                 pane.ui(ui, &mut vctx);
                             });
@@ -4230,6 +4406,7 @@ pub fn run() -> i32 {
                                 show_location_bar: false,
                                 other_dir: None,
                                 new_docs: Vec::new(),
+                                pick: false,
                             };
                             pane.ui(ui, &mut vctx);
                             measured = Some(
@@ -4288,6 +4465,7 @@ pub fn run() -> i32 {
                             show_location_bar: false,
                             other_dir: None,
                                 new_docs: Vec::new(),
+                                pick: false,
                         };
                         pane2.ui(ui, &mut vctx);
                     });
@@ -6876,6 +7054,171 @@ me@host:/data /home/me/data fuse.sshfs rw 0 0
                 return Err(format!("{w}×{h} is not the clip's own 4:3"));
             }
             Ok(format!("320×240 clip → {w}×{h}"))
+        })(),
+    );
+
+    // ---- the file dialog (`--pick`) --------------------------------------
+    // The picker's rules, without a window: what a filter keeps, what a filter
+    // row is read from, and what the two kinds of dialog would answer.
+    let dialog = base.join("dialog");
+    let _ = write(&dialog.join("shot.png"), b"png");
+    let _ = write(&dialog.join("notes.txt"), b"txt");
+    let _ = write(&dialog.join("sub/inner.png"), b"png");
+    r.check(
+        "a dialog's filter keeps the types it was asked for, and every folder",
+        (|| {
+            let mut pane = crate::state::Pane::new(1, dialog.clone());
+            pane.pick_keep = Some(vec!["*.png".to_string()]);
+            pane.refilter();
+            let names: Vec<String> = pane.entries.iter().map(|e| e.name.clone()).collect();
+            if names.contains(&"notes.txt".to_string()) {
+                return Err(format!("the filter let notes.txt through: {names:?}"));
+            }
+            if !names.contains(&"shot.png".to_string()) {
+                return Err(format!("the filter dropped shot.png: {names:?}"));
+            }
+            if !names.contains(&"sub".to_string()) {
+                return Err(format!("the filter dropped the folder: {names:?}"));
+            }
+            // And the find bar's own text still narrows on top of it.
+            pane.filter = "shot".to_string();
+            pane.filter_on = true;
+            pane.refilter();
+            let narrowed: Vec<String> = pane.entries.iter().map(|e| e.name.clone()).collect();
+            if narrowed.len() != 1 || narrowed[0] != "shot.png" {
+                return Err(format!("the two narrowings disagree: {narrowed:?}"));
+            }
+            Ok(format!("{} kept, then {}", names.len(), narrowed.len()))
+        })(),
+    );
+    r.check(
+        "a glob keeps what it names and refuses the rest",
+        (|| {
+            let cases = [
+                ("*.png", "shot.png", true),
+                ("*.PNG", "shot.png", true),
+                ("*", "anything at all", true),
+                ("*.tar.*", "x.tar.gz", true),
+                ("a?c", "abc", true),
+                ("a?c", "ac", false),
+                ("*.png", "shot.jpg", false),
+                ("*.png", "png", false),
+            ];
+            for (pattern, name, want) in cases {
+                if crate::pick::glob_matches(pattern, name) != want {
+                    return Err(format!("{pattern} against {name} should be {want}"));
+                }
+            }
+            Ok(format!("{} patterns", cases.len()))
+        })(),
+    );
+    r.check(
+        "a filter row is read from the word a program passes",
+        (|| {
+            let row = crate::pick::parse_filter("Images:*.png;*.jpg")
+                .ok_or("the row was dropped")?;
+            if row.label != "Images"
+                || row.patterns != vec!["*.png".to_string(), "*.jpg".to_string()]
+            {
+                return Err(format!("{row:?}"));
+            }
+            // A bare pattern set stands in as its own label, and a row with no
+            // pattern is dropped rather than shown empty.
+            let bare = crate::pick::parse_filter("*.txt").ok_or("the bare row was dropped")?;
+            if bare.label != "*.txt" {
+                return Err(format!("the bare row reads {bare:?}"));
+            }
+            if crate::pick::parse_filter("Text:").is_some()
+                || crate::pick::parse_filter("   ").is_some()
+            {
+                return Err("a row with no patterns was kept".into());
+            }
+            Ok("2 rows".to_string())
+        })(),
+    );
+    r.check(
+        "the dialog answers with the marked file, never one the filter refuses",
+        (|| {
+            let mut pick = crate::pick::Pick::new(crate::pick::Mode::Open);
+            pick.filters.push(crate::pick::Filter {
+                label: "Images".into(),
+                patterns: vec!["*.png".into()],
+            });
+            let marked = vec![dialog.join("notes.txt"), dialog.join("shot.png")];
+            let answer = crate::pick::candidate(&pick, &dialog, &marked, None)
+                .ok_or("nothing to answer")?;
+            if answer != vec![dialog.join("shot.png")] {
+                return Err(format!("answered {answer:?}"));
+            }
+            // Nothing marked and the cursor on a refused file: nothing to
+            // answer, so the button is disabled rather than lying.
+            let refused = vec![dialog.join("notes.txt")];
+            if crate::pick::candidate(&pick, &dialog, &[], refused.first()).is_some() {
+                return Err("a refused file was answered".into());
+            }
+            // One file asked for: a marking of three answers with one.
+            pick.filters.clear();
+            let three = vec![
+                dialog.join("shot.png"),
+                dialog.join("notes.txt"),
+                dialog.join("sub/inner.png"),
+            ];
+            let one = crate::pick::candidate(&pick, &dialog, &three, None)
+                .ok_or("nothing to answer")?;
+            if one.len() != 1 {
+                return Err(format!("a single-file request answered {} files", one.len()));
+            }
+            pick.multi = true;
+            let many = crate::pick::candidate(&pick, &dialog, &three, None)
+                .ok_or("nothing to answer")?;
+            if many.len() != 3 {
+                return Err(format!("a multi request answered {} of 3", many.len()));
+            }
+            Ok(format!("1 refused, {} answered", many.len()))
+        })(),
+    );
+    r.check(
+        "a folder request answers the folder on screen, and only a folder",
+        (|| {
+            let mut pick = crate::pick::Pick::new(crate::pick::Mode::Open);
+            pick.folder = true;
+            let here = crate::pick::candidate(&pick, &dialog, &[], None)
+                .ok_or("the folder on screen was not answered")?;
+            if here != vec![dialog.clone()] {
+                return Err(format!("answered {here:?}"));
+            }
+            let file = vec![dialog.join("shot.png")];
+            if crate::pick::candidate(&pick, &dialog, &file, None)
+                .is_some_and(|a| a.iter().any(|p| p.ends_with("shot.png")))
+            {
+                return Err("a file was answered by a folder request".into());
+            }
+            let marked = vec![dialog.join("sub")];
+            let sub = crate::pick::candidate(&pick, &dialog, &marked, None)
+                .ok_or("the marked folder was not answered")?;
+            if sub != marked {
+                return Err(format!("answered {sub:?}"));
+            }
+            Ok(dialog.join("sub").display().to_string())
+        })(),
+    );
+    r.check(
+        "a save dialog answers the folder shown plus the name, or a typed path",
+        (|| {
+            let joined = crate::pick::save_target(&dialog, "  new picture.png ")
+                .ok_or("an empty name was answered")?;
+            if joined != dialog.join("new picture.png") {
+                return Err(format!("{joined:?}"));
+            }
+            let typed = crate::pick::save_target(&dialog, "/tmp/elsewhere.png")
+                .ok_or("a typed path was answered empty")?;
+            if typed != std::path::PathBuf::from("/tmp/elsewhere.png") {
+                return Err(format!("{typed:?}"));
+            }
+            if crate::pick::save_target(&dialog, "   ").is_some() {
+                return Err("an empty name was answered".into());
+            }
+            Ok(joined.display().to_string())
         })(),
     );
 

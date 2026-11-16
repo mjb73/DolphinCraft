@@ -1,56 +1,59 @@
 DolphinCraft — a desktop file manager in Rust and egui, rebuilt from Dolphin with a few tools of its own.
 
-## What's new in 0.1.7
+## What's new in 0.1.8
 
-* **Create New offers the document types this computer actually has** — no list of
-  applications in the code. Every entry is read from the desktop's own records
-  (`/usr/share/applications`, `~/.local/share`, the Flatpak exports), and a type is
-  offered only when three pieces of standard evidence say the application owns it:
-  a MIME type named after it (`application/x-photocraft`), a MIME package whose icon
-  matches its `Icon=`, or a description that opens with its name ("FreeCAD document
-  files"). The document types are a `New Document ▸` submenu of *New*, not fifteen
-  rows in the menu, and *Document Types (n/N) ▸* ticks which ones you want. On this
-  machine it finds fifteen — six studio formats, Blender, Qt Designer, FLUID,
-  FontForge, FreeCAD, FreeFileSync, RealTimeSync and Meld.
-* **A created document is a real document.** The row runs the application's own CLI
-  (`photocraft-cli run --new …`, `flatpak run --command=…` for store builds), so a
-  PhotoCraft document opens in PhotoCraft. When an application cannot start one
-  here, the row says so — "Blender Scene created empty — Blender could not start one
-  here" — rather than leaving an empty file wearing an extension. The folder's own
-  right-click *Create New* offers the same rows, flat, because it is already a menu.
-* **A Type column in details**, between the name and the size, sorted ascending and
-  descending like the others by clicking its header. Its words and the sort's words
-  are the same function, so they cannot disagree, and the column gives way entirely
-  on a window too narrow to hold it instead of squeezing the name to thirty pixels.
-* **A document's icon carries its type.** The page draws the extension — PCRAFT,
-  VECTORCRAFT, BLEND — in letters sized to the tile: measured with the real font and
-  solved against the page's own band, 8.6 px for VECTORCRAFT on a 96 px tile, capped
-  at 15 px on the picture wall, and no label at all below a 6 px floor where it would
-  be a smudge. Two documents made by two applications no longer wear the same blank
-  page.
-* **Check for Updates…** in the app menu, above *About*: when you pick it, it asks
-  GitHub for the newest release, offers it with its notes, and *Install and Restart*
-  installs it and comes back on the new build with the same folder and flags. It is
-  never automatic — nothing looks for a release until you ask — the download is
-  checked against the release's sha256 before anything is replaced, and a bad
-  checksum is refused with the build you have left alone. This is the one thing in
-  the program that uses the network.
-* **Maximising is the window manager's business.** On a two-screen desktop the
-  startup fit compares the window's extent with the monitor's size instead of judging
-  its far edge against the monitor's width, so a window already usable on the second
-  screen is left where it is; a maximized window is not measured, resized or saved,
-  and the watch for a misplaced window ends at the first press on the title row, the
-  window buttons or a resize edge.
-* **The guide card is gone** at your request: *What the Two Buttons Do…*, its Help
-  group, F1 and `--guide` with it. The app menu is five groups and ends on *Sort by*,
-  with *Check for Updates…*, *About DolphinCraft* and *Quit* pinned at the bottom.
-* **About** names the release this build came from — 0.1.7 — and says it dials out
+* **The system's file dialog is this window.** Every program with an *Open* or
+  *Save* button asks the desktop for a file, and on this machine the answer was
+  plasma's own dialog. It is now DolphinCraft's: `dolphincraft --pick open` (or
+  `--pick save`) is the whole file manager as a dialog — places, tabs, all four
+  views, the find bar, the type-ahead — with a footer carrying the question, the
+  type filter, the save name field and Cancel / Open, and the answer printed on
+  stdout as one absolute path per line. `--folder` asks for a folder instead,
+  `--multi` allows several files, `--filter "Images:*.png;*.jpg"` gives it the
+  rows the asking program declared, `--name` fills the save field and `--title`
+  says what is being asked. The dialog offers nothing that makes, renames or
+  deletes a file: a right click is one *Open* row, the second click that turns a
+  row into a name field is off, the file window's key map is not read at all, and
+  not one setting is written — it is another program's question, not a session.
+  Cancel, Escape and closing the window all answer the same way.
+* **A backend puts it behind the desktop's portal.** `packaging/portal/` answers
+  `org.freedesktop.impl.portal.FileChooser` — version 3: open a file, save a
+  file, save several — plus `Request.Close`, so a program that cancels its
+  request also ends the window. One command installs it and nothing needs root:
+  `sh packaging/portal/install-portal.sh`. Only one line of
+  `~/.config/xdg-desktop-portal/portals.conf` changes, so secrets, settings and
+  notifications keep the backends the desktop gave them, and `--uninstall` puts
+  the file back as it was. It reaches Flatpak and Snap applications always, and
+  any GTK, Electron or Firefox program that has been told to use the portal. KDE
+  and Qt programs draw their own KIO dialog inside their own process and keep
+  it — replacing that would mean forking KIO.
+* **The desktop's file manager, on `org.freedesktop.FileManager1`.** Another
+  program's *Show in folder* — a finished download, a mounted device, a chat
+  attachment — opens DolphinCraft with the file marked in the folder that holds
+  it; *Show item properties* opens it with the Properties window up; a request
+  that arrives with no window open starts one. `DesktopName` answers
+  `DolphinCraft`. This is the name Plasma's Dolphin daemon answered, so every
+  file association was already this build's and those requests still opened
+  Dolphin. Now they do not.
+* **The picture wall reaches into the folders below.** A *Sub-folders* switch
+  shows the pictures of the whole tree — a library sorted into year or month
+  folders reads as one wall — through the same listing a search uses, so marking,
+  Ctrl+A, the arrow keys, the viewer and the slideshow keep working on the real
+  files. Untick it and the wall is this folder alone again. The find bar's
+  content search walks the same way.
+* **A preview is decoded by the file's own bytes, not by its name.** A PNG that
+  arrived named `.jpg` — a download, a renamed export — showed a broken tile
+  before and now shows its picture; the viewer decodes through the same helper. A
+  video is recognised by its magic as well as its extension (`ftyp`, Matroska's
+  EBML header, `RIFF…AVI`), so a clip renamed `.jpg` still gets its first frame
+  from ffmpeg.
+* **About** names the release this build came from — 0.1.8 — and says it dials out
   only for *Check for Updates…*, when asked.
-* 155 built-in checks (`dolphincraft --selftest`), all passing — the new ones cover
-  the document-type records and the Flatpak exports, the Type column's widths and
-  both sort directions, the size solved for an extension on a page, the release
-  reply, its numeric version comparison and a real release archive installed over a
-  fixture binary (executable, no staging file left), and the two-screen window fit.
+* 165 built-in checks (`dolphincraft --selftest`), all passing — the new ones
+  cover what a dialog's filter keeps and what it drops, the glob matcher, a filter
+  row read out of the word a program passes, which marked file a dialog may
+  answer, a folder request that answers the folder on screen, and a save dialog's
+  name read as a path.
 
 **Linux** — `install.sh` (no root), or the tarball for your architecture.
 ```sh
@@ -59,15 +62,15 @@ curl -fsSL https://raw.githubusercontent.com/mjb73/DolphinCraft/main/install.sh 
 It installs `dolphincraft` to `~/.local/bin`, writes the menu entry, and refreshes the launcher.
 From 0.1.7 on, the menu's *Check for Updates…* does the same job without the shell command.
 
-**Archives** — `dolphincraft-0.1.7-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
+**Archives** — `dolphincraft-0.1.8-x86_64-linux.tar.gz` (or `aarch64` for ARM) and an identical
 `.zip`, each with a `.sha256`. Unpack one and run the binary:
 
 ```sh
-tar xzf dolphincraft-0.1.7-x86_64-linux.tar.gz
-./dolphincraft-0.1.7-x86_64-linux/dolphincraft
+tar xzf dolphincraft-0.1.8-x86_64-linux.tar.gz
+./dolphincraft-0.1.8-x86_64-linux/dolphincraft
 ```
 
-The tarballs are built on Debian 12, so they ask for glibc 2.35 — Debian 12, Ubuntu 22.04+,
+The tarballs are built on Debian 12, so they ask for glibc 2.35 — Ubuntu 22.04+,
 Mint 21+, Fedora 36+ and anything newer. A Wayland or X11 session and an OpenGL driver
 (libglvnd + mesa) are the only runtime requirements.
 
